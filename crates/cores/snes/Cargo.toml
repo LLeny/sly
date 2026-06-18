@@ -4,4 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+thiserror = "2.0.18"
 wdc_65c816 = { path = "../cpu/wdc_65c816" }

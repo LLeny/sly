@@ -1,3 +1,8 @@
+pub mod cartridge;
+pub mod error;
+
+pub use cartridge::Cartridge;
+pub use error::SnesError;
 pub use wdc_65c816::{self, Cpu, Disasm, combo, disassemble_at};
 
 #[derive(Default)]
