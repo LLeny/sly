@@ -1,0 +1,11 @@
+[package]
+name = "wdc_65c816"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["disasm"]
+disasm = []
+
+[dependencies]
+chipi-macros = { path = "../../../../../chipi2/crates/chipi-macros" }

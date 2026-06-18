@@ -1,0 +1,7 @@
+[package]
+name = "snes"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wdc_65c816 = { path = "../cpu/wdc_65c816" }
