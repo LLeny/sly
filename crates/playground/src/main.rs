@@ -9,4 +9,7 @@ fn main() {
     let cart = Cartridge::new(buffer).expect("Failed to create cartridge");
     let title = cart.title();
     println!("Loaded ROM: {}", title);
+
+    let memory_map = cart.memory_map().expect("Failed to get memory map");
+    println!("Memory map: {:?}", memory_map);
 }

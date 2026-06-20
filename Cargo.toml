@@ -2,8 +2,6 @@
 resolver = "3"
 members = ["crates/cirsium", "crates/cores/cpu/wdc_65c816", "crates/cores/snes", "crates/debugger", "crates/playground"]
 
-[patch.crates-io]
-
 [profile.release]
 codegen-units = 1
 lto = "fat"

@@ -4,4 +4,6 @@ use thiserror::Error;
 pub enum SnesError {
     #[error("Invalid ROM header")]
     InvalidRomHeader,
+    #[error("Invalid memory map")]
+    InvalidMemoryMap,
 }
