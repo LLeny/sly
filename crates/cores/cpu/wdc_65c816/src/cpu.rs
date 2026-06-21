@@ -9,7 +9,7 @@ pub struct Cpu {
 impl Default for Cpu {
     fn default() -> Self {
         Cpu {
-            pc: 0,
+            pc: 0xFFFC,
             flags: FLAG_M | FLAG_X,
         }
     }
