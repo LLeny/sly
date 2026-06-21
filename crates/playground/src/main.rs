@@ -15,5 +15,8 @@ fn main() {
 
     let snes = Snes::new(cart);
     let disasm = snes.disassemble_next();
-    println!("{:04X}: {}", snes.cpu.pc, disasm);
+    println!(
+        "{:02X}:{:04X}: {}",
+        snes.cpu.program_bank, snes.cpu.pc, disasm
+    );
 }

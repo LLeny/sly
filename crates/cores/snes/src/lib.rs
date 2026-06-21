@@ -18,10 +18,10 @@ impl Snes {
         let mut mmu = Mmu::default();
 
         const HEADER_ADDR: u16 = 0xFFC0;
-        mmu.load(HEADER_ADDR, cartridge.raw_header());
+        mmu.load(0, HEADER_ADDR, cartridge.raw_header());
 
         const RESET_VECTOR_ADDR: u16 = 0xFFFC;
-        let cpu = Cpu::new(mmu.read16(RESET_VECTOR_ADDR));
+        let cpu = Cpu::new(mmu.read16(0, RESET_VECTOR_ADDR));
 
         Self {
             cpu,
@@ -36,5 +36,9 @@ impl Snes {
 
     pub fn disassemble_next(&self) -> Disasm {
         self.disassemble_at(self.cpu.pc)
+    }
+
+    pub fn step(&mut self) {
+        self.cpu.step(&self.mmu);
     }
 }
