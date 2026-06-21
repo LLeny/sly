@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 chapa = "0.2.0"
 thiserror = "2.0.18"
+tracing = "0.1.44"
 wdc_65c816 = { path = "../cpu/wdc_65c816" }

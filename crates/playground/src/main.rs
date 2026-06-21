@@ -1,6 +1,8 @@
 fn main() {
     use snes::{Cartridge, Snes};
 
+    tracing_subscriber::fmt::init();
+
     let path = std::env::args()
         .nth(1)
         .expect("Usage: playground <path-to-rom>");

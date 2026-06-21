@@ -79,13 +79,22 @@ impl Mmu {
 
     fn read_io(&self, reg: u16) -> u8 {
         match reg {
-            _ => 0, // TODO
+            _ => {
+                tracing::error!(
+                    reg = format!("{:04X}", reg),
+                    "Read from unmapped I/O register"
+                );
+                0
+            }
         }
     }
 
     fn write_io(&mut self, reg: u16, value: u8) {
-        let _ = (reg, value);
-        // TODO
+        tracing::error!(
+            reg = format!("{:04X}", reg),
+            value = format!("{:02X}", value),
+            "Write to unmapped I/O register"
+        );
     }
 }
 
@@ -95,7 +104,13 @@ impl Bus for Mmu {
             AddressSpace::Wram(index) => self.wram[index],
             AddressSpace::Rom(index) => self.cartridge.rom[index],
             AddressSpace::Io(reg) => self.read_io(reg),
-            AddressSpace::Unmapped => 0,
+            AddressSpace::Unmapped => {
+                tracing::error!(
+                    addr = format!("{:06X}", addr),
+                    "Read from unmapped address"
+                );
+                0
+            }
         }
     }
 
@@ -104,7 +119,13 @@ impl Bus for Mmu {
             AddressSpace::Wram(index) => self.wram[index] = value,
             AddressSpace::Rom(_) => {} // ROM is readonly
             AddressSpace::Io(reg) => self.write_io(reg, value),
-            AddressSpace::Unmapped => {}
+            AddressSpace::Unmapped => {
+                tracing::error!(
+                    addr = format!("{:06X}", addr),
+                    value = format!("{:02X}", value),
+                    "Write to unmapped address"
+                );
+            }
         }
     }
 }
