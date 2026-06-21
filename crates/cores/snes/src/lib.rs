@@ -10,24 +10,17 @@ pub use wdc_65c816::{Cpu, Disasm};
 pub struct Snes {
     pub cpu: Cpu,
     pub mmu: Mmu,
-    pub cartridge: Cartridge,
 }
 
 impl Snes {
     pub fn new(cartridge: Cartridge) -> Self {
-        let mut mmu = Mmu::default();
-
-        const HEADER_ADDR: u16 = 0xFFC0;
-        mmu.load(0, HEADER_ADDR, cartridge.raw_header());
-
         const RESET_VECTOR_ADDR: u16 = 0xFFFC;
-        let cpu = Cpu::new(mmu.read16(0, RESET_VECTOR_ADDR));
+        const BANK_ZERO: u8 = 0x00;
 
-        Self {
-            cpu,
-            mmu,
-            cartridge,
-        }
+        let mmu = Mmu::new(cartridge);
+        let cpu = Cpu::new(mmu.read16(BANK_ZERO, RESET_VECTOR_ADDR));
+
+        Self { cpu, mmu }
     }
 
     pub fn disassemble_at(&self, pc: u16) -> Disasm {
@@ -39,6 +32,6 @@ impl Snes {
     }
 
     pub fn step(&mut self) {
-        self.cpu.step(&self.mmu);
+        self.cpu.step(&mut self.mmu);
     }
 }

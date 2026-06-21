@@ -4,11 +4,11 @@ use decoder::{DisasmCtx, FlagOpsKind, Instruction, Ops};
 
 pub(crate) struct InterpreterView<'a, B: Bus + ?Sized> {
     cpu: &'a mut Cpu,
-    bus: &'a B,
+    bus: &'a mut B,
 }
 
 impl<'a, B: Bus + ?Sized> InterpreterView<'a, B> {
-    pub(crate) fn new(cpu: &'a mut Cpu, bus: &'a B) -> Self {
+    pub(crate) fn new(cpu: &'a mut Cpu, bus: &'a mut B) -> Self {
         Self { cpu, bus }
     }
 }

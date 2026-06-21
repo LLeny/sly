@@ -26,7 +26,7 @@ impl Cpu {
         }
     }
 
-    pub fn step(&mut self, bus: &(impl Bus + ?Sized)) {
+    pub fn step(&mut self, bus: &mut (impl Bus + ?Sized)) {
         let addr = ((self.program_bank as u32) << 16) | (self.pc as u32);
 
         let opcode = bus.read(addr);
