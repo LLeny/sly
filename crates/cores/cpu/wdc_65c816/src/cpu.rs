@@ -33,11 +33,10 @@ impl Cpu {
         let modes = crate::combo(self.flags.m(), self.flags.x());
 
         let len = decoder::stream_len(modes, opcode);
+        self.pc = self.pc.wrapping_add(len as u16);
 
         let mut view = InterpreterView::new(&mut *self, bus);
         decoder::run_ops(modes, &mut view, opcode);
-
-        self.pc = self.pc.wrapping_add(len as u16);
     }
 }
 

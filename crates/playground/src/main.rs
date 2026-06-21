@@ -6,6 +6,11 @@ fn main() {
     let path = std::env::args()
         .nth(1)
         .expect("Usage: playground <path-to-rom>");
+    let count = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(100);
+
     let buffer = std::fs::read(&path).expect("Failed to read ROM");
 
     let cart = Cartridge::new(buffer).expect("Failed to create cartridge");
@@ -15,10 +20,14 @@ fn main() {
     let memory_map = cart.memory_map().expect("Failed to get memory map");
     println!("Memory map: {:?}", memory_map);
 
-    let snes = Snes::new(cart);
-    let disasm = snes.disassemble_next();
-    println!(
-        "{:02X}:{:04X}: {}",
-        snes.cpu.program_bank, snes.cpu.pc, disasm
-    );
+    let mut snes = Snes::new(cart);
+
+    for _ in 0..count {
+        let disasm = snes.disassemble_next();
+        println!(
+            "{:02X}:{:04X}: {}",
+            snes.cpu.program_bank, snes.cpu.pc, disasm
+        );
+        snes.step();
+    }
 }

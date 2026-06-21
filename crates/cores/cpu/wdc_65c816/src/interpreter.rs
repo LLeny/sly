@@ -23,7 +23,9 @@ macro_rules! unimplemented_ops {
     ($($name:ident),+ $(,)?) => {
         $(
             #[inline]
-            fn $name(&mut self, _inst: Instruction) {}
+            fn $name(&mut self, _inst: Instruction) {
+                todo!("Implement instruction {}", stringify!($name));
+            }
         )+
     };
 }

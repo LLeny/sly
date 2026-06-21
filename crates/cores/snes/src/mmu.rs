@@ -105,10 +105,7 @@ impl Bus for Mmu {
             AddressSpace::Rom(index) => self.cartridge.rom[index],
             AddressSpace::Io(reg) => self.read_io(reg),
             AddressSpace::Unmapped => {
-                tracing::error!(
-                    addr = format!("{:06X}", addr),
-                    "Read from unmapped address"
-                );
+                tracing::error!(addr = format!("{:06X}", addr), "Read from unmapped address");
                 0
             }
         }
