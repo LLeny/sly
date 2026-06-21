@@ -27,16 +27,18 @@ impl Cpu {
     }
 
     pub fn step(&mut self, bus: &mut (impl Bus + ?Sized)) {
-        let addr = ((self.program_bank as u32) << 16) | (self.pc as u32);
+        let cia = ((self.program_bank as u32) << 16) | (self.pc as u32);
+        let opcode = bus.read(cia);
 
-        let opcode = bus.read(addr);
         let modes = crate::combo(self.flags.m(), self.flags.x());
-
         let len = decoder::stream_len(modes, opcode);
-        self.pc = self.pc.wrapping_add(len as u16);
 
-        let mut view = InterpreterView::new(&mut *self, bus);
+        let mut view = InterpreterView::new(&mut *self, bus, len);
         decoder::run_ops(modes, &mut view, opcode);
+        let (next_bank, next_pc) = view.next();
+
+        self.program_bank = next_bank;
+        self.pc = next_pc;
     }
 }
 

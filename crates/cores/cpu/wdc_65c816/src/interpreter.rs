@@ -1,15 +1,52 @@
 use crate::cpu::Cpu;
 use crate::{Bus, decoder};
-use decoder::{DisasmCtx, FlagOpsKind, Instruction, Ops};
+use decoder::{BranchesKind, DisasmCtx, FlagOpsKind, Instruction, Ops};
 
 pub(crate) struct InterpreterView<'a, B: Bus + ?Sized> {
     cpu: &'a mut Cpu,
     bus: &'a mut B,
+    next_bank: u8,
+    next_pc: u16,
 }
 
 impl<'a, B: Bus + ?Sized> InterpreterView<'a, B> {
-    pub(crate) fn new(cpu: &'a mut Cpu, bus: &'a mut B) -> Self {
-        Self { cpu, bus }
+    pub(crate) fn new(cpu: &'a mut Cpu, bus: &'a mut B, len: u8) -> Self {
+        let next_bank = cpu.program_bank;
+        let next_pc = cpu.pc.wrapping_add(len as u16);
+
+        Self {
+            cpu,
+            bus,
+            next_bank,
+            next_pc,
+        }
+    }
+
+    /// The committed NIA (program bank, offset) after the op has run.
+    pub(crate) fn next(&self) -> (u8, u16) {
+        (self.next_bank, self.next_pc)
+    }
+
+    /// CIA (current instruction address): the full 24 bit address of the
+    /// instruction being executed.
+    fn code_addr(&self) -> u64 {
+        ((self.cpu.program_bank as u64) << 16) | self.cpu.pc as u64
+    }
+
+    /// Redirect execution within the current program bank.
+    fn jump(&mut self, pc: u16) {
+        self.next_pc = pc;
+    }
+
+    /// Redirect execution to another program bank.
+    fn jump_long(&mut self, bank: u8, pc: u16) {
+        self.next_bank = bank;
+        self.next_pc = pc;
+    }
+
+    /// Take a relative branch.
+    fn branch(&mut self, offset: i16) {
+        self.next_pc = self.next_pc.wrapping_add(offset as u16);
     }
 }
 
@@ -45,6 +82,37 @@ impl<B: Bus + ?Sized> Ops for InterpreterView<'_, B> {
         }
     }
 
+    fn branches(&mut self, op: BranchesKind, instr: Instruction) {
+        let taken = match op {
+            BranchesKind::BraRel => true,
+            BranchesKind::BeqRel => self.cpu.flags.zero(),
+            BranchesKind::BneRel => !self.cpu.flags.zero(),
+            BranchesKind::BcsRel => self.cpu.flags.carry(),
+            BranchesKind::BccRel => !self.cpu.flags.carry(),
+            BranchesKind::BmiRel => self.cpu.flags.negative(),
+            BranchesKind::BplRel => !self.cpu.flags.negative(),
+            BranchesKind::BvsRel => self.cpu.flags.overflow(),
+            BranchesKind::BvcRel => !self.cpu.flags.overflow(),
+        };
+
+        if taken {
+            let offset = self.read_u8(self.code_addr() + 1) as i8;
+            self.branch(offset as i16);
+        }
+    }
+
+    fn jmp_abs(&mut self, inst: Instruction) {
+        let pc = self.code_addr();
+        let target = inst.jmp_abs__addr(pc, self) as u16;
+        self.jump(target);
+    }
+
+    fn jmp_abl(&mut self, inst: Instruction) {
+        let pc = self.code_addr();
+        let target = inst.jmp_abl__addr(pc, self);
+        self.jump_long((target >> 16) as u8, target as u16);
+    }
+
     unimplemented_ops! {
         rep_imm, sep_imm, adc_abl, adc_abs, adc_abx, adc_aby, adc_alx, adc_dp, adc_dpx, adc_idl, adc_idly,
         adc_idp, adc_idx, adc_idy, adc_imm_m16, adc_imm_m8, adc_isy, adc_sr,
@@ -60,7 +128,7 @@ impl<B: Bus + ?Sized> Ops for InterpreterView<'_, B> {
         eor_abl, eor_abs, eor_abx, eor_aby, eor_alx, eor_dp, eor_dpx, eor_idl, eor_idly,
         eor_idp, eor_idx, eor_idy, eor_imm_m16, eor_imm_m8, eor_isy, eor_sr,
         inc_abs, inc_abx, inc_dp, inc_dpx,
-        jml_ial, jmp_abl, jmp_abs, jmp_iax, jmp_ind, jsl_abl, jsr_abs, jsr_iax,
+        jml_ial, jmp_iax, jmp_ind, jsl_abl, jsr_abs, jsr_iax,
         lda_abl, lda_abs, lda_abx, lda_aby, lda_alx, lda_dp, lda_dpx, lda_idl, lda_idly,
         lda_idp, lda_idx, lda_idy, lda_imm_m16, lda_imm_m8, lda_isy, lda_sr,
         ldx_abs, ldx_aby, ldx_dp, ldx_dpy, ldx_imm_x16, ldx_imm_x8,
