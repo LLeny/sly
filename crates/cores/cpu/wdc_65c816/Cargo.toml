@@ -8,4 +8,5 @@ default = ["disasm"]
 disasm = []
 
 [dependencies]
+chapa = "0.2.0"
 chipi-macros = { path = "../../../../../chipi2/crates/chipi-macros" }

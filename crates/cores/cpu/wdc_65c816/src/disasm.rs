@@ -1,5 +1,5 @@
 use crate::bus::Bus;
-use crate::cpu::{Cpu, FLAG_M, FLAG_X};
+use crate::cpu::Cpu;
 use crate::decoder::{self, DisasmCtx};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,8 +26,8 @@ impl<B: Bus + ?Sized> DisasmCtx for DisasmView<'_, B> {
 
     fn mode(&self, name: &str) -> u64 {
         match name {
-            "m" => (self.cpu.flags & FLAG_M != 0) as u64,
-            "x" => (self.cpu.flags & FLAG_X != 0) as u64,
+            "m" => self.cpu.flags.m() as u64,
+            "x" => self.cpu.flags.x() as u64,
             _ => 0,
         }
     }

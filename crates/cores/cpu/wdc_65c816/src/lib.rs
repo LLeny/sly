@@ -8,6 +8,7 @@ pub use generated::Ricoh5A22 as decoder;
 pub mod bus;
 pub mod cpu;
 pub mod disasm;
+mod interpreter;
 
 pub use bus::Bus;
 pub use cpu::Cpu;

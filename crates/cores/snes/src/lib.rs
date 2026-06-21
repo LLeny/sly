@@ -15,11 +15,13 @@ pub struct Snes {
 
 impl Snes {
     pub fn new(cartridge: Cartridge) -> Self {
-        let cpu = Cpu::default();
         let mut mmu = Mmu::default();
 
         const HEADER_ADDR: u16 = 0xFFC0;
         mmu.load(HEADER_ADDR, cartridge.raw_header());
+
+        const RESET_VECTOR_ADDR: u16 = 0xFFFC;
+        let cpu = Cpu::new(mmu.read16(RESET_VECTOR_ADDR));
 
         Self {
             cpu,

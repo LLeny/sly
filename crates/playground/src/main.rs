@@ -1,5 +1,5 @@
 fn main() {
-    use snes::Cartridge;
+    use snes::{Cartridge, Snes};
 
     let path = std::env::args()
         .nth(1)
@@ -12,4 +12,8 @@ fn main() {
 
     let memory_map = cart.memory_map().expect("Failed to get memory map");
     println!("Memory map: {:?}", memory_map);
+
+    let snes = Snes::new(cart);
+    let disasm = snes.disassemble_next();
+    println!("{:04X}: {}", snes.cpu.pc, disasm);
 }
