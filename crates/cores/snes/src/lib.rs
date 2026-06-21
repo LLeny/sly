@@ -1,26 +1,35 @@
 pub mod cartridge;
 pub mod error;
+pub mod mmu;
 
 pub use cartridge::Cartridge;
 pub use error::SnesError;
-pub use wdc_65c816::{self, Cpu, Disasm, combo, disassemble_at};
+pub use mmu::Mmu;
+pub use wdc_65c816::{Cpu, Disasm};
 
-#[derive(Default)]
 pub struct Snes {
     pub cpu: Cpu,
+    pub mmu: Mmu,
+    pub cartridge: Cartridge,
 }
 
 impl Snes {
-    pub fn new() -> Self {
-        Self { cpu: Cpu::new() }
-    }
+    pub fn new(cartridge: Cartridge) -> Self {
+        let cpu = Cpu::default();
+        let mut mmu = Mmu::default();
 
-    pub fn load(&mut self, addr: u16, bytes: &[u8]) {
-        self.cpu.load(addr, bytes);
+        const HEADER_ADDR: u16 = 0xFFC0;
+        mmu.load(HEADER_ADDR, cartridge.raw_header());
+
+        Self {
+            cpu,
+            mmu,
+            cartridge,
+        }
     }
 
     pub fn disassemble_at(&self, pc: u16) -> Disasm {
-        disassemble_at(&self.cpu, pc)
+        wdc_65c816::disassemble_at(&self.cpu, &self.mmu, pc)
     }
 
     pub fn disassemble_next(&self) -> Disasm {

@@ -5,11 +5,13 @@ mod generated {
 
 pub use generated::Ricoh5A22 as decoder;
 
+pub mod bus;
 pub mod cpu;
 pub mod disasm;
 
+pub use bus::Bus;
 pub use cpu::Cpu;
-pub use disasm::{Disasm, disassemble_at};
+pub use disasm::{Disasm, DisasmView, disassemble_at};
 
 #[inline]
 pub fn combo(m8: bool, x8: bool) -> usize {
