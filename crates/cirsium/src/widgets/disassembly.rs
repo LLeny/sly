@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, Div, MouseButton, Pixels, Point, SharedString, Stateful,
+    App, ClickEvent, Div, Hsla, MouseButton, Pixels, Point, SharedString, Stateful,
     UniformListScrollHandle, Window, div, prelude::*, px, svg, uniform_list,
 };
 
@@ -16,12 +16,47 @@ const BYTES_WIDTH: f32 = 96.;
 type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
 type ContextCallback = Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App) + 'static>;
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TokenKind {
+    Mnemonic,
+    Number,
+    Register,
+    Punctuation,
+    Plain,
+}
+
+#[derive(Clone)]
+pub struct DisasmToken {
+    pub text: SharedString,
+    pub kind: TokenKind,
+}
+
+impl DisasmToken {
+    pub fn new(text: impl Into<SharedString>, kind: TokenKind) -> Self {
+        Self {
+            text: text.into(),
+            kind,
+        }
+    }
+}
+
+fn token_color(theme: &Theme, kind: TokenKind) -> Hsla {
+    match kind {
+        TokenKind::Mnemonic => theme.code_opcode,
+        TokenKind::Number => theme.code_number,
+        TokenKind::Register => theme.info,
+        TokenKind::Punctuation => theme.text_dim,
+        TokenKind::Plain => theme.text_secondary,
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct DisasmLine {
     pub addr: u32,
     pub address: SharedString,
     pub bytes: SharedString,
     pub text: SharedString,
+    pub tokens: Vec<DisasmToken>,
     pub current: bool,
     pub selected: bool,
 }
@@ -32,6 +67,7 @@ impl DisasmLine {
         address: impl Into<SharedString>,
         bytes: impl Into<SharedString>,
         text: impl Into<SharedString>,
+        tokens: Vec<DisasmToken>,
         current: bool,
     ) -> Self {
         Self {
@@ -39,6 +75,7 @@ impl DisasmLine {
             address: address.into(),
             bytes: bytes.into(),
             text: text.into(),
+            tokens,
             current,
             selected: false,
         }
@@ -156,11 +193,6 @@ fn disasm_row(
     on_select: Option<SelectCallback>,
     on_context: Option<ContextCallback>,
 ) -> Stateful<Div> {
-    let (mnemonic, operands) = match line.text.split_once(' ') {
-        Some((m, rest)) => (m.to_string(), rest.trim().to_string()),
-        None => (line.text.to_string(), String::new()),
-    };
-
     let mut gutter = div()
         .w(px(13.))
         .flex_none()
@@ -208,24 +240,29 @@ fn disasm_row(
                 .child(line.bytes.clone()),
         );
     }
-    row = row.child(
-        div()
-            .font_family(theme.mono_font)
-            .text_sm()
-            .min_w(px(42.))
-            .flex_none()
-            .text_color(theme.code_opcode)
-            .child(mnemonic),
-    );
-    if !operands.is_empty() {
-        row = row.child(
+
+    let mut text = div()
+        .flex()
+        .items_center()
+        .font_family(theme.mono_font)
+        .text_sm();
+    if let Some(mnemonic) = line.tokens.first() {
+        text = text.child(
             div()
-                .font_family(theme.mono_font)
-                .text_sm()
-                .text_color(theme.text_secondary)
-                .child(operands),
+                .min_w(px(42.))
+                .flex_none()
+                .text_color(token_color(theme, mnemonic.kind))
+                .child(mnemonic.text.clone()),
         );
     }
+    for tok in line.tokens.iter().skip(1) {
+        text = text.child(
+            div()
+                .text_color(token_color(theme, tok.kind))
+                .child(tok.text.clone()),
+        );
+    }
+    row = row.child(text);
 
     if !line.current && !line.selected {
         let hover_bg = theme.bg_header;

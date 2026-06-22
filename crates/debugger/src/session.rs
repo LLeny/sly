@@ -1,6 +1,7 @@
 use cirsium::components::StatusView;
 use cirsium::widgets::{
-    CartridgeField, CartridgeView, CpuView, DisasmLine, DisassemblyView, FlagView, RegisterView,
+    CartridgeField, CartridgeView, CpuView, DisasmLine, DisasmToken, DisassemblyView, FlagView,
+    RegisterView, TokenKind,
 };
 use gpui::SharedString;
 use snes::cartridge::{MapMode, Speed};
@@ -150,11 +151,13 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> DisassemblyView {
     for _ in 0..count {
         let d = snes.disassemble_at(addr);
         let len = d.length.max(1);
+        let tokens = tokenize(&d.text);
         lines.push(DisasmLine::new(
             addr as u32,
             format!("{bank:02X}:{addr:04X}"),
             read_bytes(snes, bank, addr, len),
             d.text,
+            tokens,
             addr == pc,
         ));
         addr = addr.wrapping_add(len as u16);
@@ -171,6 +174,64 @@ fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
         .map(|i| format!("{:02X}", snes.mmu.read8(bank, addr.wrapping_add(i as u16))))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn tokenize(text: &str) -> Vec<DisasmToken> {
+    let b = text.as_bytes();
+    let n = b.len();
+    let mut i = 0;
+    let mut tokens = Vec::new();
+
+    let start = i;
+    while i < n && b[i].is_ascii_alphabetic() {
+        i += 1;
+    }
+
+    if i > start {
+        tokens.push(DisasmToken::new(&text[start..i], TokenKind::Mnemonic));
+    }
+
+    while i < n && b[i] == b' ' {
+        i += 1;
+    }
+
+    while i < n {
+        let c = b[i];
+        if c == b'#' || c == b'$' {
+            let s = i;
+            i += 1;
+            if c == b'#' && i < n && b[i] == b'$' {
+                i += 1;
+            }
+            while i < n && b[i].is_ascii_hexdigit() {
+                i += 1;
+            }
+            tokens.push(DisasmToken::new(&text[s..i], TokenKind::Number));
+        } else if c.is_ascii_alphabetic() {
+            let s = i;
+            while i < n && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+            let word = &text[s..i];
+            let kind = match word {
+                "A" | "X" | "Y" | "S" => TokenKind::Register,
+                _ => TokenKind::Plain,
+            };
+            tokens.push(DisasmToken::new(word, kind));
+        } else if matches!(c, b',' | b'(' | b')' | b'[' | b']') {
+            tokens.push(DisasmToken::new(&text[i..i + 1], TokenKind::Punctuation));
+            i += 1;
+        } else {
+            let s = i;
+            i += 1;
+            while i < n && b[i] == c {
+                i += 1;
+            }
+            tokens.push(DisasmToken::new(&text[s..i], TokenKind::Plain));
+        }
+    }
+
+    tokens
 }
 
 fn cartridge_view(cart: &Cartridge) -> CartridgeView {
