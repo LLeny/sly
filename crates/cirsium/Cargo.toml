@@ -1,0 +1,8 @@
+[package]
+name = "cirsium"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "c3c38c5c09d887817229b133d904e6eb3f7e7011" }
+rust-embed = { version = "8.11.0", features = ["debug-embed"] }

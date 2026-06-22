@@ -82,7 +82,7 @@ impl<B: Bus + ?Sized> Ops for InterpreterView<'_, B> {
         }
     }
 
-    fn branches(&mut self, op: BranchesKind, instr: Instruction) {
+    fn branches(&mut self, op: BranchesKind, _instr: Instruction) {
         let taken = match op {
             BranchesKind::BraRel => true,
             BranchesKind::BeqRel => self.cpu.flags.zero(),

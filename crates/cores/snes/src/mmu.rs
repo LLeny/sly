@@ -25,6 +25,10 @@ impl Mmu {
         }
     }
 
+    pub fn read8(&self, bank: u8, addr: u16) -> u8 {
+        self.read(((bank as u32) << 16) | addr as u32)
+    }
+
     pub fn read16(&self, bank: u8, addr: u16) -> u16 {
         let base = ((bank as u32) << 16) | addr as u32;
         let lo = self.read(base) as u16;

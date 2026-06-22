@@ -1,0 +1,156 @@
+use gpui::{App, ClickEvent, Div, FontWeight, SharedString, Window, div, prelude::*};
+
+use crate::assets::icon;
+use crate::components::{ClickHandler, Copyable, Panel, label_text};
+use crate::theme::Theme;
+
+#[derive(Clone)]
+pub struct RegisterView {
+    pub name: SharedString,
+    pub value: u32,
+    pub bits: u8,
+}
+
+impl RegisterView {
+    pub fn new(name: impl Into<SharedString>, value: u32, bits: u8) -> Self {
+        Self {
+            name: name.into(),
+            value,
+            bits,
+        }
+    }
+
+    fn hex(&self) -> String {
+        let width = (self.bits as usize).div_ceil(4);
+        format!("${:0width$X}", self.value, width = width)
+    }
+}
+
+#[derive(Clone)]
+pub struct FlagView {
+    pub name: SharedString,
+    pub set: bool,
+}
+
+impl FlagView {
+    pub fn new(name: impl Into<SharedString>, set: bool) -> Self {
+        Self {
+            name: name.into(),
+            set,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct CpuView {
+    pub isa: SharedString,
+    pub registers: Vec<RegisterView>,
+    pub flags: Vec<FlagView>,
+}
+
+#[derive(IntoElement)]
+pub struct CpuWidget {
+    view: CpuView,
+    collapsed: bool,
+    on_toggle: Option<ClickHandler>,
+}
+
+impl CpuWidget {
+    pub const ID: &'static str = "cpu";
+
+    pub fn new(view: CpuView) -> Self {
+        Self {
+            view,
+            collapsed: false,
+            on_toggle: None,
+        }
+    }
+
+    pub fn collapsed(mut self, collapsed: bool) -> Self {
+        self.collapsed = collapsed;
+        self
+    }
+
+    pub fn on_toggle(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_toggle = Some(Box::new(handler));
+        self
+    }
+}
+
+impl RenderOnce for CpuWidget {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = Theme::global(cx);
+        let t = &*theme;
+
+        let registers =
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .children(self.view.registers.chunks(3).map(|row| {
+                    div()
+                        .flex()
+                        .gap_1()
+                        .children(row.iter().map(|r| reg_cell(t, r)))
+                }));
+
+        let flags = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .pt_2()
+            .border_t_1()
+            .border_color(t.border_subtle)
+            .children(self.view.flags.iter().map(|f| flag_chip(t, f)));
+
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(registers)
+            .child(flags);
+
+        Panel::new(Self::ID, "CPU")
+            .glyph(icon::CPU)
+            .meta(self.view.isa)
+            .collapsed(self.collapsed)
+            .on_toggle_opt(self.on_toggle)
+            .child(body)
+    }
+}
+
+fn reg_cell(theme: &Theme, r: &RegisterView) -> Copyable {
+    let hex = r.hex();
+    let inner = div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .w_full()
+        .child(label_text(theme, r.name.clone()))
+        .child(
+            div()
+                .font_family(theme.mono_font)
+                .text_color(theme.text_primary)
+                .child(hex.clone()),
+        );
+
+    Copyable::new(format!("reg-{}", r.name), hex)
+        .cell()
+        .child(inner)
+}
+
+fn flag_chip(theme: &Theme, f: &FlagView) -> Div {
+    div()
+        .px_1()
+        .font_family(theme.mono_font)
+        .text_xs()
+        .font_weight(FontWeight::MEDIUM)
+        .when(f.set, |d| d.bg(theme.accent_soft).text_color(theme.accent))
+        .when(!f.set, |d| {
+            d.bg(theme.bg_panel_alt).text_color(theme.text_muted)
+        })
+        .child(f.name.clone())
+}
