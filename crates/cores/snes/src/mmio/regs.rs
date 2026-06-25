@@ -1,4 +1,8 @@
-use crate::macros::register_mmio;
+use crate::{
+    Snes,
+    macros::{mmio_passthrough, register_mmio},
+    mmio::MmioReg,
+};
 
 register_mmio! {
     /// NMITIMEN
@@ -69,5 +73,22 @@ register_mmio! {
 
         #[bits(7)]
         pub channel7: bool,
+    }
+}
+
+mmio_passthrough!(NmiTimerEnable => irq.nmitimen);
+mmio_passthrough!(HdmaTransferEnable => dma.hdmaen);
+
+impl MmioReg for DmaTransferStart {
+    fn read(snes: &Snes) -> u8 {
+        snes.dma.mdmaen.raw()
+    }
+
+    fn write(snes: &mut Snes, value: u8) {
+        snes.dma.mdmaen = Self::from_raw(value);
+        tracing::error!(
+            value = format!("{:02X}", value),
+            "MDMA start not implemented"
+        );
     }
 }

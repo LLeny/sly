@@ -26,4 +26,19 @@ macro_rules! register_mmio {
     };
 }
 
+macro_rules! mmio_passthrough {
+    ($name:ident => $($field:ident).+) => {
+        impl crate::mmio::MmioReg for $name {
+            fn read(snes: &crate::Snes) -> u8 {
+                snes.$($field).+.raw()
+            }
+
+            fn write(snes: &mut crate::Snes, value: u8) {
+                snes.$($field).+ = Self::from_raw(value);
+            }
+        }
+    };
+}
+
+pub(crate) use mmio_passthrough;
 pub(crate) use register_mmio;

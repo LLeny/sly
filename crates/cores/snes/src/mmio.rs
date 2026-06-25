@@ -6,7 +6,7 @@ use crate::mmio::regs::{DmaTransferStart, HdmaTransferEnable, NmiTimerEnable};
 use crate::{Cartridge, Snes};
 
 const WRAM_SIZE: usize = 0x2_0000;
-const OPEN_BUS: u8 = 0xFF;
+pub(crate) const OPEN_BUS: u8 = 0xFF;
 
 pub struct Mmio {
     pub cartridge: Cartridge,
@@ -121,9 +121,9 @@ impl Snes {
 
     fn read_io(&self, reg: u16) -> u8 {
         match reg {
-            NmiTimerEnable::ADDRESS => self.irq.nmitimen.raw(),
-            DmaTransferStart::ADDRESS => self.dma.mdmaen.raw(),
-            HdmaTransferEnable::ADDRESS => self.dma.hdmaen.raw(),
+            NmiTimerEnable::ADDRESS => NmiTimerEnable::read(self),
+            DmaTransferStart::ADDRESS => DmaTransferStart::read(self),
+            HdmaTransferEnable::ADDRESS => HdmaTransferEnable::read(self),
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),
@@ -136,9 +136,9 @@ impl Snes {
 
     fn write_io(&mut self, reg: u16, value: u8) {
         match reg {
-            NmiTimerEnable::ADDRESS => self.irq.nmitimen = NmiTimerEnable::from_raw(value),
-            DmaTransferStart::ADDRESS => self.dma.mdmaen = DmaTransferStart::from_raw(value),
-            HdmaTransferEnable::ADDRESS => self.dma.hdmaen = HdmaTransferEnable::from_raw(value),
+            NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
+            DmaTransferStart::ADDRESS => DmaTransferStart::write(self, value),
+            HdmaTransferEnable::ADDRESS => HdmaTransferEnable::write(self, value),
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),
@@ -148,4 +148,9 @@ impl Snes {
             }
         }
     }
+}
+
+pub(crate) trait MmioReg {
+    fn read(snes: &Snes) -> u8;
+    fn write(snes: &mut Snes, value: u8);
 }
