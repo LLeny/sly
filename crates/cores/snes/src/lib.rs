@@ -2,19 +2,21 @@ pub mod cartridge;
 pub mod cpu;
 pub mod error;
 pub mod interrupt;
-pub mod mmu;
+mod macros;
+pub mod mmio;
 
 pub use cartridge::Cartridge;
 pub use cpu::{Cpu, Disasm};
 pub use error::SnesError;
-pub use mmu::Mmu;
+pub use mmio::Mmio;
 
-use crate::interrupt::Irq;
+use crate::{interrupt::Irq, mmio::dma::Dma};
 
 pub struct Snes {
     pub cpu: Cpu,
-    pub mmu: Mmu,
+    pub mmu: Mmio,
     pub irq: Irq,
+    pub dma: Dma,
 }
 
 impl Snes {
@@ -24,8 +26,9 @@ impl Snes {
 
         let mut snes = Self {
             cpu: Cpu::new(0),
-            mmu: Mmu::new(cartridge),
+            mmu: Mmio::new(cartridge),
             irq: Irq::default(),
+            dma: Dma::default(),
         };
         snes.cpu.pc = snes.read16(BANK_ZERO, RESET_VECTOR_ADDR);
         snes

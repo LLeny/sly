@@ -1,11 +1,14 @@
+pub mod dma;
+pub mod regs;
+
 use crate::cartridge::MapMode;
-use crate::interrupt::NmiTimerEnable;
+use crate::mmio::regs::{HdmaTransferEnable, NmiTimerEnable};
 use crate::{Cartridge, Snes};
 
 const WRAM_SIZE: usize = 0x2_0000;
 const OPEN_BUS: u8 = 0xFF;
 
-pub struct Mmu {
+pub struct Mmio {
     pub cartridge: Cartridge,
     pub wram: Box<[u8]>,
 }
@@ -17,7 +20,7 @@ pub(crate) enum AddressSpace {
     Unmapped,
 }
 
-impl Mmu {
+impl Mmio {
     pub fn new(cartridge: Cartridge) -> Self {
         Self {
             cartridge,
@@ -98,7 +101,13 @@ impl Snes {
     pub fn write(&mut self, addr: u32, value: u8) {
         match self.mmu.map(addr) {
             AddressSpace::Wram(index) => self.mmu.wram[index] = value,
-            AddressSpace::Rom(_) => {}
+            AddressSpace::Rom(_) => {
+                tracing::warn!(
+                    addr = format!("{:06X}", addr),
+                    value = format!("{:02X}", value),
+                    "Write to ROM"
+                );
+            }
             AddressSpace::Io(reg) => self.write_io(reg, value),
             AddressSpace::Unmapped => {
                 tracing::error!(
@@ -112,7 +121,8 @@ impl Snes {
 
     fn read_io(&self, reg: u16) -> u8 {
         match reg {
-            0x4200 => self.irq.nmitimen.raw(),
+            NmiTimerEnable::ADDRESS => self.irq.nmitimen.raw(),
+            HdmaTransferEnable::ADDRESS => self.dma.hdmaen.raw(),
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),
@@ -125,7 +135,8 @@ impl Snes {
 
     fn write_io(&mut self, reg: u16, value: u8) {
         match reg {
-            0x4200 => self.irq.nmitimen = NmiTimerEnable::from_raw(value),
+            NmiTimerEnable::ADDRESS => self.irq.nmitimen = NmiTimerEnable::from_raw(value),
+            HdmaTransferEnable::ADDRESS => self.dma.hdmaen = HdmaTransferEnable::from_raw(value),
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),

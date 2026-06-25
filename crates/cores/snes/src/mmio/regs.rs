@@ -1,0 +1,44 @@
+use crate::macros::register_mmio;
+
+register_mmio! {
+    /// NMITIMEN
+    pub struct NmiTimerEnable @ 0x4200 {
+        #[bits(0)]
+        pub joypad_autoread_enable: bool,
+
+        #[bits(4..=5)]
+        pub hv_timer_condition: u8,
+
+        #[bits(7)]
+        pub vblank_nmi_enable: bool,
+    }
+}
+
+register_mmio! {
+    /// HDMAEN
+    pub struct HdmaTransferEnable @ 0x420C {
+        #[bits(0)]
+        pub channel0: bool,
+
+        #[bits(1)]
+        pub channel1: bool,
+
+        #[bits(2)]
+        pub channel2: bool,
+
+        #[bits(3)]
+        pub channel3: bool,
+
+        #[bits(4)]
+        pub channel4: bool,
+
+        #[bits(5)]
+        pub channel5: bool,
+
+        #[bits(6)]
+        pub channel6: bool,
+
+        #[bits(7)]
+        pub channel7: bool,
+    }
+}
