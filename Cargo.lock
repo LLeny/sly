@@ -953,31 +953,11 @@ dependencies = [
 
 [[package]]
 name = "chapa"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4eb62d0421ea9020fc2d1e41eff2288dcb90562333faeabb192069f7ba194fa"
-dependencies = [
- "chapa-macros 0.2.0",
-]
-
-[[package]]
-name = "chapa"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b130716cc7e56644d8ededaf95e4fb8bc404374247ca7c5db7487ab4a99ef304"
 dependencies = [
- "chapa-macros 0.3.0",
-]
-
-[[package]]
-name = "chapa-macros"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "772e3d631837fce070b40faf0591a055db0944f1d5d4d1f20afa9bb2f70af341"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
+ "chapa-macros",
 ]
 
 [[package]]
@@ -5663,10 +5643,10 @@ dependencies = [
 name = "snes"
 version = "0.1.0"
 dependencies = [
- "chapa 0.2.0",
+ "chapa",
+ "chipi-macros",
  "thiserror 2.0.18",
  "tracing",
- "wdc_65c816",
 ]
 
 [[package]]
@@ -6923,14 +6903,6 @@ dependencies = [
  "log",
  "once_cell",
  "pkg-config",
-]
-
-[[package]]
-name = "wdc_65c816"
-version = "0.1.0"
-dependencies = [
- "chapa 0.3.0",
- "chipi-macros",
 ]
 
 [[package]]

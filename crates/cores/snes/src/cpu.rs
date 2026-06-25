@@ -1,5 +1,11 @@
-use crate::interpreter::InterpreterView;
-use crate::{Bus, decoder};
+mod decoder;
+pub mod disasm;
+mod interpreter;
+
+pub use disasm::{Disasm, disassemble_at};
+
+use crate::Snes;
+use interpreter::InterpreterView;
 
 pub struct Cpu {
     pub acc: u16,
@@ -25,21 +31,27 @@ impl Cpu {
             flags: Flags::default(),
         }
     }
+}
 
-    pub fn step(&mut self, bus: &mut (impl Bus + ?Sized)) {
-        let cia = ((self.program_bank as u32) << 16) | (self.pc as u32);
-        let opcode = bus.read(cia);
+pub fn step(snes: &mut Snes) {
+    let (bank, pc, modes) = {
+        let cpu = &snes.cpu;
+        (
+            cpu.program_bank,
+            cpu.pc,
+            decoder::pack_modes(cpu.flags.m() as u64, cpu.flags.x() as u64),
+        )
+    };
 
-        let modes = crate::combo(self.flags.m(), self.flags.x());
-        let len = decoder::stream_len(modes, opcode);
+    let opcode = snes.read8(bank, pc);
+    let len = decoder::stream_len(modes, opcode);
 
-        let mut view = InterpreterView::new(&mut *self, bus, len);
-        decoder::run_ops(modes, &mut view, opcode);
-        let (next_bank, next_pc) = view.next();
+    let mut view = InterpreterView::new(&mut *snes, len);
+    decoder::run_ops(modes, &mut view, opcode);
+    let (next_bank, next_pc) = view.next();
 
-        self.program_bank = next_bank;
-        self.pc = next_pc;
-    }
+    snes.cpu.program_bank = next_bank;
+    snes.cpu.pc = next_pc;
 }
 
 #[chapa::bitfield(u8, order = msb0)]

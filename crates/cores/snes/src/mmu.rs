@@ -1,16 +1,16 @@
-use wdc_65c816::Bus;
-
-use crate::Cartridge;
 use crate::cartridge::MapMode;
+use crate::interrupt::NmiTimerEnable;
+use crate::{Cartridge, Snes};
 
 const WRAM_SIZE: usize = 0x2_0000;
+const OPEN_BUS: u8 = 0xFF;
 
 pub struct Mmu {
     pub cartridge: Cartridge,
     pub wram: Box<[u8]>,
 }
 
-enum AddressSpace {
+pub(crate) enum AddressSpace {
     Wram(usize),
     Rom(usize),
     Io(u16),
@@ -25,19 +25,8 @@ impl Mmu {
         }
     }
 
-    pub fn read8(&self, bank: u8, addr: u16) -> u8 {
-        self.read(((bank as u32) << 16) | addr as u32)
-    }
-
-    pub fn read16(&self, bank: u8, addr: u16) -> u16 {
-        let base = ((bank as u32) << 16) | addr as u32;
-        let lo = self.read(base) as u16;
-        let hi = self.read(base.wrapping_add(1)) as u16;
-        lo | (hi << 8)
-    }
-
     /// Translate a CPU address to an address space (WRAM, ROM, I/O or unmapped).
-    fn map(&self, addr: u32) -> AddressSpace {
+    pub(crate) fn map(&self, addr: u32) -> AddressSpace {
         let bank = (addr >> 16) as u8;
         let offset = addr as u16;
 
@@ -80,51 +69,68 @@ impl Mmu {
 
         AddressSpace::Rom(rom_addr % rom.len())
     }
-
-    fn read_io(&self, reg: u16) -> u8 {
-        match reg {
-            _ => {
-                tracing::error!(
-                    reg = format!("{:04X}", reg),
-                    "Read from unmapped I/O register"
-                );
-                0
-            }
-        }
-    }
-
-    fn write_io(&mut self, reg: u16, value: u8) {
-        tracing::error!(
-            reg = format!("{:04X}", reg),
-            value = format!("{:02X}", value),
-            "Write to unmapped I/O register"
-        );
-    }
 }
 
-impl Bus for Mmu {
-    fn read(&self, addr: u32) -> u8 {
-        match self.map(addr) {
-            AddressSpace::Wram(index) => self.wram[index],
-            AddressSpace::Rom(index) => self.cartridge.rom[index],
+impl Snes {
+    pub fn read8(&self, bank: u8, addr: u16) -> u8 {
+        self.read(((bank as u32) << 16) | addr as u32)
+    }
+
+    pub fn read16(&self, bank: u8, addr: u16) -> u16 {
+        let base = ((bank as u32) << 16) | addr as u32;
+        let lo = self.read(base) as u16;
+        let hi = self.read(base.wrapping_add(1)) as u16;
+        lo | (hi << 8)
+    }
+
+    pub fn read(&self, addr: u32) -> u8 {
+        match self.mmu.map(addr) {
+            AddressSpace::Wram(index) => self.mmu.wram[index],
+            AddressSpace::Rom(index) => self.mmu.cartridge.rom[index],
             AddressSpace::Io(reg) => self.read_io(reg),
             AddressSpace::Unmapped => {
                 tracing::error!(addr = format!("{:06X}", addr), "Read from unmapped address");
-                0
+                OPEN_BUS
             }
         }
     }
 
-    fn write(&mut self, addr: u32, value: u8) {
-        match self.map(addr) {
-            AddressSpace::Wram(index) => self.wram[index] = value,
-            AddressSpace::Rom(_) => {} // ROM is readonly
+    pub fn write(&mut self, addr: u32, value: u8) {
+        match self.mmu.map(addr) {
+            AddressSpace::Wram(index) => self.mmu.wram[index] = value,
+            AddressSpace::Rom(_) => {}
             AddressSpace::Io(reg) => self.write_io(reg, value),
             AddressSpace::Unmapped => {
                 tracing::error!(
                     addr = format!("{:06X}", addr),
                     value = format!("{:02X}", value),
                     "Write to unmapped address"
+                );
+            }
+        }
+    }
+
+    fn read_io(&self, reg: u16) -> u8 {
+        match reg {
+            0x4200 => self.irq.nmitimen.raw(),
+            _ => {
+                tracing::error!(
+                    reg = format!("{:04X}", reg),
+                    "Read from unmapped I/O register"
+                );
+                OPEN_BUS
+            }
+        }
+    }
+
+    fn write_io(&mut self, reg: u16, value: u8) {
+        match reg {
+            0x4200 => self.irq.nmitimen = NmiTimerEnable::from_raw(value),
+            _ => {
+                tracing::error!(
+                    reg = format!("{:04X}", reg),
+                    value = format!("{:02X}", value),
+                    "Write to unmapped I/O register"
                 );
             }
         }

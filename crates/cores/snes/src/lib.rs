@@ -1,15 +1,20 @@
 pub mod cartridge;
+pub mod cpu;
 pub mod error;
+pub mod interrupt;
 pub mod mmu;
 
 pub use cartridge::Cartridge;
+pub use cpu::{Cpu, Disasm};
 pub use error::SnesError;
 pub use mmu::Mmu;
-pub use wdc_65c816::{Cpu, Disasm};
+
+use crate::interrupt::Irq;
 
 pub struct Snes {
     pub cpu: Cpu,
     pub mmu: Mmu,
+    pub irq: Irq,
 }
 
 impl Snes {
@@ -17,14 +22,17 @@ impl Snes {
         const RESET_VECTOR_ADDR: u16 = 0xFFFC;
         const BANK_ZERO: u8 = 0x00;
 
-        let mmu = Mmu::new(cartridge);
-        let cpu = Cpu::new(mmu.read16(BANK_ZERO, RESET_VECTOR_ADDR));
-
-        Self { cpu, mmu }
+        let mut snes = Self {
+            cpu: Cpu::new(0),
+            mmu: Mmu::new(cartridge),
+            irq: Irq::default(),
+        };
+        snes.cpu.pc = snes.read16(BANK_ZERO, RESET_VECTOR_ADDR);
+        snes
     }
 
     pub fn disassemble_at(&self, pc: u16) -> Disasm {
-        wdc_65c816::disassemble_at(&self.cpu, &self.mmu, pc)
+        cpu::disassemble_at(self, pc)
     }
 
     pub fn disassemble_next(&self) -> Disasm {
@@ -32,6 +40,6 @@ impl Snes {
     }
 
     pub fn step(&mut self) {
-        self.cpu.step(&mut self.mmu);
+        cpu::step(self);
     }
 }

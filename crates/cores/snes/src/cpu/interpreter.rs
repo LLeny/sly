@@ -1,22 +1,21 @@
-use crate::cpu::Cpu;
-use crate::{Bus, decoder};
+use super::decoder;
+use crate::Snes;
 use decoder::{BranchesKind, DisasmCtx, FlagOpsKind, Instruction, Ops, StoreKind};
 
-pub(crate) struct InterpreterView<'a, B: Bus + ?Sized> {
-    cpu: &'a mut Cpu,
-    bus: &'a mut B,
+pub(crate) struct InterpreterView<'a> {
+    snes: &'a mut Snes,
     next_bank: u8,
     next_pc: u16,
 }
 
-impl<'a, B: Bus + ?Sized> InterpreterView<'a, B> {
-    pub(crate) fn new(cpu: &'a mut Cpu, bus: &'a mut B, len: u8) -> Self {
+impl<'a> InterpreterView<'a> {
+    pub(crate) fn new(snes: &'a mut Snes, len: u8) -> Self {
+        let cpu = &snes.cpu;
         let next_bank = cpu.program_bank;
         let next_pc = cpu.pc.wrapping_add(len as u16);
 
         Self {
-            cpu,
-            bus,
+            snes,
             next_bank,
             next_pc,
         }
@@ -30,7 +29,8 @@ impl<'a, B: Bus + ?Sized> InterpreterView<'a, B> {
     /// CIA (current instruction address): the full 24 bit address of the
     /// instruction being executed.
     fn code_addr(&self) -> u64 {
-        ((self.cpu.program_bank as u64) << 16) | self.cpu.pc as u64
+        let cpu = &self.snes.cpu;
+        ((cpu.program_bank as u64) << 16) | cpu.pc as u64
     }
 
     /// Redirect execution within the current program bank.
@@ -50,9 +50,9 @@ impl<'a, B: Bus + ?Sized> InterpreterView<'a, B> {
     }
 }
 
-impl<B: Bus + ?Sized> DisasmCtx for InterpreterView<'_, B> {
+impl DisasmCtx for InterpreterView<'_> {
     fn read_u8(&self, addr: u64) -> u8 {
-        self.bus.read(addr as u32)
+        self.snes.read(addr as u32)
     }
 }
 
@@ -67,32 +67,34 @@ macro_rules! unimplemented_ops {
     };
 }
 
-impl<B: Bus + ?Sized> Ops for InterpreterView<'_, B> {
+impl Ops for InterpreterView<'_> {
     fn nop(&mut self, _: Instruction) {}
 
     fn flag_ops(&mut self, op: FlagOpsKind, _instr: Instruction) {
+        let flags = &mut self.snes.cpu.flags;
         match op {
-            FlagOpsKind::Clc => self.cpu.flags.set_carry(false),
-            FlagOpsKind::Sec => self.cpu.flags.set_carry(true),
-            FlagOpsKind::Cli => self.cpu.flags.set_irq_disable(false),
-            FlagOpsKind::Sei => self.cpu.flags.set_irq_disable(true),
-            FlagOpsKind::Cld => self.cpu.flags.set_decimal(false),
-            FlagOpsKind::Sed => self.cpu.flags.set_decimal(true),
-            FlagOpsKind::Clv => self.cpu.flags.set_overflow(false),
+            FlagOpsKind::Clc => flags.set_carry(false),
+            FlagOpsKind::Sec => flags.set_carry(true),
+            FlagOpsKind::Cli => flags.set_irq_disable(false),
+            FlagOpsKind::Sei => flags.set_irq_disable(true),
+            FlagOpsKind::Cld => flags.set_decimal(false),
+            FlagOpsKind::Sed => flags.set_decimal(true),
+            FlagOpsKind::Clv => flags.set_overflow(false),
         }
     }
 
     fn branches(&mut self, op: BranchesKind, _instr: Instruction) {
+        let flags = self.snes.cpu.flags;
         let taken = match op {
             BranchesKind::BraRel => true,
-            BranchesKind::BeqRel => self.cpu.flags.zero_(),
-            BranchesKind::BneRel => !self.cpu.flags.zero_(),
-            BranchesKind::BcsRel => self.cpu.flags.carry(),
-            BranchesKind::BccRel => !self.cpu.flags.carry(),
-            BranchesKind::BmiRel => self.cpu.flags.negative(),
-            BranchesKind::BplRel => !self.cpu.flags.negative(),
-            BranchesKind::BvsRel => self.cpu.flags.overflow(),
-            BranchesKind::BvcRel => !self.cpu.flags.overflow(),
+            BranchesKind::BeqRel => flags.zero_(),
+            BranchesKind::BneRel => !flags.zero_(),
+            BranchesKind::BcsRel => flags.carry(),
+            BranchesKind::BccRel => !flags.carry(),
+            BranchesKind::BmiRel => flags.negative(),
+            BranchesKind::BplRel => !flags.negative(),
+            BranchesKind::BvsRel => flags.overflow(),
+            BranchesKind::BvcRel => !flags.overflow(),
         };
 
         if taken {
@@ -116,12 +118,12 @@ impl<B: Bus + ?Sized> Ops for InterpreterView<'_, B> {
     fn store(&mut self, op: StoreKind, inst: Instruction) {
         match op {
             StoreKind::StzAbs => {
-                let ea = ((self.cpu.data_bank as u32) << 16)
-                    | inst.stz_abs__addr(self.code_addr(), self);
-                self.bus.write(ea, 0);
+                let data_bank = self.snes.cpu.data_bank;
+                let ea = ((data_bank as u32) << 16) | inst.stz_abs__addr(self.code_addr(), self);
+                self.snes.write(ea, 0);
 
-                if self.cpu.flags.is_acc_16bits() {
-                    self.bus.write(ea + 1, 0);
+                if self.snes.cpu.flags.is_acc_16bits() {
+                    self.snes.write(ea + 1, 0);
                 }
             }
             _ => todo!("Implement store instruction {op:?}"),
