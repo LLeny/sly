@@ -15,6 +15,35 @@ register_mmio! {
 }
 
 register_mmio! {
+    /// MDMAEN
+    pub struct DmaTransferStart @ 0x420B {
+        #[bits(0)]
+        pub channel0: bool,
+
+        #[bits(1)]
+        pub channel1: bool,
+
+        #[bits(2)]
+        pub channel2: bool,
+
+        #[bits(3)]
+        pub channel3: bool,
+
+        #[bits(4)]
+        pub channel4: bool,
+
+        #[bits(5)]
+        pub channel5: bool,
+
+        #[bits(6)]
+        pub channel6: bool,
+
+        #[bits(7)]
+        pub channel7: bool,
+    }
+}
+
+register_mmio! {
     /// HDMAEN
     pub struct HdmaTransferEnable @ 0x420C {
         #[bits(0)]

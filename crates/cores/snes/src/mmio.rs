@@ -2,7 +2,7 @@ pub mod dma;
 pub mod regs;
 
 use crate::cartridge::MapMode;
-use crate::mmio::regs::{HdmaTransferEnable, NmiTimerEnable};
+use crate::mmio::regs::{DmaTransferStart, HdmaTransferEnable, NmiTimerEnable};
 use crate::{Cartridge, Snes};
 
 const WRAM_SIZE: usize = 0x2_0000;
@@ -122,6 +122,7 @@ impl Snes {
     fn read_io(&self, reg: u16) -> u8 {
         match reg {
             NmiTimerEnable::ADDRESS => self.irq.nmitimen.raw(),
+            DmaTransferStart::ADDRESS => self.dma.mdmaen.raw(),
             HdmaTransferEnable::ADDRESS => self.dma.hdmaen.raw(),
             _ => {
                 tracing::error!(
@@ -136,6 +137,7 @@ impl Snes {
     fn write_io(&mut self, reg: u16, value: u8) {
         match reg {
             NmiTimerEnable::ADDRESS => self.irq.nmitimen = NmiTimerEnable::from_raw(value),
+            DmaTransferStart::ADDRESS => self.dma.mdmaen = DmaTransferStart::from_raw(value),
             HdmaTransferEnable::ADDRESS => self.dma.hdmaen = HdmaTransferEnable::from_raw(value),
             _ => {
                 tracing::error!(
