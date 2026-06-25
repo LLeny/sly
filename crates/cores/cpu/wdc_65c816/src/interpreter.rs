@@ -1,6 +1,6 @@
 use crate::cpu::Cpu;
 use crate::{Bus, decoder};
-use decoder::{BranchesKind, DisasmCtx, FlagOpsKind, Instruction, Ops};
+use decoder::{BranchesKind, DisasmCtx, FlagOpsKind, Instruction, Ops, StoreKind};
 
 pub(crate) struct InterpreterView<'a, B: Bus + ?Sized> {
     cpu: &'a mut Cpu,
@@ -85,8 +85,8 @@ impl<B: Bus + ?Sized> Ops for InterpreterView<'_, B> {
     fn branches(&mut self, op: BranchesKind, _instr: Instruction) {
         let taken = match op {
             BranchesKind::BraRel => true,
-            BranchesKind::BeqRel => self.cpu.flags.zero(),
-            BranchesKind::BneRel => !self.cpu.flags.zero(),
+            BranchesKind::BeqRel => self.cpu.flags.zero_(),
+            BranchesKind::BneRel => !self.cpu.flags.zero_(),
             BranchesKind::BcsRel => self.cpu.flags.carry(),
             BranchesKind::BccRel => !self.cpu.flags.carry(),
             BranchesKind::BmiRel => self.cpu.flags.negative(),
@@ -111,6 +111,21 @@ impl<B: Bus + ?Sized> Ops for InterpreterView<'_, B> {
         let pc = self.code_addr();
         let target = inst.jmp_abl__addr(pc, self);
         self.jump_long((target >> 16) as u8, target as u16);
+    }
+
+    fn store(&mut self, op: StoreKind, inst: Instruction) {
+        match op {
+            StoreKind::StzAbs => {
+                let ea = ((self.cpu.data_bank as u32) << 16)
+                    | inst.stz_abs__addr(self.code_addr(), self);
+                self.bus.write(ea, 0);
+
+                if self.cpu.flags.is_acc_16bits() {
+                    self.bus.write(ea + 1, 0);
+                }
+            }
+            _ => todo!("Implement store instruction {op:?}"),
+        }
     }
 
     unimplemented_ops! {
@@ -143,9 +158,7 @@ impl<B: Bus + ?Sized> Ops for InterpreterView<'_, B> {
         rti, rtl, rts,
         sbc_abl, sbc_abs, sbc_abx, sbc_aby, sbc_alx, sbc_dp, sbc_dpx, sbc_idl, sbc_idly,
         sbc_idp, sbc_idx, sbc_idy, sbc_imm_m16, sbc_imm_m8, sbc_isy, sbc_sr,
-        sta_abl, sta_abs, sta_abx, sta_aby, sta_alx, sta_dp, sta_dpx, sta_idl, sta_idly,
-        sta_idp, sta_idx, sta_idy, sta_isy, sta_sr,
-        stp, stx_abs, stx_dp, stx_dpy, sty_abs, sty_dp, sty_dpx, stz_abs, stz_abx, stz_dp, stz_dpx,
+        stp,
         tax, tay, tcd, tcs, tdc, trb_abs, trb_dp, tsb_abs, tsb_dp, tsc, tsx, txa, txs, txy, tya, tyx,
         wai, wdm_imm, xba, xce,
     }

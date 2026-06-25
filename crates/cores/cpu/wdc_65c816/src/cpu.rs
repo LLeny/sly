@@ -22,7 +22,7 @@ impl Cpu {
             data_bank: 0,
             direct_page: 0,
             program_bank: 0,
-            flags: Flags::new().with_m(true).with_x(true),
+            flags: Flags::default(),
         }
     }
 
@@ -43,13 +43,13 @@ impl Cpu {
 }
 
 #[chapa::bitfield(u8, order = msb0)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct Flags {
     #[bits(0, alias = "c")]
     pub carry: bool,
 
     #[bits(1, alias = "z")]
-    pub zero: bool,
+    pub zero_: bool,
 
     #[bits(2, alias = "i")]
     pub irq_disable: bool,
@@ -57,10 +57,10 @@ pub struct Flags {
     #[bits(3, alias = "d")]
     pub decimal: bool,
 
-    #[bits(4, alias = "x")]
+    #[bits(4, alias = "x", default = true)]
     pub index_register_size: bool,
 
-    #[bits(5, alias = "m")]
+    #[bits(5, alias = "m", default = true)]
     pub accumulator_register_size: bool,
 
     #[bits(6, alias = "v")]
@@ -68,4 +68,14 @@ pub struct Flags {
 
     #[bits(7, alias = "n")]
     pub negative: bool,
+}
+
+impl Flags {
+    pub fn is_acc_16bits(&self) -> bool {
+        !self.m()
+    }
+
+    pub fn is_index_16bits(&self) -> bool {
+        !self.x()
+    }
 }
