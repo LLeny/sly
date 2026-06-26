@@ -1,6 +1,8 @@
 use super::decoder;
-use crate::Snes;
-use decoder::{BranchesKind, DisasmCtx, FlagOpsKind, Instruction, LoadKind, Ops, StoreKind};
+use crate::{Snes, cpu::Flags};
+use decoder::{
+    BranchesKind, DisasmCtx, FlagMaskKind, FlagOpsKind, Instruction, LoadKind, Ops, StoreKind,
+};
 
 pub(crate) struct InterpreterView<'a> {
     snes: &'a mut Snes,
@@ -80,6 +82,22 @@ impl Ops for InterpreterView<'_> {
             FlagOpsKind::Cld => flags.set_decimal(false),
             FlagOpsKind::Sed => flags.set_decimal(true),
             FlagOpsKind::Clv => flags.set_overflow(false),
+        }
+    }
+
+    fn flag_mask(&mut self, op: FlagMaskKind, _instr: Instruction) {
+        let mask = self.read_u8(self.code_addr() + 1);
+
+        let cpu = &mut self.snes.cpu;
+        let raw = cpu.flags.raw();
+        cpu.flags = Flags::from_raw(match op {
+            FlagMaskKind::RepImm => raw & !mask,
+            FlagMaskKind::SepImm => raw | mask,
+        });
+
+        if cpu.flags.x() {
+            cpu.index_x &= 0x00ff;
+            cpu.index_y &= 0x00ff;
         }
     }
 
@@ -173,7 +191,7 @@ impl Ops for InterpreterView<'_> {
     }
 
     unimplemented_ops! {
-        rep_imm, sep_imm, adc_abl, adc_abs, adc_abx, adc_aby, adc_alx, adc_dp, adc_dpx, adc_idl, adc_idly,
+        adc_abl, adc_abs, adc_abx, adc_aby, adc_alx, adc_dp, adc_dpx, adc_idl, adc_idly,
         adc_idp, adc_idx, adc_idy, adc_imm_m16, adc_imm_m8, adc_isy, adc_sr,
         and_abl, and_abs, and_abx, and_aby, and_alx, and_dp, and_dpx, and_idl, and_idly,
         and_idp, and_idx, and_idy, and_imm_m16, and_imm_m8, and_isy, and_sr,
