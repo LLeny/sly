@@ -1,6 +1,6 @@
 use super::decoder;
 use crate::Snes;
-use decoder::{BranchesKind, DisasmCtx, FlagOpsKind, Instruction, Ops, StoreKind};
+use decoder::{BranchesKind, DisasmCtx, FlagOpsKind, Instruction, LoadKind, Ops, StoreKind};
 
 pub(crate) struct InterpreterView<'a> {
     snes: &'a mut Snes,
@@ -60,7 +60,7 @@ macro_rules! unimplemented_ops {
     ($($name:ident),+ $(,)?) => {
         $(
             #[inline]
-            fn $name(&mut self, _inst: Instruction) {
+            fn $name(&mut self, _instr: Instruction) {
                 todo!("Implement instruction {}", stringify!($name));
             }
         )+
@@ -103,30 +103,72 @@ impl Ops for InterpreterView<'_> {
         }
     }
 
-    fn jmp_abs(&mut self, inst: Instruction) {
+    fn jmp_abs(&mut self, instr: Instruction) {
         let pc = self.code_addr();
-        let target = inst.jmp_abs__addr(pc, self) as u16;
+        let target = instr.jmp_abs__addr(pc, self) as u16;
         self.jump(target);
     }
 
-    fn jmp_abl(&mut self, inst: Instruction) {
+    fn jmp_abl(&mut self, instr: Instruction) {
         let pc = self.code_addr();
-        let target = inst.jmp_abl__addr(pc, self);
+        let target = instr.jmp_abl__addr(pc, self);
         self.jump_long((target >> 16) as u8, target as u16);
     }
 
-    fn store(&mut self, op: StoreKind, inst: Instruction) {
+    fn store(&mut self, op: StoreKind, instr: Instruction) {
         match op {
             StoreKind::StzAbs => {
                 let data_bank = self.snes.cpu.data_bank;
-                let ea = ((data_bank as u32) << 16) | inst.stz_abs__addr(self.code_addr(), self);
+                let ea = ((data_bank as u32) << 16) | instr.stz_abs__addr(self.code_addr(), self);
                 self.snes.write(ea, 0);
 
                 if self.snes.cpu.flags.is_acc_16bits() {
                     self.snes.write(ea + 1, 0);
                 }
             }
+            StoreKind::StaAbs => {
+                let data_bank = self.snes.cpu.data_bank;
+                let ea = ((data_bank as u32) << 16) | instr.sta_abs__addr(self.code_addr(), self);
+                let value = self.snes.cpu.acc as u8;
+                self.snes.write(ea, value);
+
+                if self.snes.cpu.flags.is_acc_16bits() {
+                    let value_hi = (self.snes.cpu.acc >> 8) as u8;
+                    self.snes.write(ea + 1, value_hi);
+                }
+            }
             _ => todo!("Implement store instruction {op:?}"),
+        }
+    }
+
+    fn load(&mut self, op: LoadKind, instr: Instruction) {
+        match op {
+            LoadKind::LdaImmM8 => {
+                let data_bank = self.snes.cpu.data_bank;
+                let ea = ((data_bank as u32) << 16) | instr.lda_imm_m8__imm(self.code_addr(), self);
+                let value = self.snes.read(ea);
+
+                if self.snes.cpu.flags.is_acc_16bits() {
+                    let value_hi = self.snes.read(ea + 1);
+                    self.snes.cpu.acc = (value_hi as u16) << 8 | value as u16;
+                } else {
+                    self.snes.cpu.acc = value as u16;
+                }
+            }
+            _ => todo!("Implement load instruction {op:?}"),
+        }
+    }
+
+    fn xce(&mut self, _instr: Instruction) {
+        let flags = &mut self.snes.cpu.flags;
+        let c = flags.carry();
+        let x = flags.x();
+
+        flags.set_c(x);
+        flags.set_x(c);
+
+        if flags.x() {
+            tracing::error!("switched to emulation mode, weird?");
         }
     }
 
@@ -162,6 +204,6 @@ impl Ops for InterpreterView<'_> {
         sbc_idp, sbc_idx, sbc_idy, sbc_imm_m16, sbc_imm_m8, sbc_isy, sbc_sr,
         stp,
         tax, tay, tcd, tcs, tdc, trb_abs, trb_dp, tsb_abs, tsb_dp, tsc, tsx, txa, txs, txy, tya, tyx,
-        wai, wdm_imm, xba, xce,
+        wai, wdm_imm, xba,
     }
 }
