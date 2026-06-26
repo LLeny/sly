@@ -50,6 +50,19 @@ impl<'a> InterpreterView<'a> {
     fn branch(&mut self, offset: i16) {
         self.next_pc = self.next_pc.wrapping_add(offset as u16);
     }
+
+    /// Push a byte onto the stack.
+    fn push8(&mut self, value: u8) {
+        let sp = self.snes.cpu.stack_pointer;
+        self.snes.write(sp as u32, value);
+        self.snes.cpu.stack_pointer = sp.wrapping_sub(1);
+    }
+
+    /// Push a word onto the stack.
+    fn push16(&mut self, value: u16) {
+        self.push8((value >> 8) as u8);
+        self.push8(value as u8);
+    }
 }
 
 impl DisasmCtx for InterpreterView<'_> {
@@ -190,14 +203,30 @@ impl Ops for InterpreterView<'_> {
         }
     }
 
+    fn brk_imm(&mut self, _instr: Instruction) {
+        const BRK_VECTOR: u16 = 0xffe6;
+
+        let (program_bank, return_pc) = self.next();
+
+        self.push8(program_bank);
+        self.push16(return_pc);
+        self.push8(self.snes.cpu.flags.raw());
+
+        self.snes.cpu.flags.set_irq_disable(true);
+        self.snes.cpu.flags.set_decimal(false);
+        self.snes.cpu.program_bank = 0;
+
+        let target = self.snes.read16(0, BRK_VECTOR);
+        self.jump_long(0, target);
+    }
+
     unimplemented_ops! {
         adc_abl, adc_abs, adc_abx, adc_aby, adc_alx, adc_dp, adc_dpx, adc_idl, adc_idly,
         adc_idp, adc_idx, adc_idy, adc_imm_m16, adc_imm_m8, adc_isy, adc_sr,
         and_abl, and_abs, and_abx, and_aby, and_alx, and_dp, and_dpx, and_idl, and_idly,
         and_idp, and_idx, and_idy, and_imm_m16, and_imm_m8, and_isy, and_sr,
         asl_a, asl_abs, asl_abx, asl_dp, asl_dpx,
-        bit_abs, bit_abx, bit_dp, bit_dpx, bit_imm_m16, bit_imm_m8,
-        brk_imm, brl_rell,
+        bit_abs, bit_abx, bit_dp, bit_dpx, bit_imm_m16, bit_imm_m8, brl_rell,
         cmp_abl, cmp_abs, cmp_abx, cmp_aby, cmp_alx, cmp_dp, cmp_dpx, cmp_idl, cmp_idly,
         cmp_idp, cmp_idx, cmp_idy, cmp_imm_m16, cmp_imm_m8, cmp_isy, cmp_sr,
         cop_imm, cpx_abs, cpx_dp, cpx_imm_x16, cpx_imm_x8, cpy_abs, cpy_dp, cpy_imm_x16, cpy_imm_x8,

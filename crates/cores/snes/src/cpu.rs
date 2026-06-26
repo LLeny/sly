@@ -16,6 +16,7 @@ pub struct Cpu {
     pub program_bank: u8,
     pub flags: Flags,
     pub pc: u16,
+    pub stack_pointer: u16,
 }
 
 impl Cpu {
@@ -29,6 +30,7 @@ impl Cpu {
             direct_page: 0,
             program_bank: 0,
             flags: Flags::default(),
+            stack_pointer: 0x01ff,
         }
     }
 }

@@ -68,7 +68,7 @@ impl Disasm {
         if self.follow_pc
             && let Some(ix) = self.view.lines.iter().position(|l| l.current)
         {
-            self.scroll.scroll_to_item(ix, ScrollStrategy::Center);
+            self.scroll.scroll_to_item_strict(ix, ScrollStrategy::Top);
         }
     }
 
