@@ -191,15 +191,13 @@ impl Ops for InterpreterView<'_> {
     }
 
     fn xce(&mut self, _instr: Instruction) {
-        let flags = &mut self.snes.cpu.flags;
-        let c = flags.carry();
-        let x = flags.x();
+        let cpu = &mut self.snes.cpu;
+        let carry = cpu.flags.carry();
+        cpu.flags.set_carry(cpu.emulation);
+        cpu.emulation = carry;
 
-        flags.set_c(x);
-        flags.set_x(c);
-
-        if flags.x() {
-            tracing::error!("switched to emulation mode, weird?");
+        if cpu.emulation {
+            tracing::error!("Entering emulation mode, weird?");
         }
     }
 

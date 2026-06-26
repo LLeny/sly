@@ -17,6 +17,7 @@ pub struct Cpu {
     pub flags: Flags,
     pub pc: u16,
     pub stack_pointer: u16,
+    emulation: bool,
 }
 
 impl Cpu {
@@ -31,6 +32,7 @@ impl Cpu {
             program_bank: 0,
             flags: Flags::default(),
             stack_pointer: 0x01ff,
+            emulation: true,
         }
     }
 }
