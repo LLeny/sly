@@ -1,3 +1,4 @@
-[submodule "submodules/chipi-spec2"]
-	path = submodules/chipi-spec2
-	url = https://github.com/ioncodes/chipi-spec2
+[submodule "submodules/chipi-spec"]
+	path = submodules/chipi-spec
+	url = https://github.com/ioncodes/chipi-spec
+	branch = 1.0

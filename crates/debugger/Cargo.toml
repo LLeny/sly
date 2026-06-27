@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-gpui = { git = "https://github.com/zed-industries/zed", rev = "c3c38c5c09d887817229b133d904e6eb3f7e7011" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "c3c38c5c09d887817229b133d904e6eb3f7e7011", features = ["font-kit", "wayland", "x11"] }
+gpui = { git = "https://github.com/ioncodes/zed", rev = "f10625819af32278aaad3dfb38de2f267bedeb6d" }
+gpui_platform = { git = "https://github.com/ioncodes/zed", rev = "f10625819af32278aaad3dfb38de2f267bedeb6d", features = ["font-kit", "wayland", "x11"] }
 cirsium = { path = "../cirsium" }
 snes = { path = "../cores/snes" }
-reqwest_client = { git = "https://github.com/zed-industries/zed", rev = "c3c38c5c09d887817229b133d904e6eb3f7e7011" }
+reqwest_client = { git = "https://github.com/ioncodes/zed", rev = "f10625819af32278aaad3dfb38de2f267bedeb6d" }
 urlencoding = "2.1.3"
