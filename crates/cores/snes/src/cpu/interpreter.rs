@@ -1,9 +1,6 @@
 use super::decoder;
 use crate::{Snes, cpu::Flags};
-use decoder::{
-    BranchesKind, DisasmCtx, FlagMaskKind, FlagOpsKind, Instruction, LoadKind, Ops, StoreKind,
-    SwTrapKind,
-};
+use decoder::{Branches, FlagMask, FlagOps, Instruction, Load, RegStep, Store, SwTrap};
 
 pub(crate) struct InterpreterView<'a> {
     snes: &'a mut Snes,
@@ -29,13 +26,6 @@ impl<'a> InterpreterView<'a> {
         (self.next_bank, self.next_pc)
     }
 
-    /// CIA (current instruction address): the full 24 bit address of the
-    /// instruction being executed.
-    fn code_addr(&self) -> u64 {
-        let cpu = &self.snes.cpu;
-        ((cpu.program_bank as u64) << 16) | cpu.pc as u64
-    }
-
     /// Redirect execution within the current program bank.
     fn jump(&mut self, pc: u16) {
         self.next_pc = pc;
@@ -50,6 +40,11 @@ impl<'a> InterpreterView<'a> {
     /// Take a relative branch.
     fn branch(&mut self, offset: i16) {
         self.next_pc = self.next_pc.wrapping_add(offset as u16);
+    }
+
+    /// Effective address of a 16bit operand within the current data bank.
+    fn data_ea(&self, addr: u16) -> u32 {
+        ((self.snes.cpu.data_bank as u32) << 16) | addr as u32
     }
 
     /// Push a byte onto the stack.
@@ -87,66 +82,59 @@ impl<'a> InterpreterView<'a> {
     }
 }
 
-impl DisasmCtx for InterpreterView<'_> {
-    fn read_u8(&self, addr: u64) -> u8 {
-        self.snes.read(addr as u32)
-    }
-}
+impl InterpreterView<'_> {
+    pub(crate) fn exec(&mut self, inst: Instruction) {
+        match inst {
+            Instruction::Nop => {}
 
-macro_rules! unimplemented_ops {
-    ($($name:ident),+ $(,)?) => {
-        $(
-            #[inline]
-            fn $name(&mut self, _instr: Instruction) {
-                todo!("Implement instruction {}", stringify!($name));
-            }
-        )+
-    };
-}
+            Instruction::RegStep(op) => self.reg_step(op),
+            Instruction::FlagOps(op) => self.flag_ops(op),
+            Instruction::FlagMask(op) => self.flag_mask(op),
+            Instruction::Branches(op) => self.branches(op),
+            Instruction::SwTrap(op) => self.sw_trap(op),
+            Instruction::Store(op) => self.store(op),
+            Instruction::Load(op) => self.load(op),
 
-impl Ops for InterpreterView<'_> {
-    fn nop(&mut self, _: Instruction) {}
+            Instruction::JmpAbs { addr } => self.jump(addr),
+            Instruction::JmpAbl { addr } => self.jump_long((addr >> 16) as u8, addr as u16),
+            Instruction::BrlRell { disp } => self.branch(disp),
+            Instruction::Xce => self.xce(),
 
-    fn reg_step(&mut self, op: decoder::RegStepKind, _instr: Instruction) {
-        match op {
-            decoder::RegStepKind::Inx => {
-                self.snes.cpu.index_x = self.snes.cpu.index_x.wrapping_add(1)
-            }
-            decoder::RegStepKind::Dex => {
-                self.snes.cpu.index_x = self.snes.cpu.index_x.wrapping_sub(1)
-            }
-            decoder::RegStepKind::Iny => {
-                self.snes.cpu.index_y = self.snes.cpu.index_y.wrapping_add(1)
-            }
-            decoder::RegStepKind::Dey => {
-                self.snes.cpu.index_y = self.snes.cpu.index_y.wrapping_sub(1)
-            }
-            decoder::RegStepKind::IncA => self.snes.cpu.acc = self.snes.cpu.acc.wrapping_add(1),
-            decoder::RegStepKind::DecA => self.snes.cpu.acc = self.snes.cpu.acc.wrapping_sub(1),
+            other => todo!("Implement instruction {other:?}"),
         }
     }
 
-    fn flag_ops(&mut self, op: FlagOpsKind, _instr: Instruction) {
+    fn reg_step(&mut self, op: RegStep) {
+        let cpu = &mut self.snes.cpu;
+        match op {
+            RegStep::Inx => cpu.index_x = cpu.index_x.wrapping_add(1),
+            RegStep::Dex => cpu.index_x = cpu.index_x.wrapping_sub(1),
+            RegStep::Iny => cpu.index_y = cpu.index_y.wrapping_add(1),
+            RegStep::Dey => cpu.index_y = cpu.index_y.wrapping_sub(1),
+            RegStep::IncA => cpu.acc = cpu.acc.wrapping_add(1),
+            RegStep::DecA => cpu.acc = cpu.acc.wrapping_sub(1),
+        }
+    }
+
+    fn flag_ops(&mut self, op: FlagOps) {
         let flags = &mut self.snes.cpu.flags;
         match op {
-            FlagOpsKind::Clc => flags.set_carry(false),
-            FlagOpsKind::Sec => flags.set_carry(true),
-            FlagOpsKind::Cli => flags.set_irq_disable(false),
-            FlagOpsKind::Sei => flags.set_irq_disable(true),
-            FlagOpsKind::Cld => flags.set_decimal(false),
-            FlagOpsKind::Sed => flags.set_decimal(true),
-            FlagOpsKind::Clv => flags.set_overflow(false),
+            FlagOps::Clc => flags.set_carry(false),
+            FlagOps::Sec => flags.set_carry(true),
+            FlagOps::Cli => flags.set_irq_disable(false),
+            FlagOps::Sei => flags.set_irq_disable(true),
+            FlagOps::Cld => flags.set_decimal(false),
+            FlagOps::Sed => flags.set_decimal(true),
+            FlagOps::Clv => flags.set_overflow(false),
         }
     }
 
-    fn flag_mask(&mut self, op: FlagMaskKind, _instr: Instruction) {
-        let mask = self.read_u8(self.code_addr() + 1);
-
+    fn flag_mask(&mut self, op: FlagMask) {
         let cpu = &mut self.snes.cpu;
         let raw = cpu.flags.raw();
         cpu.flags = Flags::from_raw(match op {
-            FlagMaskKind::RepImm => raw & !mask,
-            FlagMaskKind::SepImm => raw | mask,
+            FlagMask::RepImm { mask } => raw & !mask,
+            FlagMask::SepImm { mask } => raw | mask,
         });
 
         if cpu.flags.x() {
@@ -155,60 +143,50 @@ impl Ops for InterpreterView<'_> {
         }
     }
 
-    fn branches(&mut self, op: BranchesKind, _instr: Instruction) {
+    fn branches(&mut self, op: Branches) {
         let flags = self.snes.cpu.flags;
-        let taken = match op {
-            BranchesKind::BraRel => true,
-            BranchesKind::BeqRel => flags.zero_(),
-            BranchesKind::BneRel => !flags.zero_(),
-            BranchesKind::BcsRel => flags.carry(),
-            BranchesKind::BccRel => !flags.carry(),
-            BranchesKind::BmiRel => flags.negative(),
-            BranchesKind::BplRel => !flags.negative(),
-            BranchesKind::BvsRel => flags.overflow(),
-            BranchesKind::BvcRel => !flags.overflow(),
+        let (taken, disp) = match op {
+            Branches::BraRel { disp } => (true, disp),
+            Branches::BeqRel { disp } => (flags.zero_(), disp),
+            Branches::BneRel { disp } => (!flags.zero_(), disp),
+            Branches::BcsRel { disp } => (flags.carry(), disp),
+            Branches::BccRel { disp } => (!flags.carry(), disp),
+            Branches::BmiRel { disp } => (flags.negative(), disp),
+            Branches::BplRel { disp } => (!flags.negative(), disp),
+            Branches::BvsRel { disp } => (flags.overflow(), disp),
+            Branches::BvcRel { disp } => (!flags.overflow(), disp),
         };
 
         if taken {
-            let offset = self.read_u8(self.code_addr() + 1) as i8;
-            self.branch(offset as i16);
+            self.branch(disp as i16);
         }
     }
 
-    fn jmp_abs(&mut self, instr: Instruction) {
-        let pc = self.code_addr();
-        let target = instr.jmp_abs__addr(pc, self) as u16;
-        self.jump(target);
+    fn sw_trap(&mut self, op: SwTrap) {
+        const BRK_VECTOR_NATIVE: u16 = 0xFFE6;
+        const BRK_VECTOR_EMULATION: u16 = 0xFFFE;
+        const COP_VECTOR_NATIVE: u16 = 0xFFE4;
+        const COP_VECTOR_EMULATION: u16 = 0xFFF4;
+
+        let (native_vector, emu_vector) = match op {
+            SwTrap::BrkImm { .. } => (BRK_VECTOR_NATIVE, BRK_VECTOR_EMULATION),
+            SwTrap::CopImm { .. } => (COP_VECTOR_NATIVE, COP_VECTOR_EMULATION),
+        };
+        self.service_interrupt(native_vector, emu_vector);
     }
 
-    fn jmp_abl(&mut self, instr: Instruction) {
-        let pc = self.code_addr();
-        let target = instr.jmp_abl__addr(pc, self);
-        self.jump_long((target >> 16) as u8, target as u16);
-    }
-
-    fn brl_rell(&mut self, instr: Instruction) {
-        let pc = self.code_addr();
-        let offset = instr.brl_rell__disp(pc, self);
-        self.branch(offset);
-    }
-
-    fn store(&mut self, op: StoreKind, instr: Instruction) {
+    fn store(&mut self, op: Store) {
         match op {
-            StoreKind::StzAbs => {
-                let data_bank = self.snes.cpu.data_bank;
-                let ea =
-                    ((data_bank as u32) << 16) | instr.stz_abs__addr(self.code_addr(), self) as u32;
+            Store::StzAbs { addr } => {
+                let ea = self.data_ea(addr);
                 self.snes.write(ea, 0);
 
                 if self.snes.cpu.flags.is_acc_16bits() {
                     self.snes.write(ea + 1, 0);
                 }
             }
-            StoreKind::StaAbs => {
-                let data_bank = self.snes.cpu.data_bank;
-                let ea =
-                    ((data_bank as u32) << 16) | instr.sta_abs__addr(self.code_addr(), self) as u32;
+            Store::StaAbs { addr } => {
+                let ea = self.data_ea(addr);
                 let value = self.snes.cpu.acc as u8;
                 self.snes.write(ea, value);
 
@@ -217,16 +195,14 @@ impl Ops for InterpreterView<'_> {
                     self.snes.write(ea + 1, value_hi);
                 }
             }
-            _ => todo!("Implement store instruction {op:?}"),
+            other => todo!("Implement store instruction {other:?}"),
         }
     }
 
-    fn load(&mut self, op: LoadKind, instr: Instruction) {
+    fn load(&mut self, op: Load) {
         match op {
-            LoadKind::LdaImmM8 => {
-                let data_bank = self.snes.cpu.data_bank;
-                let ea = ((data_bank as u32) << 16)
-                    | instr.lda_imm_m8__imm(self.code_addr(), self) as u32;
+            Load::LdaImmM8 { imm } => {
+                let ea = self.data_ea(imm.into());
                 let value = self.snes.read(ea);
 
                 if self.snes.cpu.flags.is_acc_16bits() {
@@ -236,11 +212,11 @@ impl Ops for InterpreterView<'_> {
                     self.snes.cpu.acc = value as u16;
                 }
             }
-            _ => todo!("Implement load instruction {op:?}"),
+            other => todo!("Implement load instruction {other:?}"),
         }
     }
 
-    fn xce(&mut self, _instr: Instruction) {
+    fn xce(&mut self) {
         let cpu = &mut self.snes.cpu;
         let carry = cpu.flags.carry();
         cpu.flags.set_carry(cpu.emulation);
@@ -249,47 +225,5 @@ impl Ops for InterpreterView<'_> {
         if cpu.emulation {
             tracing::error!("Entering emulation mode, weird?");
         }
-    }
-
-    fn sw_trap(&mut self, op: SwTrapKind, _instr: Instruction) {
-        let (native_vector, emu_vector) = match op {
-            SwTrapKind::BrkImm => (0xffe6, 0xfffe),
-            SwTrapKind::CopImm => (0xffe4, 0xfff4),
-        };
-        self.service_interrupt(native_vector, emu_vector);
-    }
-
-    unimplemented_ops! {
-        adc_abl, adc_abs, adc_abx, adc_aby, adc_alx, adc_dp, adc_dpx, adc_idl, adc_idly,
-        adc_idp, adc_idx, adc_idy, adc_imm_m16, adc_imm_m8, adc_isy, adc_sr,
-        and_abl, and_abs, and_abx, and_aby, and_alx, and_dp, and_dpx, and_idl, and_idly,
-        and_idp, and_idx, and_idy, and_imm_m16, and_imm_m8, and_isy, and_sr,
-        asl_a, asl_abs, asl_abx, asl_dp, asl_dpx,
-        bit_abs, bit_abx, bit_dp, bit_dpx, bit_imm_m16, bit_imm_m8,
-        cmp_abl, cmp_abs, cmp_abx, cmp_aby, cmp_alx, cmp_dp, cmp_dpx, cmp_idl, cmp_idly,
-        cmp_idp, cmp_idx, cmp_idy, cmp_imm_m16, cmp_imm_m8, cmp_isy, cmp_sr,
-        cpx_abs, cpx_dp, cpx_imm_x16, cpx_imm_x8, cpy_abs, cpy_dp, cpy_imm_x16, cpy_imm_x8,
-        dec_abs, dec_abx, dec_dp, dec_dpx,
-        eor_abl, eor_abs, eor_abx, eor_aby, eor_alx, eor_dp, eor_dpx, eor_idl, eor_idly,
-        eor_idp, eor_idx, eor_idy, eor_imm_m16, eor_imm_m8, eor_isy, eor_sr,
-        inc_abs, inc_abx, inc_dp, inc_dpx,
-        jml_ial, jmp_iax, jmp_ind, jsl_abl, jsr_abs, jsr_iax,
-        lda_abl, lda_abs, lda_abx, lda_aby, lda_alx, lda_dp, lda_dpx, lda_idl, lda_idly,
-        lda_idp, lda_idx, lda_idy, lda_imm_m16, lda_imm_m8, lda_isy, lda_sr,
-        ldx_abs, ldx_aby, ldx_dp, ldx_dpy, ldx_imm_x16, ldx_imm_x8,
-        ldy_abs, ldy_abx, ldy_dp, ldy_dpx, ldy_imm_x16, ldy_imm_x8,
-        lsr_a, lsr_abs, lsr_abx, lsr_dp, lsr_dpx,
-        mvn_bm, mvp_bm,
-        ora_abl, ora_abs, ora_abx, ora_aby, ora_alx, ora_dp, ora_dpx, ora_idl, ora_idly,
-        ora_idp, ora_idx, ora_idy, ora_imm_m16, ora_imm_m8, ora_isy, ora_sr,
-        pea_abs, pei_idp, per_rell, pha, phb, phd, phk, php, phx, phy,
-        pla, plb, pld, plp, plx, ply,
-        rol_a, rol_abs, rol_abx, rol_dp, rol_dpx, ror_a, ror_abs, ror_abx, ror_dp, ror_dpx,
-        rti, rtl, rts,
-        sbc_abl, sbc_abs, sbc_abx, sbc_aby, sbc_alx, sbc_dp, sbc_dpx, sbc_idl, sbc_idly,
-        sbc_idp, sbc_idx, sbc_idy, sbc_imm_m16, sbc_imm_m8, sbc_isy, sbc_sr,
-        stp,
-        tax, tay, tcd, tcs, tdc, trb_abs, trb_dp, tsb_abs, tsb_dp, tsc, tsx, txa, txs, txy, tya, tyx,
-        wai, wdm_imm, xba,
     }
 }

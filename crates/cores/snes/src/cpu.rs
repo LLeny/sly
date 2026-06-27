@@ -37,6 +37,16 @@ impl Cpu {
     }
 }
 
+pub(crate) struct CodeReader<'a> {
+    pub snes: &'a Snes,
+}
+
+impl decoder::DisasmCtx for CodeReader<'_> {
+    fn read_u8(&self, addr: u64) -> u8 {
+        self.snes.read(addr as u32)
+    }
+}
+
 pub fn step(snes: &mut Snes) {
     let (bank, pc, modes) = {
         let cpu = &snes.cpu;
@@ -47,11 +57,14 @@ pub fn step(snes: &mut Snes) {
         )
     };
 
-    let opcode = snes.read8(bank, pc);
-    let len = decoder::stream_len(modes, opcode);
+    let cia = ((bank as u64) << 16) | pc as u64;
+    let (instr, len) = {
+        let reader = CodeReader { snes: &*snes };
+        decoder::decode(modes, cia, &reader)
+    };
 
     let mut view = InterpreterView::new(&mut *snes, len);
-    decoder::run_ops(modes, &mut view, opcode);
+    view.exec(instr);
     let (next_bank, next_pc) = view.next();
 
     snes.cpu.program_bank = next_bank;

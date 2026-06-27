@@ -1,5 +1,6 @@
-use super::decoder::{self, DisasmCtx};
+use super::decoder;
 use crate::Snes;
+use crate::cpu::CodeReader;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Disasm {
@@ -13,27 +14,14 @@ impl std::fmt::Display for Disasm {
     }
 }
 
-struct DisasmView<'a> {
-    snes: &'a Snes,
-}
-
-impl DisasmCtx for DisasmView<'_> {
-    fn read_u8(&self, addr: u64) -> u8 {
-        self.snes.read(addr as u32)
-    }
-
-    fn mode(&self, name: &str) -> u64 {
-        match name {
-            "m" => self.snes.cpu.flags.m() as u64,
-            "x" => self.snes.cpu.flags.x() as u64,
-            _ => 0,
-        }
-    }
-}
-
 #[inline]
 pub fn disassemble_at(snes: &Snes, pc: u16) -> Disasm {
-    let view = DisasmView { snes };
-    let (text, length) = decoder::disasm_ctx(pc as u64, &view);
+    let reader = CodeReader { snes };
+    let addr = pc as u64;
+    let modes = decoder::pack_modes(snes.cpu.flags.m() as u64, snes.cpu.flags.x() as u64);
+
+    let (inst, length) = decoder::decode(modes, addr, &reader);
+    let text = inst.render(addr, &reader);
+
     Disasm { text, length }
 }
