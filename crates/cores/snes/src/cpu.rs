@@ -71,7 +71,7 @@ pub fn step(snes: &mut Snes) {
     snes.cpu.pc = next_pc;
 }
 
-#[chapa::bitfield(u8, order = msb0)]
+#[chapa::bitfield(u8, order = lsb0)]
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Flags {
     #[bits(0, alias = "c")]
