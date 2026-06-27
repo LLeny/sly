@@ -3,10 +3,65 @@ use gpui::{
     prelude::*, px, svg,
 };
 
+#[cfg(not(target_os = "macos"))]
 use crate::assets::icon;
 use crate::theme::Theme;
 
 pub fn title_bar(theme: &Theme, title: impl Into<SharedString>, controls: impl IntoElement) -> Div {
+    let leading = div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_3()
+        .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move());
+
+    #[cfg(not(target_os = "macos"))]
+    let leading = leading.child(
+        svg()
+            .path(icon::LOGO)
+            .size(px(15.))
+            .text_color(theme.accent),
+    );
+
+    let leading = leading.child(
+        div()
+            .text_xs()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme.text_secondary)
+            .child(title.into()),
+    );
+
+    #[cfg(target_os = "macos")]
+    let leading = leading.pl(px(92.));
+
+    let trailing = div().flex().items_center().h_full().child(controls);
+
+    #[cfg(not(target_os = "macos"))]
+    let trailing = trailing
+        .child(window_button(
+            theme,
+            "win-min",
+            false,
+            icon::MINIMIZE,
+            |w, _| w.minimize_window(),
+        ))
+        .child(window_button(
+            theme,
+            "win-max",
+            false,
+            icon::MAXIMIZE,
+            |w, _| w.zoom_window(),
+        ))
+        .child(window_button(
+            theme,
+            "win-close",
+            true,
+            icon::CLOSE,
+            |_, cx| cx.quit(),
+        ));
+
     div()
         .flex()
         .items_center()
@@ -16,57 +71,8 @@ pub fn title_bar(theme: &Theme, title: impl Into<SharedString>, controls: impl I
         .border_b_1()
         .border_color(theme.border_subtle)
         .font_family(theme.ui_font)
-        .child(
-            div()
-                .flex_1()
-                .h_full()
-                .flex()
-                .items_center()
-                .gap_2()
-                .px_3()
-                .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
-                .child(
-                    svg()
-                        .path(icon::LOGO)
-                        .size(px(15.))
-                        .text_color(theme.accent),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme.text_secondary)
-                        .child(title.into()),
-                ),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .h_full()
-                .child(controls)
-                .child(window_button(
-                    theme,
-                    "win-min",
-                    false,
-                    icon::MINIMIZE,
-                    |w, _| w.minimize_window(),
-                ))
-                .child(window_button(
-                    theme,
-                    "win-max",
-                    false,
-                    icon::MAXIMIZE,
-                    |w, _| w.zoom_window(),
-                ))
-                .child(window_button(
-                    theme,
-                    "win-close",
-                    true,
-                    icon::CLOSE,
-                    |_, cx| cx.quit(),
-                )),
-        )
+        .child(leading)
+        .child(trailing)
 }
 
 pub fn icon_button(

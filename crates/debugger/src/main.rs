@@ -4,6 +4,7 @@ mod session;
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use cirsium::assets::icon;
 use cirsium::components::{
@@ -16,9 +17,9 @@ use cirsium::widgets::{
 };
 use cirsium::{Assets, Theme, ThemeMode, set_theme};
 use gpui::{
-    App, Bounds, ClickEvent, ClipboardItem, Context, MouseDownEvent, Pixels, Point, SharedString,
-    TitlebarOptions, Window, WindowBounds, WindowDecorations, WindowOptions, div, prelude::*, px,
-    size,
+    App, Bounds, ClickEvent, ClipboardItem, Context, MouseDownEvent, Pixels, Point, QuitMode,
+    SharedString, Task, TitlebarOptions, Window, WindowBounds, WindowDecorations, WindowOptions,
+    div, prelude::*, px, size,
 };
 use gpui_platform::application;
 use reqwest_client::ReqwestClient;
@@ -28,8 +29,6 @@ use disasm::Disasm;
 use session::Session;
 
 fn main() {
-    // A ROM is required — there's nothing to debug without one. Resolve it before
-    // starting GPUI so we exit cleanly (no window) when it's missing or unloadable.
     let Some(path) = std::env::args().nth(1) else {
         eprintln!("usage: debugger <rom.sfc>");
         std::process::exit(2);
@@ -48,6 +47,8 @@ fn main() {
             eprintln!("font load failed: {err}");
         }
 
+        cx.set_quit_mode(QuitMode::LastWindowClosed);
+
         let http_client = ReqwestClient::user_agent("debugger").unwrap();
         cx.set_http_client(Arc::new(http_client));
 
@@ -59,7 +60,8 @@ fn main() {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {
                     title: Some("debugger".into()),
-                    ..Default::default()
+                    appears_transparent: true,
+                    traffic_light_position: Some(Point::new(px(12.), px(10.))),
                 }),
                 window_decorations: Some(WindowDecorations::Client),
                 ..Default::default()
@@ -80,6 +82,7 @@ struct Debugger {
     collapsed: HashSet<&'static str>,
     settings: Option<Point<Pixels>>,
     running: bool,
+    run_task: Option<Task<()>>,
 }
 
 impl Debugger {
@@ -96,6 +99,7 @@ impl Debugger {
             collapsed: HashSet::new(),
             settings: None,
             running: false,
+            run_task: None,
         }
     }
 
@@ -111,11 +115,55 @@ impl Debugger {
     }
 
     fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
+        if self.running == running {
+            return;
+        }
+
         self.running = running;
         self.status.state = self
             .session
             .caption(if running { "running" } else { "paused" });
+
+        if running {
+            self.run_task = Some(cx.spawn(async move |this, cx| {
+                loop {
+                    let keep_going = this
+                        .update(cx, |this, cx| this.run_frame(cx))
+                        .unwrap_or(false);
+                    if !keep_going {
+                        break;
+                    }
+
+                    cx.background_executor()
+                        .timer(Duration::from_millis(16))
+                        .await;
+                }
+            }));
+        } else {
+            self.run_task = None;
+        }
+
         cx.notify();
+    }
+
+    fn run_frame(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.running {
+            return false;
+        }
+
+        let ok = self.session.run_frame();
+
+        self.cpu = self.session.cpu_view();
+        self.disasm.recompute(&self.session);
+        if ok {
+            self.status.state = self.session.caption("running");
+        } else {
+            self.running = false;
+            self.status.state = self.session.caption("unimplemented op");
+        }
+
+        cx.notify();
+        ok
     }
 
     fn step(&mut self, cx: &mut Context<Self>) {
@@ -126,6 +174,7 @@ impl Debugger {
             .session
             .caption(if ok { "paused" } else { "unimplemented op" });
         self.running = false;
+        self.run_task = None;
         self.disasm.recompute(&self.session);
 
         cx.notify();
@@ -137,6 +186,7 @@ impl Debugger {
         self.cpu = self.session.cpu_view();
         self.status.state = self.session.caption("reset");
         self.running = false;
+        self.run_task = None;
         self.disasm.recompute(&self.session);
 
         cx.notify();

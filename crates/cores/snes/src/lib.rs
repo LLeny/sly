@@ -45,4 +45,13 @@ impl Snes {
     pub fn step(&mut self) {
         cpu::step(self);
     }
+
+    pub fn run_frame(&mut self) {
+        // TODO: lol
+        const INSTRUCTIONS_PER_FRAME: usize = 10_000;
+
+        for _ in 0..INSTRUCTIONS_PER_FRAME {
+            self.step();
+        }
+    }
 }

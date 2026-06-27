@@ -57,9 +57,17 @@ impl Session {
     }
 
     pub fn step(&mut self) -> bool {
+        self.guarded(|core| core.step())
+    }
+
+    pub fn run_frame(&mut self) -> bool {
+        self.guarded(|core| core.run_frame())
+    }
+
+    fn guarded(&mut self, f: impl FnOnce(&mut Snes)) -> bool {
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.core.step()));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut self.core)));
         std::panic::set_hook(prev);
         result.is_ok()
     }

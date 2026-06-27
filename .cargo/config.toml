@@ -1,0 +1,6 @@
+[build]
+rustflags = ["-Zcrate-attr=feature(cold_path)"]
+
+[env]
+RUSTC_BOOTSTRAP = "1"
+DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer"
