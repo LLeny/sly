@@ -203,14 +203,12 @@ impl InterpreterView<'_> {
         match op {
             Load::LdaImmM8 { imm } => {
                 let ea = self.data_ea(imm.into());
-                let value = self.snes.read(ea);
-
-                if self.snes.cpu.flags.is_acc_16bits() {
-                    let value_hi = self.snes.read(ea + 1);
-                    self.snes.cpu.acc = (value_hi as u16) << 8 | value as u16;
-                } else {
-                    self.snes.cpu.acc = value as u16;
-                }
+                self.snes.cpu.acc = self.snes.read(ea) as u16;
+            }
+            Load::LdaImmM16 { imm } => {
+                let ea = self.data_ea(imm.into());
+                self.snes.cpu.acc =
+                    (self.snes.read(ea + 1) as u16) << 8 | self.snes.read(ea) as u16;
             }
             other => todo!("Implement load instruction {other:?}"),
         }
