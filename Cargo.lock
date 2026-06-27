@@ -973,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "chipi-backend-rust"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "chipi-core",
  "chipi-syntax",
@@ -981,14 +981,14 @@ dependencies = [
 
 [[package]]
 name = "chipi-core"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "chipi-syntax",
 ]
 
 [[package]]
 name = "chipi-macros"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "chipi-backend-rust",
  "chipi-core",
@@ -996,7 +996,7 @@ dependencies = [
 
 [[package]]
 name = "chipi-syntax"
-version = "0.0.0"
+version = "1.0.0"
 
 [[package]]
 name = "chrono"

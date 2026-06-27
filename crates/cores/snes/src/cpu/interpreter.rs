@@ -2,6 +2,7 @@ use super::decoder;
 use crate::{Snes, cpu::Flags};
 use decoder::{
     BranchesKind, DisasmCtx, FlagMaskKind, FlagOpsKind, Instruction, LoadKind, Ops, StoreKind,
+    SwTrapKind,
 };
 
 pub(crate) struct InterpreterView<'a> {
@@ -63,6 +64,27 @@ impl<'a> InterpreterView<'a> {
         self.push8((value >> 8) as u8);
         self.push8(value as u8);
     }
+
+    /// Shared interrupt entry sequence.
+    fn service_interrupt(&mut self, native_vector: u16, emu_vector: u16) {
+        let (program_bank, return_pc) = self.next();
+        let emulation = self.snes.cpu.emulation;
+
+        if !emulation {
+            self.push8(program_bank);
+        }
+
+        self.push16(return_pc);
+        self.push8(self.snes.cpu.flags.raw());
+
+        self.snes.cpu.flags.set_irq_disable(true);
+        self.snes.cpu.flags.set_decimal(false);
+        self.snes.cpu.program_bank = 0;
+
+        let vector = if emulation { emu_vector } else { native_vector };
+        let target = self.snes.read16(0, vector);
+        self.jump_long(0, target);
+    }
 }
 
 impl DisasmCtx for InterpreterView<'_> {
@@ -84,6 +106,25 @@ macro_rules! unimplemented_ops {
 
 impl Ops for InterpreterView<'_> {
     fn nop(&mut self, _: Instruction) {}
+
+    fn reg_step(&mut self, op: decoder::RegStepKind, _instr: Instruction) {
+        match op {
+            decoder::RegStepKind::Inx => {
+                self.snes.cpu.index_x = self.snes.cpu.index_x.wrapping_add(1)
+            }
+            decoder::RegStepKind::Dex => {
+                self.snes.cpu.index_x = self.snes.cpu.index_x.wrapping_sub(1)
+            }
+            decoder::RegStepKind::Iny => {
+                self.snes.cpu.index_y = self.snes.cpu.index_y.wrapping_add(1)
+            }
+            decoder::RegStepKind::Dey => {
+                self.snes.cpu.index_y = self.snes.cpu.index_y.wrapping_sub(1)
+            }
+            decoder::RegStepKind::IncA => self.snes.cpu.acc = self.snes.cpu.acc.wrapping_add(1),
+            decoder::RegStepKind::DecA => self.snes.cpu.acc = self.snes.cpu.acc.wrapping_sub(1),
+        }
+    }
 
     fn flag_ops(&mut self, op: FlagOpsKind, _instr: Instruction) {
         let flags = &mut self.snes.cpu.flags;
@@ -146,11 +187,18 @@ impl Ops for InterpreterView<'_> {
         self.jump_long((target >> 16) as u8, target as u16);
     }
 
+    fn brl_rell(&mut self, instr: Instruction) {
+        let pc = self.code_addr();
+        let offset = instr.brl_rell__disp(pc, self);
+        self.branch(offset);
+    }
+
     fn store(&mut self, op: StoreKind, instr: Instruction) {
         match op {
             StoreKind::StzAbs => {
                 let data_bank = self.snes.cpu.data_bank;
-                let ea = ((data_bank as u32) << 16) | instr.stz_abs__addr(self.code_addr(), self);
+                let ea =
+                    ((data_bank as u32) << 16) | instr.stz_abs__addr(self.code_addr(), self) as u32;
                 self.snes.write(ea, 0);
 
                 if self.snes.cpu.flags.is_acc_16bits() {
@@ -159,7 +207,8 @@ impl Ops for InterpreterView<'_> {
             }
             StoreKind::StaAbs => {
                 let data_bank = self.snes.cpu.data_bank;
-                let ea = ((data_bank as u32) << 16) | instr.sta_abs__addr(self.code_addr(), self);
+                let ea =
+                    ((data_bank as u32) << 16) | instr.sta_abs__addr(self.code_addr(), self) as u32;
                 let value = self.snes.cpu.acc as u8;
                 self.snes.write(ea, value);
 
@@ -176,7 +225,8 @@ impl Ops for InterpreterView<'_> {
         match op {
             LoadKind::LdaImmM8 => {
                 let data_bank = self.snes.cpu.data_bank;
-                let ea = ((data_bank as u32) << 16) | instr.lda_imm_m8__imm(self.code_addr(), self);
+                let ea = ((data_bank as u32) << 16)
+                    | instr.lda_imm_m8__imm(self.code_addr(), self) as u32;
                 let value = self.snes.read(ea);
 
                 if self.snes.cpu.flags.is_acc_16bits() {
@@ -201,21 +251,12 @@ impl Ops for InterpreterView<'_> {
         }
     }
 
-    fn brk_imm(&mut self, _instr: Instruction) {
-        const BRK_VECTOR: u16 = 0xffe6;
-
-        let (program_bank, return_pc) = self.next();
-
-        self.push8(program_bank);
-        self.push16(return_pc);
-        self.push8(self.snes.cpu.flags.raw());
-
-        self.snes.cpu.flags.set_irq_disable(true);
-        self.snes.cpu.flags.set_decimal(false);
-        self.snes.cpu.program_bank = 0;
-
-        let target = self.snes.read16(0, BRK_VECTOR);
-        self.jump_long(0, target);
+    fn sw_trap(&mut self, op: SwTrapKind, _instr: Instruction) {
+        let (native_vector, emu_vector) = match op {
+            SwTrapKind::BrkImm => (0xffe6, 0xfffe),
+            SwTrapKind::CopImm => (0xffe4, 0xfff4),
+        };
+        self.service_interrupt(native_vector, emu_vector);
     }
 
     unimplemented_ops! {
@@ -224,10 +265,10 @@ impl Ops for InterpreterView<'_> {
         and_abl, and_abs, and_abx, and_aby, and_alx, and_dp, and_dpx, and_idl, and_idly,
         and_idp, and_idx, and_idy, and_imm_m16, and_imm_m8, and_isy, and_sr,
         asl_a, asl_abs, asl_abx, asl_dp, asl_dpx,
-        bit_abs, bit_abx, bit_dp, bit_dpx, bit_imm_m16, bit_imm_m8, brl_rell,
+        bit_abs, bit_abx, bit_dp, bit_dpx, bit_imm_m16, bit_imm_m8,
         cmp_abl, cmp_abs, cmp_abx, cmp_aby, cmp_alx, cmp_dp, cmp_dpx, cmp_idl, cmp_idly,
         cmp_idp, cmp_idx, cmp_idy, cmp_imm_m16, cmp_imm_m8, cmp_isy, cmp_sr,
-        cop_imm, cpx_abs, cpx_dp, cpx_imm_x16, cpx_imm_x8, cpy_abs, cpy_dp, cpy_imm_x16, cpy_imm_x8,
+        cpx_abs, cpx_dp, cpx_imm_x16, cpx_imm_x8, cpy_abs, cpy_dp, cpy_imm_x16, cpy_imm_x8,
         dec_abs, dec_abx, dec_dp, dec_dpx,
         eor_abl, eor_abs, eor_abx, eor_aby, eor_alx, eor_dp, eor_dpx, eor_idl, eor_idly,
         eor_idp, eor_idx, eor_idy, eor_imm_m16, eor_imm_m8, eor_isy, eor_sr,

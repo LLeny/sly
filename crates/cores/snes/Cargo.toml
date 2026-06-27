@@ -9,6 +9,6 @@ disasm = []
 
 [dependencies]
 chapa = "0.3.0"
-chipi-macros = { path = "../../../../chipi2/crates/chipi-macros" }
+chipi-macros = { path = "../../../../chipi/crates/chipi-macros" }
 thiserror = "2.0.18"
 tracing = "0.1.44"
