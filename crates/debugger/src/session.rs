@@ -5,6 +5,7 @@ use cirsium::widgets::{
 };
 use gpui::SharedString;
 use snes::cartridge::{MapMode, Speed};
+use snes::mmio::Address;
 use snes::{Cartridge, Cpu, Snes};
 
 use crate::art::{AssetProvider, GameRef, System};
@@ -73,7 +74,7 @@ impl Session {
     }
 
     pub fn reset(&mut self) {
-        self.core.cpu = Cpu::new(self.core.read16(0x00, 0xFFFC));
+        self.core.cpu = Cpu::new(self.core.read16(Address::new(0x00, 0xFFFC)));
     }
 
     pub fn set_pc(&mut self, addr: u16) {
@@ -180,7 +181,12 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> DisassemblyView {
 
 fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
     (0..len)
-        .map(|i| format!("{:02X}", snes.read8(bank, addr.wrapping_add(i as u16))))
+        .map(|i| {
+            format!(
+                "{:02X}",
+                snes.read8(Address::new(bank, addr.wrapping_add(i as u16)))
+            )
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }

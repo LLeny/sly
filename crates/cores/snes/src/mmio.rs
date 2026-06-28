@@ -1,9 +1,12 @@
+pub mod addr;
 pub mod dma;
 pub mod regs;
 
 use crate::cartridge::MapMode;
 use crate::mmio::regs::{DmaTransferStart, HdmaTransferEnable, NmiTimerEnable};
 use crate::{Cartridge, Snes};
+
+pub use addr::Address;
 
 const WRAM_SIZE: usize = 0x2_0000;
 pub(crate) const OPEN_BUS: u8 = 0xFF;
@@ -29,9 +32,9 @@ impl Mmio {
     }
 
     /// Translate a CPU address to an address space (WRAM, ROM, I/O or unmapped).
-    pub(crate) fn map(&self, addr: u32) -> AddressSpace {
-        let bank = (addr >> 16) as u8;
-        let offset = addr as u16;
+    pub(crate) fn map(&self, addr: Address) -> AddressSpace {
+        let bank = addr.bank();
+        let offset = addr.address();
 
         match bank {
             // "The first 8 KiB of RAM is mirrored into many banks for convenient access,
@@ -75,35 +78,35 @@ impl Mmio {
 }
 
 impl Snes {
-    pub fn read8(&self, bank: u8, addr: u16) -> u8 {
-        self.read(((bank as u32) << 16) | addr as u32)
-    }
-
-    pub fn read16(&self, bank: u8, addr: u16) -> u16 {
-        let base = ((bank as u32) << 16) | addr as u32;
-        let lo = self.read(base) as u16;
-        let hi = self.read(base.wrapping_add(1)) as u16;
+    pub fn read16(&self, addr: Address) -> u16 {
+        let lo = self.read8(addr) as u16;
+        let hi = self.read8(addr.wrapping_add(1)) as u16;
         lo | (hi << 8)
     }
 
-    pub fn read(&self, addr: u32) -> u8 {
+    pub fn write16(&mut self, addr: Address, value: u16) {
+        self.write8(addr, value as u8);
+        self.write8(addr.wrapping_add(1), (value >> 8) as u8);
+    }
+
+    pub fn read8(&self, addr: Address) -> u8 {
         match self.mmu.map(addr) {
             AddressSpace::Wram(index) => self.mmu.wram[index],
             AddressSpace::Rom(index) => self.mmu.cartridge.rom[index],
             AddressSpace::Io(reg) => self.read_io(reg),
             AddressSpace::Unmapped => {
-                tracing::error!(addr = format!("{:06X}", addr), "Read from unmapped address");
+                tracing::error!(addr = format!("{addr:?}"), "Read from unmapped address");
                 OPEN_BUS
             }
         }
     }
 
-    pub fn write(&mut self, addr: u32, value: u8) {
+    pub fn write8(&mut self, addr: Address, value: u8) {
         match self.mmu.map(addr) {
             AddressSpace::Wram(index) => self.mmu.wram[index] = value,
             AddressSpace::Rom(_) => {
                 tracing::warn!(
-                    addr = format!("{:06X}", addr),
+                    addr = format!("{addr:?}"),
                     value = format!("{:02X}", value),
                     "Write to ROM"
                 );
@@ -111,7 +114,7 @@ impl Snes {
             AddressSpace::Io(reg) => self.write_io(reg, value),
             AddressSpace::Unmapped => {
                 tracing::error!(
-                    addr = format!("{:06X}", addr),
+                    addr = format!("{addr:?}"),
                     value = format!("{:02X}", value),
                     "Write to unmapped address"
                 );

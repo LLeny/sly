@@ -2,6 +2,7 @@ use super::decoder;
 use crate::{
     Snes,
     cpu::{Flags, decoder::Transfer},
+    mmio::Address,
 };
 use decoder::{Branches, FlagMask, FlagOps, Instruction, Jump, Load, RegStep, Store, SwTrap};
 
@@ -46,14 +47,24 @@ impl<'a> InterpreterView<'a> {
     }
 
     /// Effective address of a 16bit operand within the current data bank.
-    fn data_ea(&self, addr: u16) -> u32 {
-        ((self.snes.cpu.data_bank as u32) << 16) | addr as u32
+    fn data_ea(&self, addr: u16) -> Address {
+        Address::new(self.snes.cpu.data_bank, addr)
+    }
+
+    /// Write the low byte of `value` to `ea`, and the high byte to the next
+    /// address when the accumulator is in 16bit mode.
+    fn write(&mut self, ea: Address, value: u16) {
+        if self.snes.cpu.flags.is_acc_16bits() {
+            self.snes.write16(ea, value);
+        } else {
+            self.snes.write8(ea, value as u8);
+        }
     }
 
     /// Push a byte onto the stack.
     fn push8(&mut self, value: u8) {
         let sp = self.snes.cpu.stack_pointer;
-        self.snes.write(sp as u32, value);
+        self.snes.write8(Address::new(0, sp), value);
         self.snes.cpu.stack_pointer = sp.wrapping_sub(1);
     }
 
@@ -80,7 +91,7 @@ impl<'a> InterpreterView<'a> {
         self.snes.cpu.program_bank = 0;
 
         let vector = if emulation { emu_vector } else { native_vector };
-        let target = self.snes.read16(0, vector);
+        let target = self.snes.read16(Address::new(0, vector));
         self.set_pc_long(0, target);
     }
 }
@@ -168,20 +179,23 @@ impl InterpreterView<'_> {
     fn jump(&mut self, op: Jump) {
         match op {
             Jump::JmpAbs { addr } => self.set_pc(addr),
-            Jump::JmpAbl { addr } => self.set_pc_long((addr >> 16) as u8, addr as u16),
+            Jump::JmpAbl { addr } => {
+                let target = Address::from_24bit(addr);
+                self.set_pc_long(target.bank(), target.address());
+            }
             Jump::JmpInd { addr } => {
-                let target = self.snes.read16(0, addr);
+                let target = self.snes.read16(Address::new(0, addr));
                 self.set_pc(target);
             }
             Jump::JmpIax { addr } => {
                 let bank = self.snes.cpu.program_bank;
                 let ptr = addr.wrapping_add(self.snes.cpu.index_x);
-                let target = self.snes.read16(bank, ptr);
+                let target = self.snes.read16(Address::new(bank, ptr));
                 self.set_pc(target);
             }
             Jump::JmlIal { addr } => {
-                let offset = self.snes.read16(0, addr);
-                let bank = self.snes.read8(0, addr.wrapping_add(2));
+                let offset = self.snes.read16(Address::new(0, addr));
+                let bank = self.snes.read8(Address::new(0, addr.wrapping_add(2)));
                 self.set_pc_long(bank, offset);
             }
         }
@@ -222,21 +236,14 @@ impl InterpreterView<'_> {
         match op {
             Store::StzAbs { addr } => {
                 let ea = self.data_ea(addr);
-                self.snes.write(ea, 0);
-
-                if self.snes.cpu.flags.is_acc_16bits() {
-                    self.snes.write(ea + 1, 0);
-                }
+                self.write(ea, 0);
             }
             Store::StaAbs { addr } => {
                 let ea = self.data_ea(addr);
-                let value = self.snes.cpu.acc as u8;
-                self.snes.write(ea, value);
-
-                if self.snes.cpu.flags.is_acc_16bits() {
-                    let value_hi = (self.snes.cpu.acc >> 8) as u8;
-                    self.snes.write(ea + 1, value_hi);
-                }
+                self.write(ea, self.snes.cpu.acc);
+            }
+            Store::StaAbl { addr } => {
+                self.write(Address::from_24bit(addr), self.snes.cpu.acc);
             }
             other => todo!("Implement store instruction {other:?}"),
         }
@@ -246,12 +253,11 @@ impl InterpreterView<'_> {
         match op {
             Load::LdaImmM8 { imm } => {
                 let ea = self.data_ea(imm.into());
-                self.snes.cpu.acc = self.snes.read(ea) as u16;
+                self.snes.cpu.acc = self.snes.read8(ea) as u16;
             }
             Load::LdaImmM16 { imm } => {
                 let ea = self.data_ea(imm.into());
-                self.snes.cpu.acc =
-                    (self.snes.read(ea + 1) as u16) << 8 | self.snes.read(ea) as u16;
+                self.snes.cpu.acc = self.snes.read16(ea);
             }
             other => todo!("Implement load instruction {other:?}"),
         }

@@ -10,7 +10,10 @@ pub use cpu::{Cpu, Disasm};
 pub use error::SnesError;
 pub use mmio::Mmio;
 
-use crate::{interrupt::Irq, mmio::dma::Dma};
+use crate::{
+    interrupt::Irq,
+    mmio::{Address, dma::Dma},
+};
 
 pub struct Snes {
     pub cpu: Cpu,
@@ -30,7 +33,7 @@ impl Snes {
             irq: Irq::default(),
             dma: Dma::default(),
         };
-        snes.cpu.pc = snes.read16(BANK_ZERO, RESET_VECTOR_ADDR);
+        snes.cpu.pc = snes.read16(Address::new(BANK_ZERO, RESET_VECTOR_ADDR));
         snes
     }
 

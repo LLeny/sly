@@ -5,6 +5,7 @@ mod interpreter;
 pub use disasm::{Disasm, disassemble_at};
 
 use crate::Snes;
+use crate::mmio::Address;
 use interpreter::InterpreterView;
 
 pub struct Cpu {
@@ -43,7 +44,7 @@ pub(crate) struct CodeReader<'a> {
 
 impl decoder::DisasmCtx for CodeReader<'_> {
     fn read_u8(&self, addr: u64) -> u8 {
-        self.snes.read(addr as u32)
+        self.snes.read8(Address::from_24bit(addr as u32))
     }
 }
 
