@@ -1,6 +1,9 @@
 use super::decoder;
-use crate::{Snes, cpu::Flags};
-use decoder::{Branches, FlagMask, FlagOps, Instruction, Load, RegStep, Store, SwTrap};
+use crate::{
+    Snes,
+    cpu::{Flags, decoder::Transfer},
+};
+use decoder::{Branches, FlagMask, FlagOps, Instruction, Jump, Load, RegStep, Store, SwTrap};
 
 pub(crate) struct InterpreterView<'a> {
     snes: &'a mut Snes,
@@ -27,12 +30,12 @@ impl<'a> InterpreterView<'a> {
     }
 
     /// Redirect execution within the current program bank.
-    fn jump(&mut self, pc: u16) {
+    fn set_pc(&mut self, pc: u16) {
         self.next_pc = pc;
     }
 
     /// Redirect execution to another program bank.
-    fn jump_long(&mut self, bank: u8, pc: u16) {
+    fn set_pc_long(&mut self, bank: u8, pc: u16) {
         self.next_bank = bank;
         self.next_pc = pc;
     }
@@ -78,7 +81,7 @@ impl<'a> InterpreterView<'a> {
 
         let vector = if emulation { emu_vector } else { native_vector };
         let target = self.snes.read16(0, vector);
-        self.jump_long(0, target);
+        self.set_pc_long(0, target);
     }
 }
 
@@ -94,9 +97,9 @@ impl InterpreterView<'_> {
             Instruction::SwTrap(op) => self.sw_trap(op),
             Instruction::Store(op) => self.store(op),
             Instruction::Load(op) => self.load(op),
+            Instruction::Jump(op) => self.jump(op),
+            Instruction::Transfer(op) => self.transfer(op),
 
-            Instruction::JmpAbs { addr } => self.jump(addr),
-            Instruction::JmpAbl { addr } => self.jump_long((addr >> 16) as u8, addr as u16),
             Instruction::BrlRell { disp } => self.branch(disp),
             Instruction::Xce => self.xce(),
 
@@ -159,6 +162,46 @@ impl InterpreterView<'_> {
 
         if taken {
             self.branch(disp as i16);
+        }
+    }
+
+    fn jump(&mut self, op: Jump) {
+        match op {
+            Jump::JmpAbs { addr } => self.set_pc(addr),
+            Jump::JmpAbl { addr } => self.set_pc_long((addr >> 16) as u8, addr as u16),
+            Jump::JmpInd { addr } => {
+                let target = self.snes.read16(0, addr);
+                self.set_pc(target);
+            }
+            Jump::JmpIax { addr } => {
+                let bank = self.snes.cpu.program_bank;
+                let ptr = addr.wrapping_add(self.snes.cpu.index_x);
+                let target = self.snes.read16(bank, ptr);
+                self.set_pc(target);
+            }
+            Jump::JmlIal { addr } => {
+                let offset = self.snes.read16(0, addr);
+                let bank = self.snes.read8(0, addr.wrapping_add(2));
+                self.set_pc_long(bank, offset);
+            }
+        }
+    }
+
+    fn transfer(&mut self, op: Transfer) {
+        let cpu = &mut self.snes.cpu;
+        match op {
+            Transfer::Tax => cpu.index_x = cpu.acc,
+            Transfer::Tay => cpu.index_y = cpu.acc,
+            Transfer::Tcd => cpu.direct_page = cpu.acc,
+            Transfer::Tcs => cpu.stack_pointer = cpu.acc,
+            Transfer::Tdc => cpu.acc = cpu.direct_page,
+            Transfer::Tsc => cpu.acc = cpu.stack_pointer,
+            Transfer::Tsx => cpu.index_x = cpu.stack_pointer,
+            Transfer::Txa => cpu.acc = cpu.index_x,
+            Transfer::Txs => cpu.stack_pointer = cpu.index_x,
+            Transfer::Txy => cpu.index_y = cpu.index_x,
+            Transfer::Tya => cpu.acc = cpu.index_y,
+            Transfer::Tyx => cpu.index_x = cpu.index_y,
         }
     }
 
