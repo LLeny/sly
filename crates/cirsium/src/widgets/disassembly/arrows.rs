@@ -133,7 +133,7 @@ pub(super) fn arrow_gutters(lines: &[DisasmLine]) -> (Vec<GutterCell>, f32) {
         cells[to].push(GutterDraw::Elbow {
             x: xc,
             edge_y: if down { 0. } else { ROW_HEIGHT },
-            x_end: head_left + 1.5,
+            x_end: head_left,
             color,
             thickness,
         });
