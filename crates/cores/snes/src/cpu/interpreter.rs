@@ -1,7 +1,10 @@
 use super::decoder;
 use crate::{
     Snes,
-    cpu::{Flags, decoder::Transfer},
+    cpu::{
+        Flags,
+        decoder::{OPCODE_TAGS, Transfer},
+    },
     mmio::Address,
 };
 use decoder::{Branches, FlagMask, FlagOps, Instruction, Jump, Load, RegStep, Store, SwTrap};
@@ -245,6 +248,10 @@ impl InterpreterView<'_> {
             Store::StaAbl { addr } => {
                 self.write(Address::from_24bit(addr), self.snes.cpu.acc);
             }
+            Store::StaAlx { addr } => {
+                let ea = Address::from_24bit(addr.wrapping_add(self.snes.cpu.index_x as u32));
+                self.write(ea, self.snes.cpu.acc);
+            }
             other => todo!("Implement store instruction {other:?}"),
         }
     }
@@ -252,12 +259,22 @@ impl InterpreterView<'_> {
     fn load(&mut self, op: Load) {
         match op {
             Load::LdaImmM8 { imm } => {
-                let ea = self.data_ea(imm.into());
-                self.snes.cpu.acc = self.snes.read8(ea) as u16;
+                self.snes.cpu.acc = imm as u16;
             }
             Load::LdaImmM16 { imm } => {
-                let ea = self.data_ea(imm.into());
-                self.snes.cpu.acc = self.snes.read16(ea);
+                self.snes.cpu.acc = imm;
+            }
+            Load::LdxImmX8 { imm } => {
+                self.snes.cpu.index_x = imm as u16;
+            }
+            Load::LdxImmX16 { imm } => {
+                self.snes.cpu.index_x = imm;
+            }
+            Load::LdyImmX8 { imm } => {
+                self.snes.cpu.index_y = imm as u16;
+            }
+            Load::LdyImmX16 { imm } => {
+                self.snes.cpu.index_y = imm;
             }
             other => todo!("Implement load instruction {other:?}"),
         }
