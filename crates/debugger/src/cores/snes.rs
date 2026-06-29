@@ -1,8 +1,8 @@
 use cirsium::Highlight;
 use cirsium::components::StatusView;
 use cirsium::widgets::{
-    CartridgeField, CartridgeView, CpuView, DisasmLine, DisasmToken, DisassemblyView, FlagView,
-    MemoryRegion, RegisterView, TokenKind,
+    BreakpointKind, CartridgeField, CartridgeView, CpuView, DisasmLine, DisasmToken,
+    DisassemblyView, FlagView, MemoryRegion, RegisterView, TokenKind,
 };
 use gpui::SharedString;
 use snes::cartridge::{MapMode, Speed};
@@ -11,8 +11,9 @@ use snes::mmio::{Address, MemKind, MemoryAccess};
 use snes::{Cartridge, Cpu, Snes};
 
 use crate::art::{AssetProvider, GameRef, System};
+use crate::breakpoints::BreakpointMark;
 use crate::cores::disasm::{SyntaxSpec, strip_symbol_sigils, tokenize};
-use crate::target::DebugTarget;
+use crate::target::{DebugTarget, RunOutcome};
 
 const WRAM_SIZE: u32 = 0x2_0000;
 const PPU_BASE: u32 = 0x2100;
@@ -96,12 +97,13 @@ impl SnesTarget {
         }
     }
 
+    fn catch(&mut self, f: impl FnOnce(&mut Snes)) -> bool {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut self.core))).is_ok()
+    }
+
     fn guarded(&mut self, f: impl FnOnce(&mut Snes)) -> bool {
-        let prev = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut self.core)));
-        std::panic::set_hook(prev);
-        result.is_ok()
+        let _silenced = SilencedPanics::new();
+        self.catch(f)
     }
 
     fn execute_traced(&mut self, body: impl FnOnce(&mut Snes)) -> bool {
@@ -111,6 +113,59 @@ impl SnesTarget {
             self.last_access = report;
         }
         ok
+    }
+
+    fn execute_hit(&self, breakpoints: &[BreakpointMark]) -> bool {
+        let pc = self.core.cpu.pc as u32;
+        breakpoints.iter().any(|m| {
+            m.kind == BreakpointKind::Execute && (m.start & 0xFFFF..=m.end & 0xFFFF).contains(&pc)
+        })
+    }
+
+    fn watch_hit(&self, breakpoints: &[BreakpointMark], access: &MemoryAccess) -> bool {
+        breakpoints.iter().any(|m| {
+            let set = match m.kind {
+                BreakpointKind::Read => &access.reads,
+                BreakpointKind::Write => &access.writes,
+                _ => return false,
+            };
+            match m.region.as_ref() {
+                "bus" => (m.start..=m.end).any(|addr| {
+                    self.region_key("bus", addr)
+                        .is_some_and(|key| set.contains(&key))
+                }),
+                _ => set.iter().any(|&key| {
+                    (m.start..=m.end).contains(&key.1)
+                        && self.region_key(&m.region, key.1) == Some(key)
+                }),
+            }
+        })
+    }
+}
+
+struct SilencedPanics(Option<Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>>);
+
+impl SilencedPanics {
+    fn new() -> Self {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        Self(Some(prev))
+    }
+}
+
+impl Drop for SilencedPanics {
+    fn drop(&mut self) {
+        if let Some(prev) = self.0.take() {
+            std::panic::set_hook(prev);
+        }
+    }
+}
+
+fn merge_access(total: &mut MemoryAccess, step: &MemoryAccess) {
+    total.reads.extend(step.reads.iter().copied());
+    total.writes.extend(step.writes.iter().copied());
+    if step.last.is_some() {
+        total.last = step.last;
     }
 }
 
@@ -127,8 +182,40 @@ impl DebugTarget for SnesTarget {
         self.execute_traced(Snes::step)
     }
 
-    fn run_frame(&mut self) -> bool {
-        self.execute_traced(Snes::run_frame)
+    fn run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome {
+        if breakpoints.is_empty() {
+            return if self.execute_traced(Snes::run_frame) {
+                RunOutcome::Done
+            } else {
+                RunOutcome::Fault
+            };
+        }
+
+        let watch = breakpoints
+            .iter()
+            .any(|m| matches!(m.kind, BreakpointKind::Read | BreakpointKind::Write));
+
+        let _silenced = SilencedPanics::new();
+        let mut access = MemoryAccess::default();
+        for _ in 0..snes::INSTRUCTIONS_PER_FRAME {
+            let mut step = None;
+            let ok = self.catch(|core| step = Some(core.trace(Snes::step)));
+            let step = step.unwrap_or_default();
+            merge_access(&mut access, &step);
+
+            if !ok {
+                self.last_access = access;
+                return RunOutcome::Fault;
+            }
+
+            if (watch && self.watch_hit(breakpoints, &step)) || self.execute_hit(breakpoints) {
+                self.last_access = access;
+                return RunOutcome::Breakpoint;
+            }
+        }
+
+        self.last_access = access;
+        RunOutcome::Done
     }
 
     fn reset(&mut self) {
@@ -196,6 +283,12 @@ impl DebugTarget for SnesTarget {
                 _ => Highlight::None,
             })
             .collect()
+    }
+
+    fn annotate(&self, addr: u32) -> SharedString {
+        snes::mmio::symbol((addr & 0xFFFF) as u16)
+            .map(SharedString::from)
+            .unwrap_or_default()
     }
 
     fn latest_access(&self) -> Option<(SharedString, u32)> {

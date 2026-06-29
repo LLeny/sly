@@ -16,6 +16,10 @@ pub mod icon {
     pub const CARTRIDGE: &str = "icons/memory-stick.svg";
     pub const CHECK: &str = "icons/check.svg";
     pub const CODE: &str = "icons/code.svg";
+    pub const PLUS: &str = "icons/plus.svg";
+    pub const TRASH: &str = "icons/trash-2.svg";
+    pub const CONTROLS: &str = "icons/circle-play.svg";
+    pub const BREAKPOINT: &str = "icons/bug.svg";
 
     pub const RUN: &str = "icons/play.svg";
     pub const PAUSE: &str = "icons/pause.svg";

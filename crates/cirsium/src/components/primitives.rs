@@ -20,6 +20,37 @@ pub fn separator(theme: &Theme) -> Div {
     div().w(px(1.)).h(px(12.)).bg(theme.border_strong)
 }
 
+/// A small square icon button that sits beside a text input.
+pub fn field_button(
+    theme: &Theme,
+    id: &'static str,
+    icon_path: &'static str,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    let hover_bg = theme.bg_header;
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .h(px(super::CONTROL_HEIGHT))
+        .w(px(26.))
+        .bg(theme.bg_panel_alt)
+        .border_1()
+        .border_color(theme.border_subtle)
+        .rounded_md()
+        .cursor_pointer()
+        .hover(move |s| s.bg(hover_bg))
+        .on_click(on_click)
+        .child(
+            svg()
+                .path(icon_path)
+                .size(px(12.))
+                .text_color(theme.text_secondary),
+        )
+}
+
 /// A muted, compact field label.
 pub fn label_text(theme: &Theme, text: impl Into<SharedString>) -> Div {
     div()

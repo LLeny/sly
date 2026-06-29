@@ -176,7 +176,14 @@ pub(super) fn paint_arrows(window: &mut Window, bounds: Bounds<Pixels>, draws: &
 
                 let approach = if edge_y < mid { mid - r } else { mid + r };
                 b.line_to(pt(x, approach));
-                b.curve_to(pt(x + r, mid), pt(x, mid));
+
+                const KAPPA: f32 = 0.552_284_8;
+                b.cubic_bezier_to(
+                    pt(x + r, mid),
+                    pt(x, approach + (mid - approach) * KAPPA),
+                    pt(x + r - r * KAPPA, mid),
+                );
+
                 b.line_to(pt(x_end, mid));
                 if let Ok(path) = b.build() {
                     window.paint_path(path, color);

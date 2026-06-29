@@ -1,6 +1,7 @@
 use cirsium::widgets::DisassemblyView;
 use gpui::{Pixels, Point, ScrollStrategy, SharedString, UniformListScrollHandle};
 
+use crate::breakpoints::{BreakpointMark, mark_at};
 use crate::target::DebugTarget;
 
 const LEAD_BYTES: u32 = 48;
@@ -9,6 +10,7 @@ const COUNT: usize = 200;
 pub struct Menu {
     pub position: Point<Pixels>,
     pub addr: u32,
+    pub len: u32,
     pub address: SharedString,
     pub bytes: SharedString,
     pub text: SharedString,
@@ -22,6 +24,7 @@ pub struct Disasm {
     show_bytes: bool,
     base: u32,
     selected: Option<u32>,
+    breakpoints: Vec<BreakpointMark>,
 }
 
 impl Disasm {
@@ -34,6 +37,7 @@ impl Disasm {
             show_bytes: false,
             base: 0,
             selected: None,
+            breakpoints: Vec::new(),
         }
     }
 
@@ -64,6 +68,7 @@ impl Disasm {
         self.view = view;
         self.view.show_bytes = self.show_bytes;
         self.apply_selection();
+        self.apply_breakpoints();
 
         if self.follow_pc
             && let Some(ix) = self.view.lines.iter().position(|l| l.current)
@@ -77,6 +82,17 @@ impl Disasm {
         for line in &mut self.view.lines {
             line.selected = selected == Some(line.addr);
         }
+    }
+
+    fn apply_breakpoints(&mut self) {
+        for line in &mut self.view.lines {
+            line.breakpoint = mark_at(&self.breakpoints, line.addr, 0xFFFF);
+        }
+    }
+
+    pub fn set_breakpoints(&mut self, breakpoints: Vec<BreakpointMark>) {
+        self.breakpoints = breakpoints;
+        self.apply_breakpoints();
     }
 
     pub fn select(&mut self, ix: usize) {
@@ -96,6 +112,7 @@ impl Disasm {
             self.menu = Some(Menu {
                 position,
                 addr: line.addr,
+                len: line.bytes.split_whitespace().count().max(1) as u32,
                 address: line.address.clone(),
                 bytes: line.bytes.clone(),
                 text: line.text.clone(),

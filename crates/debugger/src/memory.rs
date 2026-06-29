@@ -1,15 +1,17 @@
 use std::ops::Range;
 
 use cirsium::components::ComboOption;
-use cirsium::widgets::{MemoryCell, MemoryRegion, MemoryRow, ascii_glyph};
+use cirsium::widgets::{BreakpointKind, MemoryCell, MemoryRegion, MemoryRow, ascii_glyph};
 use gpui::{Pixels, Point, ScrollStrategy, SharedString, UniformListScrollHandle};
 
+use crate::breakpoints::{BreakpointMark, mark_at};
 use crate::target::DebugTarget;
 
 pub const BYTES_PER_ROW: usize = 16;
 
 pub struct MemMenu {
     pub position: Point<Pixels>,
+    pub range: (u32, u32),
     pub address: SharedString,
     pub hex: SharedString,
     pub raw: SharedString,
@@ -25,6 +27,7 @@ pub struct Memory {
     selection: Option<(u32, u32)>,
     drag_anchor: Option<u32>,
     follow: bool,
+    breakpoints: Vec<BreakpointMark>,
 }
 
 impl Memory {
@@ -43,7 +46,19 @@ impl Memory {
             selection: None,
             drag_anchor: None,
             follow: false,
+            breakpoints: Vec::new(),
         }
+    }
+
+    pub fn set_breakpoints(&mut self, breakpoints: Vec<BreakpointMark>) {
+        self.breakpoints = breakpoints;
+    }
+
+    pub fn breakpoint_ranges(&self) -> Vec<(u32, u32, BreakpointKind)> {
+        self.breakpoints
+            .iter()
+            .map(|m| (m.start, m.end, m.kind))
+            .collect()
     }
 
     pub fn region_id(&self) -> &str {
@@ -83,9 +98,15 @@ impl Memory {
                 let cells = bytes
                     .iter()
                     .zip(highlights)
-                    .map(|(value, highlight)| MemoryCell {
-                        value: *value,
-                        highlight,
+                    .enumerate()
+                    .map(|(i, (value, highlight))| {
+                        let cell_addr = addr.wrapping_add(i as u32);
+                        let breakpoint = mark_at(&self.breakpoints, cell_addr, !0);
+                        MemoryCell {
+                            value: *value,
+                            highlight,
+                            breakpoint,
+                        }
                     })
                     .collect();
                 MemoryRow {
@@ -196,6 +217,7 @@ impl Memory {
 
         self.menu = Some(MemMenu {
             position,
+            range: (lo, hi),
             address: target.format_address(&self.current.id, lo),
             hex: hex.into(),
             raw: raw.into(),

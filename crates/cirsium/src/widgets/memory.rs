@@ -11,6 +11,7 @@ use crate::assets::icon;
 use crate::components::{ClickHandler, Panel, combobox_button};
 use crate::diff::Highlight;
 use crate::theme::Theme;
+use crate::widgets::BreakpointKind;
 
 mod row;
 
@@ -50,6 +51,7 @@ impl MemoryRegion {
 pub struct MemoryCell {
     pub value: u8,
     pub highlight: Highlight,
+    pub breakpoint: Option<BreakpointKind>,
 }
 
 #[derive(Clone)]
@@ -65,6 +67,7 @@ pub struct MemoryWidget {
     row_count: usize,
     bytes_per_row: usize,
     selection: Option<(u32, u32)>,
+    breakpoints: Vec<(u32, u32, BreakpointKind)>,
     scroll: UniformListScrollHandle,
     region_label: SharedString,
     header_extra: Option<AnyElement>,
@@ -91,6 +94,7 @@ impl MemoryWidget {
             row_count,
             bytes_per_row: bytes_per_row.max(1),
             selection: None,
+            breakpoints: Vec::new(),
             scroll,
             region_label: region_label.into(),
             header_extra: None,
@@ -105,6 +109,12 @@ impl MemoryWidget {
 
     pub fn selection(mut self, selection: Option<(u32, u32)>) -> Self {
         self.selection = selection;
+        self
+    }
+
+    /// Enabled breakpoint ranges, used to merge adjacent breakpoint cells.
+    pub fn breakpoints(mut self, breakpoints: Vec<(u32, u32, BreakpointKind)>) -> Self {
+        self.breakpoints = breakpoints;
         self
     }
 
@@ -182,6 +192,7 @@ impl RenderOnce for MemoryWidget {
         let provider = self.rows;
         let bytes_per_row = self.bytes_per_row;
         let selection = self.selection.map(|(a, b)| (a.min(b), a.max(b)));
+        let breakpoints = Rc::new(self.breakpoints);
         let on_byte_down = self.on_byte_down;
         let on_byte_drag = self.on_byte_drag;
         let on_context = self.on_context;
@@ -197,6 +208,7 @@ impl RenderOnce for MemoryWidget {
                         row,
                         bytes_per_row,
                         selection,
+                        &breakpoints,
                         on_byte_down.clone(),
                         on_byte_drag.clone(),
                         on_context.clone(),

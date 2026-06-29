@@ -1,5 +1,5 @@
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, SharedString, Stateful, Window, div, px, svg};
+use gpui::{App, ClickEvent, Div, Stateful, Window, div, px, svg};
 
 use crate::assets::icon;
 use crate::components::{ClickHandler, Panel};
@@ -8,7 +8,6 @@ use crate::theme::Theme;
 #[derive(Clone, Default)]
 pub struct ControlsView {
     pub running: bool,
-    pub status: SharedString,
 }
 
 #[derive(IntoElement)]
@@ -110,18 +109,10 @@ impl RenderOnce for ControlsWidget {
                 self.on_reset,
             ));
 
-        let mut body = div().flex().flex_col().gap_2().child(buttons);
-        if !self.view.status.is_empty() {
-            body = body.child(
-                div()
-                    .font_family(t.mono_font)
-                    .text_xs()
-                    .text_color(t.text_muted)
-                    .child(self.view.status),
-            );
-        }
+        let body = div().flex().flex_col().gap_2().child(buttons);
 
         Panel::new(Self::ID, "Controls")
+            .glyph(icon::CONTROLS)
             .collapsed(self.collapsed)
             .on_toggle_opt(self.on_toggle)
             .child(body)

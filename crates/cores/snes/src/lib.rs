@@ -18,7 +18,7 @@ use crate::mmio::MemoryAccess;
 use crate::mmio::dma::Dma;
 
 // TODO: lol
-const INSTRUCTIONS_PER_FRAME: usize = 10_000;
+pub const INSTRUCTIONS_PER_FRAME: usize = 10_000;
 
 pub struct Snes {
     pub cpu: Cpu,

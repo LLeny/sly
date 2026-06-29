@@ -1,5 +1,6 @@
 mod app;
 mod art;
+mod breakpoints;
 mod cores;
 mod db;
 mod disasm;

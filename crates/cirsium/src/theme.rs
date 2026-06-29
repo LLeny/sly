@@ -55,6 +55,8 @@ pub struct Theme {
     pub read_border: Hsla,
     pub write_fill: Hsla,
     pub write_border: Hsla,
+    pub exec_fill: Hsla,
+    pub exec_border: Hsla,
 
     pub code_opcode: Hsla,
     pub code_address: Hsla,
@@ -118,8 +120,10 @@ impl Theme {
 
             read_fill: rgb(0x1d3a5c).into(),
             read_border: rgb(0x3f6fa8).into(),
-            write_fill: rgb(0x5c2329).into(),
-            write_border: rgb(0xa84f54).into(),
+            write_fill: rgb(0x1e3d2b).into(),
+            write_border: rgb(0x4f9e6a).into(),
+            exec_fill: rgb(0x5c2329).into(),
+            exec_border: rgb(0xa84f54).into(),
 
             code_opcode: rgb(0x86c98f).into(),
             code_address: rgb(0x86868f).into(),
@@ -172,8 +176,10 @@ impl Theme {
 
             read_fill: rgb(0xc3dbf5).into(),
             read_border: rgb(0x5a8fc0).into(),
-            write_fill: rgb(0xf3c7c4).into(),
-            write_border: rgb(0xc2706c).into(),
+            write_fill: rgb(0xc8ecd0).into(),
+            write_border: rgb(0x4f9e63).into(),
+            exec_fill: rgb(0xf3c7c4).into(),
+            exec_border: rgb(0xc2706c).into(),
 
             code_opcode: rgb(0x1f8a3b).into(),
             code_address: rgb(0x6c6c74).into(),

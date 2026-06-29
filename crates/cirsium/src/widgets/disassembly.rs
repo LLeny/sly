@@ -6,6 +6,7 @@ use gpui::{
     UniformListScrollHandle, Window, canvas, div, px, svg, uniform_list,
 };
 
+use super::breakpoints::BreakpointKind;
 use crate::assets::icon;
 use crate::components::{ClickHandler, Panel};
 use crate::theme::Theme;
@@ -82,6 +83,7 @@ pub struct DisasmLine {
     pub target: Option<u32>,
     pub current: bool,
     pub selected: bool,
+    pub breakpoint: Option<BreakpointKind>,
 }
 
 impl DisasmLine {
@@ -103,6 +105,7 @@ impl DisasmLine {
             target: None,
             current,
             selected: false,
+            breakpoint: None,
         }
     }
 
@@ -242,7 +245,9 @@ fn disasm_row(
         .flex()
         .items_center()
         .justify_center();
-    if line.current {
+    if let Some(kind) = line.breakpoint {
+        gutter = gutter.child(div().size(px(8.)).rounded_full().bg(kind.color(theme)));
+    } else if line.current {
         gutter = gutter.child(
             svg()
                 .path(icon::CHEVRON_RIGHT)
@@ -261,7 +266,13 @@ fn disasm_row(
         .px_1()
         .rounded_md()
         .when(line.current, |d| d.bg(theme.accent_soft))
-        .when(line.selected && !line.current, |d| d.bg(theme.bg_panel_alt))
+        .when_some(line.breakpoint.filter(|_| !line.current), |d, kind| {
+            d.bg(kind.color(theme).opacity(0.20))
+        })
+        .when(
+            line.selected && !line.current && line.breakpoint.is_none(),
+            |d| d.bg(theme.bg_panel_alt),
+        )
         .child(gutter);
 
     if arrows_width > 0. {
@@ -335,7 +346,7 @@ fn disasm_row(
         );
     }
 
-    if !line.current && !line.selected {
+    if !line.current && !line.selected && line.breakpoint.is_none() {
         let hover_bg = theme.bg_header;
         row = row.hover(move |s| s.bg(hover_bg));
     }

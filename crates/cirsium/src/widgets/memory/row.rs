@@ -3,8 +3,11 @@ use gpui::{Div, FontWeight, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, d
 
 use crate::diff::{Highlight, highlight_color};
 use crate::theme::Theme;
+use crate::widgets::BreakpointKind;
 
-use super::{ByteDownCallback, ByteDragCallback, ContextCallback, MemoryRow, ascii_glyph};
+use super::{
+    ByteDownCallback, ByteDragCallback, ContextCallback, MemoryCell, MemoryRow, ascii_glyph,
+};
 
 const ROW_HEIGHT: f32 = 20.;
 const ADDR_WIDTH: f32 = 76.;
@@ -13,16 +16,24 @@ const ASCII_CELL_WIDTH: f32 = 9.;
 const GROUP_GAP: f32 = 8.;
 const HEX_ASCII_GAP: f32 = 14.;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn mem_row(
     theme: &Theme,
     row: &MemoryRow,
     bytes_per_row: usize,
     selection: Option<(u32, u32)>,
+    breakpoints: &[(u32, u32, BreakpointKind)],
     on_byte_down: Option<ByteDownCallback>,
     on_byte_drag: Option<ByteDragCallback>,
     on_context: Option<ContextCallback>,
 ) -> Div {
     let in_selection = |addr: u32| selection.is_some_and(|(lo, hi)| addr >= lo && addr <= hi);
+    let breakpoint_at = |addr: u32| {
+        breakpoints
+            .iter()
+            .find(|(lo, hi, _)| addr >= *lo && addr <= *hi)
+            .map(|&(_, _, kind)| kind)
+    };
 
     let address = div()
         .font_family(theme.mono_font)
@@ -38,7 +49,7 @@ pub(super) fn mem_row(
         .cells
         .iter()
         .enumerate()
-        .map(|(i, cell)| cell_fill(cell.highlight, in_selection(row.addr + i as u32)))
+        .map(|(i, cell)| cell_fill(cell, in_selection(row.addr + i as u32)))
         .collect();
 
     let mut hex = div().flex().items_center().flex_none();
@@ -47,8 +58,12 @@ pub(super) fn mem_row(
     let stride = bytes_per_row as u32;
     for (i, cell) in row.cells.iter().enumerate() {
         let addr = row.addr + i as u32;
-        let text = highlight_color(theme, cell.highlight);
         let colors = fill_colors(theme, fills[i]);
+        let dashed = matches!(fills[i], Fill::Breakpoint(_));
+        let text = match colors {
+            Some((_, border)) if dashed => border,
+            _ => highlight_color(theme, cell.highlight),
+        };
 
         let hex_left = i == 0 || i == half || fills[i - 1] != fills[i];
         let hex_right = i == last || i + 1 == half || fills[i + 1] != fills[i];
@@ -59,6 +74,10 @@ pub(super) fn mem_row(
             Fill::Selection => (
                 !in_selection(addr.wrapping_sub(stride)),
                 !in_selection(addr + stride),
+            ),
+            Fill::Breakpoint(kind) => (
+                breakpoint_at(addr.wrapping_sub(stride)) != Some(kind),
+                breakpoint_at(addr.wrapping_add(stride)) != Some(kind),
             ),
             _ => (true, true),
         };
@@ -77,6 +96,7 @@ pub(super) fn mem_row(
                 hex_right,
                 top,
                 bottom,
+                dashed,
             )
             .child(format!("{:02X}", cell.value)),
             addr,
@@ -96,6 +116,7 @@ pub(super) fn mem_row(
                 ascii_right,
                 top,
                 bottom,
+                dashed,
             )
             .child(ascii_glyph(cell.value).to_string()),
             addr,
@@ -182,10 +203,15 @@ enum Fill {
     Read,
     Write,
     Selection,
+    Breakpoint(BreakpointKind),
 }
 
-fn cell_fill(highlight: Highlight, selected: bool) -> Fill {
-    match highlight {
+fn cell_fill(cell: &MemoryCell, selected: bool) -> Fill {
+    if let Some(kind) = cell.breakpoint {
+        return Fill::Breakpoint(kind);
+    }
+
+    match cell.highlight {
         Highlight::Read => Fill::Read,
         Highlight::Written | Highlight::Changed => Fill::Write,
         Highlight::None if selected => Fill::Selection,
@@ -199,6 +225,7 @@ fn fill_colors(theme: &Theme, fill: Fill) -> Option<(Hsla, Hsla)> {
         Fill::Read => Some((theme.read_fill, theme.read_border)),
         Fill::Write => Some((theme.write_fill, theme.write_border)),
         Fill::Selection => Some((theme.selection, theme.selection_border)),
+        Fill::Breakpoint(kind) => Some(kind.colors(theme)),
     }
 }
 
@@ -212,10 +239,12 @@ fn fill_cell(
     right: bool,
     top: bool,
     bottom: bool,
+    dashed: bool,
 ) -> Div {
     let mut cell = base.font_family(theme.mono_font).text_sm().text_color(text);
     if let Some((bg, border)) = fill {
         cell = cell
+            .when(dashed, |d| d.border_dashed())
             .bg(bg)
             .border_color(border)
             .when(top, |d| d.border_t_1())

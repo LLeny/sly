@@ -4,23 +4,24 @@ use std::time::Duration;
 
 use cirsium::assets::icon;
 use cirsium::components::{
-    CONTROL_HEIGHT, CheckboxSize, MenuItem, StatusView, TextInput, TextInputEvent, checkbox,
-    combobox_menu, context_menu, icon_button, popover, status_bar, title_bar,
+    CheckboxSize, MenuItem, StatusView, TextInput, TextInputEvent, checkbox, combobox_menu,
+    context_menu, field_button, icon_button, popover, status_bar, title_bar,
 };
 use cirsium::widgets::{
-    CartridgeView, CartridgeWidget, ControlsView, ControlsWidget, CpuView, CpuWidget,
-    DisassemblyWidget, MemoryWidget, RowProvider,
+    BreakpointKind, BreakpointsWidget, CartridgeView, CartridgeWidget, ControlsView,
+    ControlsWidget, CpuView, CpuWidget, DisassemblyWidget, MemoryWidget, RowProvider,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use gpui::prelude::*;
 use gpui::{
     App, ClickEvent, ClipboardItem, Context, Entity, MouseDownEvent, Pixels, Point, SharedString,
-    Task, Window, div, px, svg,
+    Task, Window, div, px,
 };
 
+use crate::breakpoints::Breakpoints;
 use crate::disasm::Disasm;
 use crate::memory::{self, Memory};
-use crate::target::DebugTarget;
+use crate::target::{DebugTarget, RunOutcome};
 
 pub(crate) struct Debugger {
     target: Box<dyn DebugTarget>,
@@ -29,7 +30,9 @@ pub(crate) struct Debugger {
     status: StatusView,
     disasm: Disasm,
     memory: Memory,
+    breakpoints: Breakpoints,
     jump_input: Entity<TextInput>,
+    bp_input: Entity<TextInput>,
     collapsed: HashSet<&'static str>,
     settings: Option<Point<Pixels>>,
     running: bool,
@@ -51,12 +54,17 @@ impl Debugger {
         let jump_input = cx.new(|cx| TextInput::new(cx, "go to...").hex_only(true).max_len(6));
         cx.subscribe(&jump_input, Self::on_jump_event).detach();
 
+        let bp_input = cx.new(|cx| TextInput::new(cx, "address...").hex_only(true).max_len(6));
+        cx.subscribe(&bp_input, Self::on_bp_event).detach();
+
         let mut debugger = Self {
             cartridge: target.cartridge().clone(),
             cpu: target.cpu_view(),
             status: target.status("paused"),
             memory: Memory::new(target.as_ref()),
+            breakpoints: Breakpoints::default(),
             jump_input,
+            bp_input,
             target,
             disasm,
             collapsed: HashSet::new(),
@@ -134,20 +142,25 @@ impl Debugger {
             return false;
         }
 
-        let ok = self.target.run_frame();
+        let outcome = self.target.run_frame(self.breakpoints.marks());
 
         self.refresh_cpu(CpuRefresh::Highlight);
         self.disasm.recompute(self.target.as_ref());
         self.follow_memory();
-        if ok {
-            self.status.state = self.target.caption("running");
-        } else {
+
+        let keep_going = outcome == RunOutcome::Done;
+        if !keep_going {
             self.running = false;
-            self.status.state = self.target.caption("unimplemented op");
         }
 
+        self.status.state = self.target.caption(match outcome {
+            RunOutcome::Done => "running",
+            RunOutcome::Breakpoint => "breakpoint",
+            RunOutcome::Fault => "unimplemented op",
+        });
+
         cx.notify();
-        ok
+        keep_going
     }
 
     fn step(&mut self, cx: &mut Context<Self>) {
@@ -274,6 +287,89 @@ impl Debugger {
         cx.notify();
     }
 
+    fn on_bp_event(
+        &mut self,
+        _input: Entity<TextInput>,
+        event: &TextInputEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if let TextInputEvent::Submit = event {
+            self.bp_add(cx);
+        }
+    }
+
+    fn bp_add(&mut self, cx: &mut Context<Self>) {
+        let text = self.bp_input.read(cx).content().trim().to_string();
+        if let Ok(addr) = u32::from_str_radix(&text, 16) {
+            self.breakpoints.add(addr, self.target.as_ref());
+            self.bp_input.update(cx, |input, cx| input.clear(cx));
+        }
+        self.sync_bp_markers();
+        cx.notify();
+    }
+
+    fn bp_add_at(&mut self, addr: u32, len: u32, kind: BreakpointKind, cx: &mut Context<Self>) {
+        self.disasm.close_menu();
+        let end = addr.saturating_add(len.saturating_sub(1));
+        self.breakpoints
+            .add_kind(addr, end, kind, self.target.as_ref());
+        self.sync_bp_markers();
+        cx.notify();
+    }
+
+    fn bp_add_mem(
+        &mut self,
+        start: u32,
+        end: u32,
+        kind: BreakpointKind,
+        label: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        self.memory.close_menu();
+        let region: SharedString = self.memory.region_id().to_string().into();
+        let note = self.target.annotate(start);
+        self.breakpoints
+            .add_labeled(start, end, kind, region, label, note);
+        self.sync_bp_markers();
+        cx.notify();
+    }
+
+    fn bp_remove(&mut self, id: usize, cx: &mut Context<Self>) {
+        self.breakpoints.remove(id);
+        self.sync_bp_markers();
+        cx.notify();
+    }
+
+    fn bp_toggle(&mut self, id: usize, cx: &mut Context<Self>) {
+        self.breakpoints.toggle(id);
+        self.sync_bp_markers();
+        cx.notify();
+    }
+
+    fn sync_bp_markers(&mut self) {
+        let marks = self.breakpoints.marks().to_vec();
+        self.disasm.set_breakpoints(marks.clone());
+        self.memory.set_breakpoints(marks);
+    }
+
+    fn bp_set_kind(&mut self, id: SharedString, cx: &mut Context<Self>) {
+        if let Some(kind) = BreakpointKind::from_id(&id) {
+            self.breakpoints.set_draft_kind(kind);
+        }
+        cx.notify();
+    }
+
+    fn bp_open_combo(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.breakpoints.open_combo(position);
+        cx.notify();
+    }
+
+    fn bp_close_combo(&mut self, cx: &mut Context<Self>) {
+        if self.breakpoints.close_combo() {
+            cx.notify();
+        }
+    }
+
     fn toggle_follow(&mut self, cx: &mut Context<Self>) {
         self.disasm.toggle_follow(self.target.as_ref());
         cx.notify();
@@ -347,7 +443,6 @@ impl Render for Debugger {
 
         let controls_view = ControlsView {
             running: self.running,
-            status: self.status.state.clone(),
         };
         let controls = ControlsWidget::new(controls_view)
             .collapsed(self.is_collapsed(ControlsWidget::ID))
@@ -358,6 +453,27 @@ impl Render for Debugger {
             .on_reset(cx.listener(|this, _, _, cx| this.reset(cx)));
 
         let this = cx.entity();
+
+        let breakpoints =
+            BreakpointsWidget::new(self.breakpoints.view(), self.breakpoints.draft_kind())
+                .collapsed(self.is_collapsed(BreakpointsWidget::ID))
+                .scrollable(true)
+                .address_input(self.bp_input.clone())
+                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(BreakpointsWidget::ID, cx)))
+                .on_add(cx.listener(|this, _, _, cx| this.bp_add(cx)))
+                .on_kind_open(
+                    cx.listener(|this, ev: &ClickEvent, _, cx| {
+                        this.bp_open_combo(ev.position(), cx)
+                    }),
+                )
+                .on_remove({
+                    let this = this.clone();
+                    move |id, _, cx| this.update(cx, |d, cx| d.bp_remove(id, cx))
+                })
+                .on_toggle_entry({
+                    let this = this.clone();
+                    move |id, _, cx| this.update(cx, |d, cx| d.bp_toggle(id, cx))
+                });
         let disassembly =
             DisassemblyWidget::new(self.disasm.view.clone(), self.disasm.scroll.clone())
                 .collapsed(self.is_collapsed(DisassemblyWidget::ID))
@@ -373,6 +489,7 @@ impl Render for Debugger {
 
         let disasm_menu = self.disasm.menu.as_ref().map(|menu| {
             let addr = menu.addr;
+            let len = menu.len;
             let items = vec![
                 MenuItem::new(
                     "Copy Address",
@@ -389,6 +506,24 @@ impl Render for Debugger {
                 MenuItem::new(
                     "Set PC to here",
                     cx.listener(move |this, _, _, cx| this.set_pc_to(addr, cx)),
+                ),
+                MenuItem::new(
+                    "Add execute breakpoint",
+                    cx.listener(move |this, _, _, cx| {
+                        this.bp_add_at(addr, len, BreakpointKind::Execute, cx)
+                    }),
+                ),
+                MenuItem::new(
+                    "Add read breakpoint",
+                    cx.listener(move |this, _, _, cx| {
+                        this.bp_add_at(addr, len, BreakpointKind::Read, cx)
+                    }),
+                ),
+                MenuItem::new(
+                    "Add write breakpoint",
+                    cx.listener(move |this, _, _, cx| {
+                        this.bp_add_at(addr, len, BreakpointKind::Write, cx)
+                    }),
                 ),
             ];
             context_menu(
@@ -443,28 +578,12 @@ impl Render for Debugger {
             })
         };
 
-        let jump_button_hover = t.bg_header;
-        let jump_button = div()
-            .id("mem-jump-go")
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .h(px(CONTROL_HEIGHT))
-            .w(px(26.))
-            .bg(t.bg_panel_alt)
-            .border_1()
-            .border_color(t.border_subtle)
-            .rounded_md()
-            .cursor_pointer()
-            .hover(move |s| s.bg(jump_button_hover))
-            .on_click(cx.listener(|this, _, _, cx| this.jump_submit(cx)))
-            .child(
-                svg()
-                    .path(icon::CHEVRON_RIGHT)
-                    .size(px(12.))
-                    .text_color(t.text_secondary),
-            );
+        let jump_button = field_button(
+            t,
+            "mem-jump-go",
+            icon::CHEVRON_RIGHT,
+            cx.listener(|this, _, _, cx| this.jump_submit(cx)),
+        );
         let jump_field = div()
             .flex()
             .flex_none()
@@ -496,6 +615,7 @@ impl Render for Debugger {
         )
         .collapsed(self.is_collapsed(MemoryWidget::ID))
         .selection(self.memory.selection())
+        .breakpoints(self.memory.breakpoint_ranges())
         .header_extra(memory_header)
         .on_toggle(cx.listener(|this, _, _, cx| this.toggle(MemoryWidget::ID, cx)))
         .on_region_open(
@@ -529,7 +649,28 @@ impl Render for Debugger {
             )
         });
 
+        let bp_combo = self.breakpoints.combo_open.map(|pos| {
+            let options = self.breakpoints.options();
+            combobox_menu(
+                t,
+                pos,
+                &options,
+                self.breakpoints.draft_kind().id(),
+                {
+                    let this = this.clone();
+                    move |id, _, cx| this.update(cx, |d, cx| d.bp_set_kind(id, cx))
+                },
+                cx.listener(|this, _: &MouseDownEvent, _, cx| this.bp_close_combo(cx)),
+            )
+        });
+
         let memory_menu = self.memory.menu.as_ref().map(|menu| {
+            let (bp_start, bp_end) = menu.range;
+            let bp_label: SharedString = if bp_end > bp_start {
+                format!("${}...{:04X}", menu.address, bp_end & 0xFFFF).into()
+            } else {
+                format!("${}", menu.address).into()
+            };
             let items = vec![
                 MenuItem::new(
                     "Copy Address",
@@ -547,6 +688,18 @@ impl Render for Debugger {
                     "Copy ASCII",
                     clipboard_listener(cx, menu.ascii.clone(), Debugger::memory_close_menu),
                 ),
+                MenuItem::new("Add read breakpoint", {
+                    let label = bp_label.clone();
+                    cx.listener(move |this, _, _, cx| {
+                        this.bp_add_mem(bp_start, bp_end, BreakpointKind::Read, label.clone(), cx)
+                    })
+                }),
+                MenuItem::new("Add write breakpoint", {
+                    let label = bp_label.clone();
+                    cx.listener(move |this, _, _, cx| {
+                        this.bp_add_mem(bp_start, bp_end, BreakpointKind::Write, label.clone(), cx)
+                    })
+                }),
             ];
             context_menu(
                 t,
@@ -578,10 +731,13 @@ impl Render for Debugger {
                             .flex_col()
                             .w(px(360.))
                             .flex_none()
+                            .min_h(px(0.))
+                            .overflow_hidden()
                             .gap_2()
-                            .child(controls)
-                            .child(cpu)
-                            .child(cartridge),
+                            .child(div().flex_none().child(controls))
+                            .child(breakpoints)
+                            .child(div().flex_none().child(cpu))
+                            .child(div().flex_none().child(cartridge)),
                     )
                     .child(
                         div()
@@ -598,6 +754,7 @@ impl Render for Debugger {
             .child(status_bar(t, &self.status))
             .children(disasm_menu)
             .children(settings_popup)
+            .children(bp_combo)
             .children(memory_combo)
             .children(memory_menu)
     }

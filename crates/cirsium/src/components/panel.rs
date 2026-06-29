@@ -5,6 +5,14 @@ use super::ClickHandler;
 use crate::assets::icon;
 use crate::theme::Theme;
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum Sizing {
+    #[default]
+    Fixed,
+    Grow,
+    Scroll,
+}
+
 #[derive(IntoElement)]
 pub struct Panel {
     id: SharedString,
@@ -12,7 +20,7 @@ pub struct Panel {
     meta: Option<SharedString>,
     glyph: Option<SharedString>,
     collapsed: bool,
-    grow: bool,
+    sizing: Sizing,
     on_toggle: Option<ClickHandler>,
     body: Option<gpui::AnyElement>,
 }
@@ -25,7 +33,7 @@ impl Panel {
             meta: None,
             glyph: None,
             collapsed: false,
-            grow: false,
+            sizing: Sizing::Fixed,
             on_toggle: None,
             body: None,
         }
@@ -47,7 +55,16 @@ impl Panel {
     }
 
     pub fn grow(mut self, grow: bool) -> Self {
-        self.grow = grow;
+        self.sizing = if grow { Sizing::Grow } else { Sizing::Fixed };
+        self
+    }
+
+    pub fn scrollable(mut self, scrollable: bool) -> Self {
+        self.sizing = if scrollable {
+            Sizing::Scroll
+        } else {
+            Sizing::Fixed
+        };
         self
     }
 
@@ -124,7 +141,8 @@ impl RenderOnce for Panel {
             header = header.on_click(toggle);
         }
 
-        let fill = self.grow && !self.collapsed;
+        let fill = self.sizing == Sizing::Grow && !self.collapsed;
+        let bounded = self.sizing != Sizing::Fixed && !self.collapsed;
 
         let mut card = div()
             .flex()
@@ -133,7 +151,8 @@ impl RenderOnce for Panel {
             .border_1()
             .border_color(t.border_subtle)
             .overflow_hidden()
-            .when(fill, |c| c.flex_1().min_h(px(0.)))
+            .when(fill, |c| c.flex_1())
+            .when(bounded, |c| c.min_h(px(0.)))
             .child(header);
 
         if !self.collapsed
@@ -144,7 +163,7 @@ impl RenderOnce for Panel {
                     .flex()
                     .flex_col()
                     .p_2()
-                    .when(fill, |b| b.flex_1().min_h(px(0.)))
+                    .when(bounded, |b| b.flex_1().min_h(px(0.)))
                     .child(body),
             );
         }
