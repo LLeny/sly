@@ -28,16 +28,28 @@ pub fn label_text(theme: &Theme, text: impl Into<SharedString>) -> Div {
         .child(text.into())
 }
 
-/// A compact labeled checkbox (e.g. "Follow PC").
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CheckboxSize {
+    Small,
+    Normal,
+}
+
 pub fn checkbox(
     theme: &Theme,
     id: &'static str,
     checked: bool,
     label: impl Into<SharedString>,
+    size: CheckboxSize,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
+    let (box_px, check_px) = match size {
+        CheckboxSize::Small => (13., 9.),
+        CheckboxSize::Normal => (16., 11.),
+    };
+
     let mut box_ = div()
-        .size(px(13.))
+        .size(px(box_px))
+        .flex_none()
         .flex()
         .items_center()
         .justify_center()
@@ -53,23 +65,29 @@ pub fn checkbox(
         box_ = box_.bg(theme.accent_soft).child(
             svg()
                 .path(icon::CHECK)
-                .size(px(9.))
+                .size(px(check_px))
                 .text_color(theme.accent),
         );
     }
+
+    let label = div()
+        .map(|d| match size {
+            CheckboxSize::Small => d.text_xs(),
+            CheckboxSize::Normal => d.text_sm(),
+        })
+        .text_color(theme.text_secondary)
+        .child(label.into());
 
     div()
         .id(id)
         .flex()
         .items_center()
-        .gap_1()
+        .map(|d| match size {
+            CheckboxSize::Small => d.gap_1(),
+            CheckboxSize::Normal => d.gap_2().h(px(super::CONTROL_HEIGHT)),
+        })
         .cursor_pointer()
         .on_click(on_click)
         .child(box_)
-        .child(
-            div()
-                .text_xs()
-                .text_color(theme.text_secondary)
-                .child(label.into()),
-        )
+        .child(label)
 }

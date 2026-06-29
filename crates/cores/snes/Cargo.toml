@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = ["disasm"]
 disasm = []
+debug = []
 
 [dependencies]
 chapa = "0.3.0"

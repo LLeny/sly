@@ -20,9 +20,6 @@ pub struct SystemInfo {
 }
 
 impl System {
-    #[allow(dead_code)]
-    pub const ALL: &'static [System] = &[System::Snes];
-
     pub const fn info(self) -> SystemInfo {
         match self {
             System::Nes => SystemInfo {

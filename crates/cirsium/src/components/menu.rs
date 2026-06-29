@@ -7,14 +7,18 @@ use gpui::{
 use super::ClickHandler;
 use crate::theme::Theme;
 
-fn overlay(
+pub(super) fn overlay<C, D>(
     theme: &Theme,
     position: Point<Pixels>,
     anchor: Anchor,
     id: &'static str,
-    content: impl IntoElement,
-    on_dismiss: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-) -> impl IntoElement {
+    content: C,
+    on_dismiss: D,
+) -> impl IntoElement + use<C, D>
+where
+    C: IntoElement,
+    D: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+{
     let panel = div()
         .id(id)
         .occlude()

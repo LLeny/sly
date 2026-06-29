@@ -43,6 +43,10 @@ macro_rules! mmio_passthrough {
             fn write(snes: &mut crate::Snes, value: u8) {
                 snes.$($field).+ = Self::from_raw(value);
             }
+
+            fn peek(snes: &crate::Snes) -> u8 {
+                snes.$($field).+.raw()
+            }
         }
     };
 }

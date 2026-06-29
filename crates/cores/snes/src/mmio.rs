@@ -2,11 +2,20 @@ pub mod addr;
 pub mod dma;
 pub mod regs;
 
+#[cfg(feature = "debug")]
+mod access;
+mod symbol;
+
+#[cfg(feature = "debug")]
+pub use access::{AccessTracker, MemoryAccess};
+
 use crate::cartridge::MapMode;
 use crate::mmio::regs::{DmaTransferStart, HdmaTransferEnable, NmiTimerEnable};
 use crate::{Cartridge, Snes};
 
 pub use addr::Address;
+pub(crate) use symbol::MmioReg;
+pub use symbol::{MmioSymbol, address_of, is_symbol, symbol};
 
 const WRAM_SIZE: usize = 0x2_0000;
 pub(crate) const OPEN_BUS: u8 = 0xFF;
@@ -14,6 +23,9 @@ pub(crate) const OPEN_BUS: u8 = 0xFF;
 pub struct Mmio {
     pub cartridge: Cartridge,
     pub wram: Box<[u8]>,
+
+    #[cfg(feature = "debug")]
+    pub access: AccessTracker,
 }
 
 pub(crate) enum AddressSpace {
@@ -23,11 +35,30 @@ pub(crate) enum AddressSpace {
     Unmapped,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum MemKind {
+    Wram,
+    Rom,
+    Io,
+}
+
+fn space_key(space: &AddressSpace) -> Option<(MemKind, u32)> {
+    match space {
+        AddressSpace::Wram(index) => Some((MemKind::Wram, *index as u32)),
+        AddressSpace::Rom(index) => Some((MemKind::Rom, *index as u32)),
+        AddressSpace::Io(reg) => Some((MemKind::Io, *reg as u32)),
+        AddressSpace::Unmapped => None,
+    }
+}
+
 impl Mmio {
     pub fn new(cartridge: Cartridge) -> Self {
         Self {
             cartridge,
             wram: vec![0; WRAM_SIZE].into_boxed_slice(),
+
+            #[cfg(feature = "debug")]
+            access: AccessTracker::default(),
         }
     }
 
@@ -89,8 +120,27 @@ impl Snes {
         self.write8(addr.wrapping_add(1), (value >> 8) as u8);
     }
 
+    /// Record a captured read/write against the access tracker (debug builds only).
+    #[cfg(feature = "debug")]
+    fn record_access(&self, space: &AddressSpace, write: bool) {
+        if self.mmu.access.capturing()
+            && let Some(key) = space_key(space)
+        {
+            if write {
+                self.mmu.access.record_write(key);
+            } else {
+                self.mmu.access.record_read(key);
+            }
+        }
+    }
+
     pub fn read8(&self, addr: Address) -> u8 {
-        match self.mmu.map(addr) {
+        let space = self.mmu.map(addr);
+
+        #[cfg(feature = "debug")]
+        self.record_access(&space, false);
+
+        match space {
             AddressSpace::Wram(index) => self.mmu.wram[index],
             AddressSpace::Rom(index) => self.mmu.cartridge.rom[index],
             AddressSpace::Io(reg) => self.read_io(reg),
@@ -101,8 +151,26 @@ impl Snes {
         }
     }
 
-    pub fn write8(&mut self, addr: Address, value: u8) {
+    pub fn classify(&self, addr: Address) -> Option<(MemKind, u32)> {
+        space_key(&self.mmu.map(addr))
+    }
+
+    pub fn peek8(&self, addr: Address) -> u8 {
         match self.mmu.map(addr) {
+            AddressSpace::Wram(index) => self.mmu.wram[index],
+            AddressSpace::Rom(index) => self.mmu.cartridge.rom[index],
+            AddressSpace::Io(reg) => self.peek_io(reg),
+            AddressSpace::Unmapped => OPEN_BUS,
+        }
+    }
+
+    pub fn write8(&mut self, addr: Address, value: u8) {
+        let space = self.mmu.map(addr);
+
+        #[cfg(feature = "debug")]
+        self.record_access(&space, true);
+
+        match space {
             AddressSpace::Wram(index) => self.mmu.wram[index] = value,
             AddressSpace::Rom(_) => {
                 tracing::warn!(
@@ -151,35 +219,13 @@ impl Snes {
             }
         }
     }
-}
 
-pub(crate) trait MmioReg {
-    fn read(snes: &Snes) -> u8;
-    fn write(snes: &mut Snes, value: u8);
-}
-
-pub struct MmioSymbol {
-    pub addr: u16,
-    pub name: &'static str,
-}
-
-inventory::collect!(MmioSymbol);
-
-/// Look up a symbol name for a given MMIO address.
-pub fn symbol(addr: u16) -> Option<&'static str> {
-    inventory::iter::<MmioSymbol>()
-        .find(|reg| reg.addr == addr)
-        .map(|reg| reg.name)
-}
-
-/// Whether `name` is a registered MMIO register name.
-pub fn is_symbol(name: &str) -> bool {
-    address_of(name).is_some()
-}
-
-/// The address a symbol name resolves to.
-pub fn address_of(name: &str) -> Option<u16> {
-    inventory::iter::<MmioSymbol>()
-        .find(|reg| reg.name == name)
-        .map(|reg| reg.addr)
+    fn peek_io(&self, reg: u16) -> u8 {
+        match reg {
+            NmiTimerEnable::ADDRESS => NmiTimerEnable::peek(self),
+            DmaTransferStart::ADDRESS => DmaTransferStart::peek(self),
+            HdmaTransferEnable::ADDRESS => HdmaTransferEnable::peek(self),
+            _ => OPEN_BUS,
+        }
+    }
 }

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use cirsium::widgets::{DisasmToken, TokenKind};
 use logos::Logos;
 
@@ -6,9 +8,9 @@ pub struct SyntaxSpec {
     pub symbols: fn(&str) -> bool,
 }
 
-pub fn strip_symbol_sigils(text: &str, syntax: &SyntaxSpec) -> String {
+pub fn strip_symbol_sigils<'a>(text: &'a str, syntax: &SyntaxSpec) -> Cow<'a, str> {
     let bytes = text.as_bytes();
-    let mut out = String::with_capacity(text.len());
+    let mut out: Option<String> = None;
     let mut i = 0;
 
     while i < bytes.len() {
@@ -20,17 +22,24 @@ pub fn strip_symbol_sigils(text: &str, syntax: &SyntaxSpec) -> String {
             }
 
             if end > start && (syntax.symbols)(&text[start..end]) {
-                out.push_str(&text[start..end]);
+                out.get_or_insert_with(|| {
+                    let mut s = String::with_capacity(text.len());
+                    s.push_str(&text[..i]);
+                    s
+                })
+                .push_str(&text[start..end]);
                 i = end;
                 continue;
             }
         }
 
-        out.push(bytes[i] as char);
+        if let Some(out) = out.as_mut() {
+            out.push(bytes[i] as char);
+        }
         i += 1;
     }
 
-    out
+    out.map_or(Cow::Borrowed(text), Cow::Owned)
 }
 
 #[derive(Logos)]

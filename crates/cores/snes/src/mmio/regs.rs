@@ -89,4 +89,8 @@ impl MmioReg for DmaTransferStart {
             "MDMA start not implemented"
         );
     }
+
+    fn peek(snes: &Snes) -> u8 {
+        snes.dma.mdmaen.raw()
+    }
 }

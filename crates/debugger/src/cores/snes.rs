@@ -1,17 +1,25 @@
+use cirsium::Highlight;
 use cirsium::components::StatusView;
 use cirsium::widgets::{
     CartridgeField, CartridgeView, CpuView, DisasmLine, DisasmToken, DisassemblyView, FlagView,
-    RegisterView, TokenKind,
+    MemoryRegion, RegisterView, TokenKind,
 };
 use gpui::SharedString;
 use snes::cartridge::{MapMode, Speed};
 use snes::cpu::disasm::{Disasm, InstructionClass};
-use snes::mmio::Address;
+use snes::mmio::{Address, MemKind, MemoryAccess};
 use snes::{Cartridge, Cpu, Snes};
 
 use crate::art::{AssetProvider, GameRef, System};
 use crate::cores::disasm::{SyntaxSpec, strip_symbol_sigils, tokenize};
 use crate::target::DebugTarget;
+
+const WRAM_SIZE: u32 = 0x2_0000;
+const PPU_BASE: u32 = 0x2100;
+const PPU_SIZE: u32 = 0x0100;
+const CPU_BASE: u32 = 0x4200;
+const CPU_SIZE: u32 = 0x0200;
+const BUS_SIZE: u32 = 0x100_0000;
 
 pub struct SnesTarget {
     core: Snes,
@@ -19,6 +27,7 @@ pub struct SnesTarget {
     system: SharedString,
     label: SharedString,
     segments: Vec<SharedString>,
+    last_access: MemoryAccess,
 }
 
 impl SnesTarget {
@@ -58,7 +67,33 @@ impl SnesTarget {
             system: "SNES".into(),
             label: file_name.into(),
             segments,
+            last_access: MemoryAccess::default(),
         })
+    }
+
+    fn region_byte(&self, region: &str, addr: u32) -> u8 {
+        match region {
+            "wram" => self.core.mmu.wram.get(addr as usize).copied().unwrap_or(0),
+            "rom" => self
+                .core
+                .mmu
+                .cartridge
+                .rom
+                .get(addr as usize)
+                .copied()
+                .unwrap_or(0),
+            "bus" => self.core.peek8(Address::from_24bit(addr & 0x00FF_FFFF)),
+            _ => self.core.peek8(Address::new(0x00, addr as u16)),
+        }
+    }
+
+    fn region_key(&self, region: &str, addr: u32) -> Option<(MemKind, u32)> {
+        match region {
+            "wram" => Some((MemKind::Wram, addr)),
+            "rom" => Some((MemKind::Rom, addr)),
+            "bus" => self.core.classify(Address::from_24bit(addr & 0x00FF_FFFF)),
+            _ => Some((MemKind::Io, addr)),
+        }
     }
 
     fn guarded(&mut self, f: impl FnOnce(&mut Snes)) -> bool {
@@ -67,6 +102,15 @@ impl SnesTarget {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut self.core)));
         std::panic::set_hook(prev);
         result.is_ok()
+    }
+
+    fn execute_traced(&mut self, body: impl FnOnce(&mut Snes)) -> bool {
+        let mut report = None;
+        let ok = self.guarded(|core| report = Some(core.trace(body)));
+        if let Some(report) = report {
+            self.last_access = report;
+        }
+        ok
     }
 }
 
@@ -80,15 +124,16 @@ impl DebugTarget for SnesTarget {
     }
 
     fn step(&mut self) -> bool {
-        self.guarded(|core| core.step())
+        self.execute_traced(Snes::step)
     }
 
     fn run_frame(&mut self) -> bool {
-        self.guarded(|core| core.run_frame())
+        self.execute_traced(Snes::run_frame)
     }
 
     fn reset(&mut self) {
         self.core.cpu = Cpu::new(self.core.read16(Address::new(0x00, 0xFFFC)));
+        self.last_access = MemoryAccess::default();
     }
 
     fn cpu_view(&self) -> CpuView {
@@ -116,6 +161,54 @@ impl DebugTarget for SnesTarget {
     fn caption(&self, label: &str) -> SharedString {
         caption(label, &self.core)
     }
+
+    fn memory_regions(&self) -> Vec<MemoryRegion> {
+        vec![
+            MemoryRegion::new("wram", "WRAM", 0, WRAM_SIZE),
+            MemoryRegion::new("rom", "ROM", 0, self.core.mmu.cartridge.rom.len() as u32),
+            MemoryRegion::new("ppu", "PPU/APU", PPU_BASE, PPU_SIZE),
+            MemoryRegion::new("cpu", "CPU/DMA", CPU_BASE, CPU_SIZE),
+            MemoryRegion::new("bus", "CPU Bus", 0, BUS_SIZE),
+        ]
+    }
+
+    fn read_memory(&self, region: &str, addr: u32, len: usize) -> Vec<u8> {
+        (0..len as u32)
+            .map(|i| self.region_byte(region, addr.wrapping_add(i)))
+            .collect()
+    }
+
+    fn format_address(&self, region: &str, addr: u32) -> SharedString {
+        match region {
+            "wram" => format!("{:02X}:{:04X}", 0x7E + (addr >> 16), addr & 0xFFFF),
+            "rom" => format!("{addr:06X}"),
+            "bus" => format!("{:02X}:{:04X}", (addr >> 16) & 0xFF, addr & 0xFFFF),
+            _ => format!("00:{:04X}", addr & 0xFFFF),
+        }
+        .into()
+    }
+
+    fn memory_highlights(&self, region: &str, addr: u32, len: usize) -> Vec<Highlight> {
+        (0..len as u32)
+            .map(|i| match self.region_key(region, addr.wrapping_add(i)) {
+                Some(key) if self.last_access.writes.contains(&key) => Highlight::Written,
+                Some(key) if self.last_access.reads.contains(&key) => Highlight::Read,
+                _ => Highlight::None,
+            })
+            .collect()
+    }
+
+    fn latest_access(&self) -> Option<(SharedString, u32)> {
+        let (kind, offset) = self.last_access.last?;
+        let region = match kind {
+            MemKind::Wram => "wram",
+            MemKind::Rom => "rom",
+            MemKind::Io if (PPU_BASE..PPU_BASE + PPU_SIZE).contains(&offset) => "ppu",
+            MemKind::Io if (CPU_BASE..CPU_BASE + CPU_SIZE).contains(&offset) => "cpu",
+            MemKind::Io => "bus",
+        };
+        Some((region.into(), offset))
+    }
 }
 
 fn caption(label: &str, snes: &Snes) -> SharedString {
@@ -131,14 +224,7 @@ fn cpu_view(cpu: &snes::Cpu) -> CpuView {
     let acc_bits = if f.m() { 8 } else { 16 };
     let idx_bits = if f.x() { 8 } else { 16 };
 
-    let p = (f.c() as u32)
-        | (f.z() as u32) << 1
-        | (f.i() as u32) << 2
-        | (f.d() as u32) << 3
-        | (f.x() as u32) << 4
-        | (f.m() as u32) << 5
-        | (f.v() as u32) << 6
-        | (f.n() as u32) << 7;
+    let p = f.raw() as u32;
 
     CpuView {
         isa: "65C816".into(),
@@ -187,7 +273,7 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> DisassemblyView {
                 addr as u32,
                 format!("{bank:02X}:{addr:04X}"),
                 read_bytes(snes, bank, addr, len),
-                text,
+                &*text,
                 tokens,
                 addr == pc,
             )
@@ -205,15 +291,16 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> DisassemblyView {
 }
 
 fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
-    (0..len)
-        .map(|i| {
-            format!(
-                "{:02X}",
-                snes.read8(Address::new(bank, addr.wrapping_add(i as u16)))
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    use std::fmt::Write;
+    let mut out = String::with_capacity(len as usize * 3);
+    for i in 0..len {
+        if i != 0 {
+            out.push(' ');
+        }
+        let byte = snes.read8(Address::new(bank, addr.wrapping_add(i as u16)));
+        let _ = write!(out, "{byte:02X}");
+    }
+    out
 }
 
 fn disasm_note(tokens: &[DisasmToken], d: &Disasm, bank: u8, ea: Option<Address>) -> String {

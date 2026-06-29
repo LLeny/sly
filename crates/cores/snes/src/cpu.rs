@@ -69,9 +69,15 @@ pub fn step(snes: &mut Snes) {
         decoder::decode(modes, cia, &reader)
     };
 
+    #[cfg(feature = "debug")]
+    snes.mmu.access.resume();
+
     let mut view = InterpreterView::new(&mut *snes, len);
     view.exec(instr);
     let (next_bank, next_pc) = view.next();
+
+    #[cfg(feature = "debug")]
+    snes.mmu.access.pause();
 
     snes.cpu.program_bank = next_bank;
     snes.cpu.pc = next_pc;

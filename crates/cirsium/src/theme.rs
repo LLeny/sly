@@ -42,12 +42,19 @@ pub struct Theme {
     pub accent: Hsla,
     pub accent_soft: Hsla,
     pub accent_hover: Hsla,
+    pub selection: Hsla,
+    pub selection_border: Hsla,
 
     pub success: Hsla,
     pub warning: Hsla,
     pub danger: Hsla,
     pub danger_strong: Hsla,
     pub info: Hsla,
+
+    pub read_fill: Hsla,
+    pub read_border: Hsla,
+    pub write_fill: Hsla,
+    pub write_border: Hsla,
 
     pub code_opcode: Hsla,
     pub code_address: Hsla,
@@ -100,12 +107,19 @@ impl Theme {
             accent: rgb(0xa55cff).into(),
             accent_soft: rgba(0xa55cff3a).into(),
             accent_hover: rgb(0xb985ff).into(),
+            selection: rgb(0x4a2f7a).into(),
+            selection_border: rgb(0x7d5bb8).into(),
 
             success: rgb(0x6cc98a).into(),
             warning: rgb(0xd9b46a).into(),
-            danger: rgb(0xdd7470).into(),
+            danger: rgb(0xee8a86).into(),
             danger_strong: rgb(0xe5484d).into(),
-            info: rgb(0x6f9fc4).into(),
+            info: rgb(0x7bb8f4).into(),
+
+            read_fill: rgb(0x1d3a5c).into(),
+            read_border: rgb(0x3f6fa8).into(),
+            write_fill: rgb(0x5c2329).into(),
+            write_border: rgb(0xa84f54).into(),
 
             code_opcode: rgb(0x86c98f).into(),
             code_address: rgb(0x86868f).into(),
@@ -147,12 +161,19 @@ impl Theme {
             accent: rgb(0x7c3aed).into(),
             accent_soft: rgba(0x7c3aed26).into(),
             accent_hover: rgb(0x6a28d9).into(),
+            selection: rgb(0xcdb4f5).into(),
+            selection_border: rgb(0x9d7fd0).into(),
 
             success: rgb(0x1f9d57).into(),
             warning: rgb(0xb5800f).into(),
             danger: rgb(0xd23b39).into(),
             danger_strong: rgb(0xdc2626).into(),
             info: rgb(0x356fa8).into(),
+
+            read_fill: rgb(0xc3dbf5).into(),
+            read_border: rgb(0x5a8fc0).into(),
+            write_fill: rgb(0xf3c7c4).into(),
+            write_border: rgb(0xc2706c).into(),
 
             code_opcode: rgb(0x1f8a3b).into(),
             code_address: rgb(0x6c6c74).into(),

@@ -13,7 +13,12 @@ pub use mmio::Mmio;
 use crate::cpu::disasm::Disasm;
 use crate::interrupt::Irq;
 use crate::mmio::Address;
+#[cfg(feature = "debug")]
+use crate::mmio::MemoryAccess;
 use crate::mmio::dma::Dma;
+
+// TODO: lol
+const INSTRUCTIONS_PER_FRAME: usize = 10_000;
 
 pub struct Snes {
     pub cpu: Cpu,
@@ -50,11 +55,16 @@ impl Snes {
     }
 
     pub fn run_frame(&mut self) {
-        // TODO: lol
-        const INSTRUCTIONS_PER_FRAME: usize = 10_000;
-
         for _ in 0..INSTRUCTIONS_PER_FRAME {
             self.step();
         }
+    }
+
+    #[cfg(feature = "debug")]
+    pub fn trace(&mut self, body: impl FnOnce(&mut Self)) -> MemoryAccess {
+        self.mmu.access.start();
+        body(self);
+        self.mmu.access.stop();
+        self.mmu.access.snapshot()
     }
 }

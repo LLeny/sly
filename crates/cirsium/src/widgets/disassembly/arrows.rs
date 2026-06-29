@@ -14,6 +14,10 @@ const ARROW_HEAD_HALF: f32 = 4.;
 const ARROW_RADIUS: f32 = 4.;
 const ARROW_HEAD_GAP: f32 = 7.;
 
+const ARROW_GUTTER_WIDTH: f32 =
+    MAX_ARROW_LANES as f32 * ARROW_COL_WIDTH + ARROW_HEAD_GAP + ARROW_HEAD;
+const ARROW_HEAD_LEFT: f32 = MAX_ARROW_LANES as f32 * ARROW_COL_WIDTH + ARROW_HEAD_GAP;
+
 #[derive(Clone, Copy)]
 pub(super) enum GutterDraw {
     Through {
@@ -59,7 +63,7 @@ pub(super) fn arrow_gutters(lines: &[DisasmLine]) -> (Vec<GutterCell>, f32) {
         }
     }
     if arrows.is_empty() {
-        return (Vec::new(), 0.);
+        return (vec![GutterCell::default(); n], ARROW_GUTTER_WIDTH);
     }
 
     arrows.sort_by_key(|&(a, b)| a.max(b) - a.min(b));
@@ -81,14 +85,8 @@ pub(super) fn arrow_gutters(lines: &[DisasmLine]) -> (Vec<GutterCell>, f32) {
         }
     }
 
-    let lane_count = lanes.len();
-    if lane_count == 0 {
-        return (Vec::new(), 0.);
-    }
-
-    let lanes_width = lane_count as f32 * ARROW_COL_WIDTH;
-    let head_left = lanes_width + ARROW_HEAD_GAP;
-    let width = head_left + ARROW_HEAD;
+    let head_left = ARROW_HEAD_LEFT;
+    let width = ARROW_GUTTER_WIDTH;
 
     let selected = lines.iter().position(|l| l.selected);
 
@@ -109,7 +107,7 @@ pub(super) fn arrow_gutters(lines: &[DisasmLine]) -> (Vec<GutterCell>, f32) {
             color = with_alpha(color, 0.25);
         }
 
-        let col = lane_count - 1 - lane;
+        let col = MAX_ARROW_LANES - 1 - lane;
         let xc = col as f32 * ARROW_COL_WIDTH + ARROW_COL_WIDTH / 2.;
         let (lo, hi) = (from.min(to), from.max(to));
         let down = to > from;
