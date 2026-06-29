@@ -1,17 +1,19 @@
 macro_rules! register_mmio {
     (
-        $(#[$meta:meta])*
-        $vis:vis struct $name:ident @ $addr:literal { $($body:tt)* }
-    ) => {
-        register_mmio!(@emit u8, $(#[$meta])* $vis struct $name @ $addr { $($body)* });
-    };
-    (
+        #[doc = $doc:literal]
         $(#[$meta:meta])*
         $vis:vis struct $name:ident: $repr:ident @ $addr:literal { $($body:tt)* }
     ) => {
-        register_mmio!(@emit $repr, $(#[$meta])* $vis struct $name @ $addr { $($body)* });
+        register_mmio!(@emit $repr, $doc, #[doc = $doc] $(#[$meta])* $vis struct $name @ $addr { $($body)* });
     };
-    (@emit $repr:ident,
+    (
+        #[doc = $doc:literal]
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident @ $addr:literal { $($body:tt)* }
+    ) => {
+        register_mmio!(@emit u8, $doc, #[doc = $doc] $(#[$meta])* $vis struct $name @ $addr { $($body)* });
+    };
+    (@emit $repr:ident, $doc:literal,
         $(#[$meta:meta])*
         $vis:vis struct $name:ident @ $addr:literal { $($body:tt)* }
     ) => {
@@ -22,6 +24,11 @@ macro_rules! register_mmio {
 
         impl $name {
             pub const ADDRESS: u16 = $addr;
+            pub const NAME: &'static str = $doc.trim_ascii();
+        }
+
+        inventory::submit! {
+            $crate::mmio::MmioSymbol { addr: $name::ADDRESS, name: $name::NAME }
         }
     };
 }

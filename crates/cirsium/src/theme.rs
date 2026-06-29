@@ -62,6 +62,7 @@ pub struct Theme {
     pub code_register: Hsla,
     pub code_immediate: Hsla,
     pub code_sigil: Hsla,
+    pub code_symbol: Hsla,
     pub code_punctuation: Hsla,
 }
 
@@ -119,6 +120,7 @@ impl Theme {
             code_register: rgb(0x7fd4d4).into(),
             code_immediate: rgb(0xa79bcf).into(),
             code_sigil: rgb(0x9c8a5e).into(),
+            code_symbol: rgb(0xf0a995).into(),
             code_punctuation: rgb(0x6c6c74).into(),
         }
     }
@@ -165,6 +167,7 @@ impl Theme {
             code_register: rgb(0x1f8a8a).into(),
             code_immediate: rgb(0x5f4fa0).into(),
             code_sigil: rgb(0x8a7340).into(),
+            code_symbol: rgb(0xc26a4f).into(),
             code_punctuation: rgb(0x8a8a92).into(),
         }
     }

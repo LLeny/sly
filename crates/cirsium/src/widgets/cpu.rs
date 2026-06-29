@@ -3,6 +3,7 @@ use gpui::{App, ClickEvent, Div, FontWeight, SharedString, Window, div};
 
 use crate::assets::icon;
 use crate::components::{ClickHandler, Copyable, Panel, label_text};
+use crate::diff::{Highlight, highlight_color};
 use crate::theme::Theme;
 
 #[derive(Clone)]
@@ -10,6 +11,7 @@ pub struct RegisterView {
     pub name: SharedString,
     pub value: u32,
     pub bits: u8,
+    pub highlight: Highlight,
 }
 
 impl RegisterView {
@@ -18,6 +20,7 @@ impl RegisterView {
             name: name.into(),
             value,
             bits,
+            highlight: Highlight::None,
         }
     }
 
@@ -134,7 +137,7 @@ fn reg_cell(theme: &Theme, r: &RegisterView) -> Copyable {
         .child(
             div()
                 .font_family(theme.mono_font)
-                .text_color(theme.text_primary)
+                .text_color(highlight_color(theme, r.highlight))
                 .child(hex.clone()),
         );
 

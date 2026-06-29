@@ -10,5 +10,6 @@ disasm = []
 [dependencies]
 chapa = "0.3.0"
 chipi-macros = { git = "https://github.com/ioncodes/chipi", branch = "1.0" }
+inventory = "0.3.24"
 thiserror = "2.0.18"
 tracing = "0.1.44"

@@ -1,27 +1,10 @@
 use super::decoder;
 use crate::Snes;
 use crate::cpu::Flags;
+use crate::cpu::addressing::{self, AddrMode};
 use crate::cpu::decoder::{Alu, Call, Compare, Pop, Push, Transfer};
 use crate::mmio::Address;
 use decoder::{Branches, FlagMask, FlagOps, Instruction, Jump, Load, RegStep, Store, SwTrap};
-
-enum AddrMode {
-    Dp(u8),
-    DpX(u8),
-    DpY(u8),
-    Abs(u16),
-    AbsX(u16),
-    AbsY(u16),
-    Abl(u32),
-    AlX(u32),
-    Idp(u8),
-    Idx(u8),
-    Idy(u8),
-    Idl(u8),
-    Idly(u8),
-    Sr(u8),
-    Isy(u8),
-}
 
 pub(crate) struct InterpreterView<'a> {
     snes: &'a mut Snes,
@@ -63,56 +46,6 @@ impl<'a> InterpreterView<'a> {
         self.next_pc = self.next_pc.wrapping_add(offset as u16);
     }
 
-    /// Resolve any addressing mode to its 24bit effective [`Address`].
-    fn resolve(&self, mode: AddrMode) -> Address {
-        let (dbr, d, x, y, sp) = (
-            self.snes.cpu.data_bank,
-            self.snes.cpu.direct_page,
-            self.snes.cpu.index_x,
-            self.snes.cpu.index_y,
-            self.snes.cpu.stack_pointer,
-        );
-
-        let dp_ptr = |dp: u8| Address::new(0, d.wrapping_add(dp as u16));
-        let dp_idx =
-            |dp: u8, idx: u16| Address::new(0, d.wrapping_add(dp as u16).wrapping_add(idx));
-        let abs_idx = |addr: u16, idx: u16| Address::new(dbr, addr.wrapping_add(idx));
-        let indirect_y = |ptr: Address| {
-            let base = Address::new(dbr, self.snes.read16(ptr));
-            Address::from_24bit(base.as_24bit().wrapping_add(y as u32))
-        };
-
-        match mode {
-            AddrMode::Dp(dp) => dp_ptr(dp),
-            AddrMode::DpX(dp) => dp_idx(dp, x),
-            AddrMode::DpY(dp) => dp_idx(dp, y),
-            AddrMode::Abs(addr) => Address::new(dbr, addr),
-            AddrMode::AbsX(addr) => abs_idx(addr, x),
-            AddrMode::AbsY(addr) => abs_idx(addr, y),
-            AddrMode::Abl(addr) => Address::from_24bit(addr),
-            AddrMode::AlX(addr) => Address::from_24bit(addr.wrapping_add(x as u32)),
-            AddrMode::Idp(dp) => Address::new(dbr, self.snes.read16(dp_ptr(dp))),
-            AddrMode::Idx(dp) => {
-                let ptr = self.resolve(AddrMode::DpX(dp));
-                Address::new(dbr, self.snes.read16(ptr))
-            }
-            AddrMode::Idy(dp) => indirect_y(dp_ptr(dp)),
-            AddrMode::Idl(dp) => Address::from_24bit(self.read24(dp_ptr(dp))),
-            AddrMode::Idly(dp) => {
-                Address::from_24bit(self.read24(dp_ptr(dp)).wrapping_add(y as u32))
-            }
-            AddrMode::Sr(sr) => Address::new(0, sp.wrapping_add(sr as u16)),
-            AddrMode::Isy(sr) => indirect_y(Address::new(0, sp.wrapping_add(sr as u16))),
-        }
-    }
-
-    /// Read a 24bit pointer starting at `ptr`.
-    fn read24(&self, ptr: Address) -> u32 {
-        let lo = self.snes.read16(ptr) as u32;
-        let hi = self.snes.read8(ptr.wrapping_add(2)) as u32;
-        lo | (hi << 16)
-    }
-
     /// Write the low byte of `value` to `ea`, and the high byte to the next
     /// address when the accumulator is in 16bit mode.
     fn write(&mut self, ea: Address, value: u16) {
@@ -151,13 +84,6 @@ impl<'a> InterpreterView<'a> {
         let sp = self.snes.cpu.stack_pointer.wrapping_add(1);
         self.snes.cpu.stack_pointer = sp;
         self.snes.read8(Address::new(0, sp))
-    }
-
-    /// Pop a word from the stack.
-    fn pop16(&mut self) -> u16 {
-        let lo = self.pop8() as u16;
-        let hi = self.pop8() as u16;
-        (hi << 8) | lo
     }
 
     /// Shared interrupt entry sequence.
@@ -285,7 +211,8 @@ impl InterpreterView<'_> {
                 self.set_pc(target);
             }
             Jump::JmlIal { addr } => {
-                let target = Address::from_24bit(self.read24(Address::new(0, addr)));
+                let target =
+                    Address::from_24bit(addressing::read24(self.snes, Address::new(0, addr)));
                 self.set_pc_long(target.bank(), target.address());
             }
         }
@@ -330,7 +257,7 @@ impl InterpreterView<'_> {
             Store::StaAlx { addr } => (AddrMode::AlX(addr), self.snes.cpu.acc),
             other => todo!("Implement store instruction {other:?}"),
         };
-        let ea = self.resolve(mode);
+        let ea = addressing::resolve(self.snes, mode);
         self.write(ea, value);
     }
 
@@ -396,7 +323,7 @@ impl InterpreterView<'_> {
     fn compare(&mut self, op: Compare) {
         match op {
             Compare::CmpAbs { addr } => {
-                let ea = self.resolve(AddrMode::Abs(addr));
+                let ea = addressing::resolve(self.snes, AddrMode::Abs(addr));
                 let value = self.read(ea);
                 let wide = self.snes.cpu.flags.is_acc_16bits();
                 self.compare_values(self.snes.cpu.acc, value, wide);

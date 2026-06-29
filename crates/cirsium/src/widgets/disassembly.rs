@@ -32,6 +32,7 @@ pub enum TokenKind {
     ImmPrefix,
     HexPrefix,
     Register,
+    Symbol,
     Punctuation,
     Plain,
 }
@@ -63,6 +64,7 @@ fn token_color(theme: &Theme, kind: TokenKind) -> Hsla {
         TokenKind::ImmPrefix => theme.code_immediate,
         TokenKind::HexPrefix => theme.code_sigil,
         TokenKind::Register => theme.code_register,
+        TokenKind::Symbol => theme.code_symbol,
         TokenKind::Punctuation => theme.code_punctuation,
         TokenKind::Plain => theme.text_secondary,
     }
@@ -75,6 +77,8 @@ pub struct DisasmLine {
     pub bytes: SharedString,
     pub text: SharedString,
     pub tokens: Vec<DisasmToken>,
+    /// Muted trailing annotation, e.g. `NMITIMEN = $4200` or a resolved branch target.
+    pub note: SharedString,
     pub target: Option<u32>,
     pub current: bool,
     pub selected: bool,
@@ -95,6 +99,7 @@ impl DisasmLine {
             bytes: bytes.into(),
             text: text.into(),
             tokens,
+            note: SharedString::default(),
             target: None,
             current,
             selected: false,
@@ -103,6 +108,11 @@ impl DisasmLine {
 
     pub fn target(mut self, target: Option<u32>) -> Self {
         self.target = target;
+        self
+    }
+
+    pub fn note(mut self, note: impl Into<SharedString>) -> Self {
+        self.note = note.into();
         self
     }
 }
@@ -311,6 +321,19 @@ fn disasm_row(
         );
     }
     row = row.child(text);
+
+    if !line.note.is_empty() {
+        row = row.child(
+            div()
+                .ml_auto()
+                .pl_4()
+                .flex_none()
+                .font_family(theme.mono_font)
+                .text_sm()
+                .text_color(theme.code_comment)
+                .child(line.note.clone()),
+        );
+    }
 
     if !line.current && !line.selected {
         let hover_bg = theme.bg_header;

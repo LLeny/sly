@@ -1,16 +1,16 @@
 use cirsium::components::StatusView;
 use cirsium::widgets::{
-    CartridgeField, CartridgeView, CpuView, DisasmLine, DisassemblyView, FlagView, RegisterView,
-    TokenKind,
+    CartridgeField, CartridgeView, CpuView, DisasmLine, DisasmToken, DisassemblyView, FlagView,
+    RegisterView, TokenKind,
 };
 use gpui::SharedString;
 use snes::cartridge::{MapMode, Speed};
-use snes::cpu::disasm::InstructionClass;
+use snes::cpu::disasm::{Disasm, InstructionClass};
 use snes::mmio::Address;
 use snes::{Cartridge, Cpu, Snes};
 
 use crate::art::{AssetProvider, GameRef, System};
-use crate::cores::disasm::{SyntaxSpec, tokenize};
+use crate::cores::disasm::{SyntaxSpec, strip_symbol_sigils, tokenize};
 use crate::target::DebugTarget;
 
 pub struct SnesTarget {
@@ -175,18 +175,26 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> DisassemblyView {
     for _ in 0..count {
         let d = snes.disassemble_at(addr);
         let len = d.length.max(1);
-        let tokens = tokenize(&d.text, mnemonic_kind(d.class), &SNES_SYNTAX);
+        let text = strip_symbol_sigils(&d.text, &SNES_SYNTAX);
+        let tokens = tokenize(&text, mnemonic_kind(d.class), &SNES_SYNTAX);
+        let ea = (addr == pc)
+            .then(|| effective_address(snes, &text))
+            .flatten();
+        let note = disasm_note(&tokens, &d, bank, ea);
+
         lines.push(
             DisasmLine::new(
                 addr as u32,
                 format!("{bank:02X}:{addr:04X}"),
                 read_bytes(snes, bank, addr, len),
-                d.text,
+                text,
                 tokens,
                 addr == pc,
             )
-            .target(d.target),
+            .target(d.target)
+            .note(note),
         );
+
         addr = addr.wrapping_add(len as u16);
     }
 
@@ -208,6 +216,64 @@ fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
         .join(" ")
 }
 
+fn disasm_note(tokens: &[DisasmToken], d: &Disasm, bank: u8, ea: Option<Address>) -> String {
+    let mut parts: Vec<String> = tokens
+        .iter()
+        .filter(|t| t.kind == TokenKind::Symbol)
+        .filter_map(|t| {
+            let addr = snes::mmio::address_of(&t.text)?;
+            Some(format!("{} = ${addr:04X}", t.text))
+        })
+        .collect();
+
+    if let Some(ea) = ea {
+        let name = snes::mmio::symbol(ea.address()).map_or(String::new(), |n| format!(" = {n}"));
+        parts.push(format!("→ {:02X}:{:04X}{name}", ea.bank(), ea.address()));
+    } else if parts.is_empty() && d.class == InstructionClass::ControlFlow {
+        if let Some(target) = d.target {
+            parts.push(format!("→ {bank:02X}:{target:04X}"));
+        }
+    }
+
+    parts.join("  ")
+}
+
+fn effective_address(snes: &Snes, text: &str) -> Option<Address> {
+    use snes::cpu::addressing::AddrMode::*;
+
+    let op = text.split_once(' ')?.1.trim();
+    let (base, width) = operand_base(op)?;
+    let (dp, ab) = (base as u8, base as u16);
+
+    let mode = match width {
+        2 if op.ends_with(",s),y") => Isy(dp),
+        2 if op.ends_with(",x)") => Idx(dp),
+        2 if op.ends_with("),y") => Idy(dp),
+        2 if op.ends_with("],y") => Idly(dp),
+        2 if op.ends_with(",s") => Sr(dp),
+        2 if op.ends_with(']') => Idl(dp),
+        2 if op.ends_with(')') => Idp(dp),
+        2 if op.ends_with(",x") => DpX(dp),
+        2 if op.ends_with(",y") => DpY(dp),
+        4 if op.ends_with(",x") => AbsX(ab),
+        4 if op.ends_with(",y") => AbsY(ab),
+        6 if op.ends_with(",x") => AlX(base),
+        _ => return None,
+    };
+
+    Some(snes::cpu::addressing::resolve(snes, mode))
+}
+
+fn operand_base(op: &str) -> Option<(u32, usize)> {
+    if let Some((_, rest)) = op.split_once('$') {
+        let hex: String = rest.chars().take_while(char::is_ascii_hexdigit).collect();
+        return Some((u32::from_str_radix(&hex, 16).ok()?, hex.len()));
+    }
+
+    op.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .find_map(|tok| Some((snes::mmio::address_of(tok)? as u32, 4)))
+}
+
 fn mnemonic_kind(class: InstructionClass) -> TokenKind {
     match class {
         InstructionClass::ControlFlow => TokenKind::MnemonicFlow,
@@ -221,6 +287,7 @@ fn mnemonic_kind(class: InstructionClass) -> TokenKind {
 
 const SNES_SYNTAX: SyntaxSpec = SyntaxSpec {
     registers: &["A", "X", "Y", "S"],
+    symbols: snes::mmio::is_symbol,
 };
 
 fn cartridge_view(cart: &Cartridge) -> CartridgeView {

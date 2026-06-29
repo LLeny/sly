@@ -3,6 +3,34 @@ use logos::Logos;
 
 pub struct SyntaxSpec {
     pub registers: &'static [&'static str],
+    pub symbols: fn(&str) -> bool,
+}
+
+pub fn strip_symbol_sigils(text: &str, syntax: &SyntaxSpec) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'$' {
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+                end += 1;
+            }
+
+            if end > start && (syntax.symbols)(&text[start..end]) {
+                out.push_str(&text[start..end]);
+                i = end;
+                continue;
+            }
+        }
+
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+
+    out
 }
 
 #[derive(Logos)]
@@ -50,6 +78,8 @@ pub fn tokenize(text: &str, mnemonic: TokenKind, syntax: &SyntaxSpec) -> Vec<Dis
                     .any(|r| r.eq_ignore_ascii_case(slice))
                 {
                     TokenKind::Register
+                } else if (syntax.symbols)(slice) {
+                    TokenKind::Symbol
                 } else {
                     TokenKind::Plain
                 };

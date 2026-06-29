@@ -17,7 +17,7 @@ use cirsium::widgets::{
     CartridgeView, CartridgeWidget, ControlsView, ControlsWidget, CpuView, CpuWidget,
     DisassemblyWidget,
 };
-use cirsium::{Assets, Theme, ThemeMode, set_theme};
+use cirsium::{Assets, ChangeTracker, Highlight, Theme, ThemeMode, set_theme};
 use gpui::prelude::*;
 use gpui::{
     App, Bounds, ClickEvent, ClipboardItem, Context, MouseDownEvent, Pixels, Point, QuitMode,
@@ -87,6 +87,13 @@ struct Debugger {
     settings: Option<Point<Pixels>>,
     running: bool,
     run_task: Option<Task<()>>,
+    reg_changes: ChangeTracker<SharedString>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CpuRefresh {
+    Highlight,
+    Baseline,
 }
 
 impl Debugger {
@@ -94,7 +101,7 @@ impl Debugger {
         let mut disasm = Disasm::new();
         disasm.recompute(target.as_ref());
 
-        Self {
+        let mut debugger = Self {
             cartridge: target.cartridge().clone(),
             cpu: target.cpu_view(),
             status: target.status("paused"),
@@ -104,7 +111,29 @@ impl Debugger {
             settings: None,
             running: false,
             run_task: None,
+            reg_changes: ChangeTracker::default(),
+        };
+        debugger.refresh_cpu(CpuRefresh::Baseline);
+        debugger
+    }
+
+    fn refresh_cpu(&mut self, mode: CpuRefresh) {
+        let mut cpu = self.target.cpu_view();
+        if mode == CpuRefresh::Baseline {
+            self.reg_changes.clear();
         }
+
+        for reg in &mut cpu.registers {
+            let (key, value) = (reg.name.clone(), reg.value as u64);
+            reg.highlight = match mode {
+                CpuRefresh::Highlight => self.reg_changes.highlight(key, value),
+                CpuRefresh::Baseline => {
+                    self.reg_changes.snapshot(key, value);
+                    Highlight::None
+                }
+            };
+        }
+        self.cpu = cpu;
     }
 
     fn is_collapsed(&self, id: &'static str) -> bool {
@@ -157,7 +186,7 @@ impl Debugger {
 
         let ok = self.target.run_frame();
 
-        self.cpu = self.target.cpu_view();
+        self.refresh_cpu(CpuRefresh::Highlight);
         self.disasm.recompute(self.target.as_ref());
         if ok {
             self.status.state = self.target.caption("running");
@@ -173,7 +202,7 @@ impl Debugger {
     fn step(&mut self, cx: &mut Context<Self>) {
         let ok = self.target.step();
 
-        self.cpu = self.target.cpu_view();
+        self.refresh_cpu(CpuRefresh::Highlight);
         self.status.state = self
             .target
             .caption(if ok { "paused" } else { "unimplemented op" });
@@ -187,7 +216,7 @@ impl Debugger {
     fn reset(&mut self, cx: &mut Context<Self>) {
         self.target.reset();
 
-        self.cpu = self.target.cpu_view();
+        self.refresh_cpu(CpuRefresh::Baseline);
         self.status.state = self.target.caption("reset");
         self.running = false;
         self.run_task = None;
@@ -199,7 +228,7 @@ impl Debugger {
     fn set_pc_to(&mut self, addr: u32, cx: &mut Context<Self>) {
         self.disasm.close_menu();
         self.target.set_pc(addr);
-        self.cpu = self.target.cpu_view();
+        self.refresh_cpu(CpuRefresh::Highlight);
         self.status.state = self.target.caption("pc set");
         self.disasm.recompute(self.target.as_ref());
         cx.notify();

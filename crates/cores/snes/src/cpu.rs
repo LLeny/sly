@@ -1,3 +1,4 @@
+pub mod addressing;
 mod decoder;
 pub mod disasm;
 mod interpreter;
@@ -45,6 +46,10 @@ pub(crate) struct CodeReader<'a> {
 impl decoder::DisasmCtx for CodeReader<'_> {
     fn read_u8(&self, addr: u64) -> u8 {
         self.snes.read8(Address::from_24bit(addr as u32))
+    }
+
+    fn symbol(&self, addr: u64) -> Option<(String, u64)> {
+        crate::mmio::symbol(addr as u16).map(|name| (name.to_string(), 0))
     }
 }
 
