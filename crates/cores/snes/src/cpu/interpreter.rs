@@ -74,6 +74,9 @@ impl<'a> InterpreterView<'a> {
         );
 
         let dp_ptr = |dp: u8| Address::new(0, d.wrapping_add(dp as u16));
+        let dp_idx =
+            |dp: u8, idx: u16| Address::new(0, d.wrapping_add(dp as u16).wrapping_add(idx));
+        let abs_idx = |addr: u16, idx: u16| Address::new(dbr, addr.wrapping_add(idx));
         let indirect_y = |ptr: Address| {
             let base = Address::new(dbr, self.snes.read16(ptr));
             Address::from_24bit(base.as_24bit().wrapping_add(y as u32))
@@ -81,11 +84,11 @@ impl<'a> InterpreterView<'a> {
 
         match mode {
             AddrMode::Dp(dp) => dp_ptr(dp),
-            AddrMode::DpX(dp) => Address::new(0, d.wrapping_add(dp as u16).wrapping_add(x)),
-            AddrMode::DpY(dp) => Address::new(0, d.wrapping_add(dp as u16).wrapping_add(y)),
+            AddrMode::DpX(dp) => dp_idx(dp, x),
+            AddrMode::DpY(dp) => dp_idx(dp, y),
             AddrMode::Abs(addr) => Address::new(dbr, addr),
-            AddrMode::AbsX(addr) => Address::new(dbr, addr.wrapping_add(x)),
-            AddrMode::AbsY(addr) => Address::new(dbr, addr.wrapping_add(y)),
+            AddrMode::AbsX(addr) => abs_idx(addr, x),
+            AddrMode::AbsY(addr) => abs_idx(addr, y),
             AddrMode::Abl(addr) => Address::from_24bit(addr),
             AddrMode::AlX(addr) => Address::from_24bit(addr.wrapping_add(x as u32)),
             AddrMode::Idp(dp) => Address::new(dbr, self.snes.read16(dp_ptr(dp))),
@@ -282,8 +285,8 @@ impl InterpreterView<'_> {
                 self.set_pc(target);
             }
             Jump::JmlIal { addr } => {
-                let target = self.read24(Address::new(0, addr));
-                self.set_pc_long((target >> 16) as u8, target as u16);
+                let target = Address::from_24bit(self.read24(Address::new(0, addr)));
+                self.set_pc_long(target.bank(), target.address());
             }
         }
     }
