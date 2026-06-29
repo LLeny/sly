@@ -3,11 +3,29 @@ use crate::{
     Snes,
     cpu::{
         Flags,
-        decoder::{OPCODE_TAGS, Transfer},
+        decoder::{Alu, Transfer},
     },
     mmio::Address,
 };
 use decoder::{Branches, FlagMask, FlagOps, Instruction, Jump, Load, RegStep, Store, SwTrap};
+
+enum AddrMode {
+    Dp(u8),
+    DpX(u8),
+    DpY(u8),
+    Abs(u16),
+    AbsX(u16),
+    AbsY(u16),
+    Abl(u32),
+    AlX(u32),
+    Idp(u8),
+    Idx(u8),
+    Idy(u8),
+    Idl(u8),
+    Idly(u8),
+    Sr(u8),
+    Isy(u8),
+}
 
 pub(crate) struct InterpreterView<'a> {
     snes: &'a mut Snes,
@@ -49,9 +67,51 @@ impl<'a> InterpreterView<'a> {
         self.next_pc = self.next_pc.wrapping_add(offset as u16);
     }
 
-    /// Effective address of a 16bit operand within the current data bank.
-    fn data_ea(&self, addr: u16) -> Address {
-        Address::new(self.snes.cpu.data_bank, addr)
+    /// Resolve any addressing mode to its 24bit effective [`Address`].
+    fn resolve(&self, mode: AddrMode) -> Address {
+        let (dbr, d, x, y, sp) = (
+            self.snes.cpu.data_bank,
+            self.snes.cpu.direct_page,
+            self.snes.cpu.index_x,
+            self.snes.cpu.index_y,
+            self.snes.cpu.stack_pointer,
+        );
+
+        let dp_ptr = |dp: u8| Address::new(0, d.wrapping_add(dp as u16));
+        let indirect_y = |ptr: Address| {
+            let base = Address::new(dbr, self.snes.read16(ptr));
+            Address::from_24bit(base.as_24bit().wrapping_add(y as u32))
+        };
+
+        match mode {
+            AddrMode::Dp(dp) => dp_ptr(dp),
+            AddrMode::DpX(dp) => Address::new(0, d.wrapping_add(dp as u16).wrapping_add(x)),
+            AddrMode::DpY(dp) => Address::new(0, d.wrapping_add(dp as u16).wrapping_add(y)),
+            AddrMode::Abs(addr) => Address::new(dbr, addr),
+            AddrMode::AbsX(addr) => Address::new(dbr, addr.wrapping_add(x)),
+            AddrMode::AbsY(addr) => Address::new(dbr, addr.wrapping_add(y)),
+            AddrMode::Abl(addr) => Address::from_24bit(addr),
+            AddrMode::AlX(addr) => Address::from_24bit(addr.wrapping_add(x as u32)),
+            AddrMode::Idp(dp) => Address::new(dbr, self.snes.read16(dp_ptr(dp))),
+            AddrMode::Idx(dp) => {
+                let ptr = self.resolve(AddrMode::DpX(dp));
+                Address::new(dbr, self.snes.read16(ptr))
+            }
+            AddrMode::Idy(dp) => indirect_y(dp_ptr(dp)),
+            AddrMode::Idl(dp) => Address::from_24bit(self.read24(dp_ptr(dp))),
+            AddrMode::Idly(dp) => {
+                Address::from_24bit(self.read24(dp_ptr(dp)).wrapping_add(y as u32))
+            }
+            AddrMode::Sr(sr) => Address::new(0, sp.wrapping_add(sr as u16)),
+            AddrMode::Isy(sr) => indirect_y(Address::new(0, sp.wrapping_add(sr as u16))),
+        }
+    }
+
+    /// Read a 24bit pointer starting at `ptr`.
+    fn read24(&self, ptr: Address) -> u32 {
+        let lo = self.snes.read16(ptr) as u32;
+        let hi = self.snes.read8(ptr.wrapping_add(2)) as u32;
+        lo | (hi << 16)
     }
 
     /// Write the low byte of `value` to `ea`, and the high byte to the next
@@ -113,6 +173,7 @@ impl InterpreterView<'_> {
             Instruction::Load(op) => self.load(op),
             Instruction::Jump(op) => self.jump(op),
             Instruction::Transfer(op) => self.transfer(op),
+            Instruction::Alu(op) => self.alu(op),
 
             Instruction::BrlRell { disp } => self.branch(disp),
             Instruction::Xce => self.xce(),
@@ -197,9 +258,8 @@ impl InterpreterView<'_> {
                 self.set_pc(target);
             }
             Jump::JmlIal { addr } => {
-                let offset = self.snes.read16(Address::new(0, addr));
-                let bank = self.snes.read8(Address::new(0, addr.wrapping_add(2)));
-                self.set_pc_long(bank, offset);
+                let target = self.read24(Address::new(0, addr));
+                self.set_pc_long((target >> 16) as u8, target as u16);
             }
         }
     }
@@ -236,24 +296,15 @@ impl InterpreterView<'_> {
     }
 
     fn store(&mut self, op: Store) {
-        match op {
-            Store::StzAbs { addr } => {
-                let ea = self.data_ea(addr);
-                self.write(ea, 0);
-            }
-            Store::StaAbs { addr } => {
-                let ea = self.data_ea(addr);
-                self.write(ea, self.snes.cpu.acc);
-            }
-            Store::StaAbl { addr } => {
-                self.write(Address::from_24bit(addr), self.snes.cpu.acc);
-            }
-            Store::StaAlx { addr } => {
-                let ea = Address::from_24bit(addr.wrapping_add(self.snes.cpu.index_x as u32));
-                self.write(ea, self.snes.cpu.acc);
-            }
+        let (mode, value) = match op {
+            Store::StzAbs { addr } => (AddrMode::Abs(addr), 0),
+            Store::StaAbs { addr } => (AddrMode::Abs(addr), self.snes.cpu.acc),
+            Store::StaAbl { addr } => (AddrMode::Abl(addr), self.snes.cpu.acc),
+            Store::StaAlx { addr } => (AddrMode::AlX(addr), self.snes.cpu.acc),
             other => todo!("Implement store instruction {other:?}"),
-        }
+        };
+        let ea = self.resolve(mode);
+        self.write(ea, value);
     }
 
     fn load(&mut self, op: Load) {
@@ -277,6 +328,29 @@ impl InterpreterView<'_> {
                 self.snes.cpu.index_y = imm;
             }
             other => todo!("Implement load instruction {other:?}"),
+        }
+    }
+
+    fn alu(&mut self, op: Alu) {
+        match op {
+            Alu::SbcImmM16 { imm } => {
+                let cpu = &mut self.snes.cpu;
+
+                let borrow = if cpu.flags.carry() { 0 } else { 1 };
+                let wide = (cpu.acc as u32)
+                    .wrapping_sub(imm as u32)
+                    .wrapping_sub(borrow);
+                let result = wide as u16;
+
+                cpu.flags.set_carry(wide & 0x1_0000 == 0);
+                cpu.flags
+                    .set_overflow((cpu.acc ^ imm) & (cpu.acc ^ result) & 0x8000 != 0);
+                cpu.flags.set_zero_(result == 0);
+                cpu.flags.set_negative(result & 0x8000 != 0);
+
+                cpu.acc = result;
+            }
+            other => todo!("Implement ALU instruction {other:?}"),
         }
     }
 
