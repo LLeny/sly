@@ -3,7 +3,7 @@ use crate::{
     Snes,
     cpu::{
         Flags,
-        decoder::{Alu, Transfer},
+        decoder::{Alu, Call, Pop, Push, Transfer},
     },
     mmio::Address,
 };
@@ -137,6 +137,20 @@ impl<'a> InterpreterView<'a> {
         self.push8(value as u8);
     }
 
+    /// Pop a byte from the stack.
+    fn pop8(&mut self) -> u8 {
+        let sp = self.snes.cpu.stack_pointer.wrapping_add(1);
+        self.snes.cpu.stack_pointer = sp;
+        self.snes.read8(Address::new(0, sp))
+    }
+
+    /// Pop a word from the stack.
+    fn pop16(&mut self) -> u16 {
+        let lo = self.pop8() as u16;
+        let hi = self.pop8() as u16;
+        (hi << 8) | lo
+    }
+
     /// Shared interrupt entry sequence.
     fn service_interrupt(&mut self, native_vector: u16, emu_vector: u16) {
         let (program_bank, return_pc) = self.next();
@@ -174,6 +188,9 @@ impl InterpreterView<'_> {
             Instruction::Jump(op) => self.jump(op),
             Instruction::Transfer(op) => self.transfer(op),
             Instruction::Alu(op) => self.alu(op),
+            Instruction::Call(op) => self.call(op),
+            Instruction::Push(op) => self.push(op),
+            Instruction::Pop(op) => self.pop(op),
 
             Instruction::BrlRell { disp } => self.branch(disp),
             Instruction::Xce => self.xce(),
@@ -309,24 +326,12 @@ impl InterpreterView<'_> {
 
     fn load(&mut self, op: Load) {
         match op {
-            Load::LdaImmM8 { imm } => {
-                self.snes.cpu.acc = imm as u16;
-            }
-            Load::LdaImmM16 { imm } => {
-                self.snes.cpu.acc = imm;
-            }
-            Load::LdxImmX8 { imm } => {
-                self.snes.cpu.index_x = imm as u16;
-            }
-            Load::LdxImmX16 { imm } => {
-                self.snes.cpu.index_x = imm;
-            }
-            Load::LdyImmX8 { imm } => {
-                self.snes.cpu.index_y = imm as u16;
-            }
-            Load::LdyImmX16 { imm } => {
-                self.snes.cpu.index_y = imm;
-            }
+            Load::LdaImmM8 { imm } => self.snes.cpu.acc = imm as u16,
+            Load::LdaImmM16 { imm } => self.snes.cpu.acc = imm,
+            Load::LdxImmX8 { imm } => self.snes.cpu.index_x = imm as u16,
+            Load::LdxImmX16 { imm } => self.snes.cpu.index_x = imm,
+            Load::LdyImmX8 { imm } => self.snes.cpu.index_y = imm as u16,
+            Load::LdyImmX16 { imm } => self.snes.cpu.index_y = imm,
             other => todo!("Implement load instruction {other:?}"),
         }
     }
@@ -351,6 +356,30 @@ impl InterpreterView<'_> {
                 cpu.acc = result;
             }
             other => todo!("Implement ALU instruction {other:?}"),
+        }
+    }
+
+    fn call(&mut self, op: Call) {
+        match op {
+            decoder::Call::JsrAbs { addr } => {
+                self.push16(self.next_pc);
+                self.set_pc(addr);
+            }
+            other => todo!("Implement call instruction {other:?}"),
+        }
+    }
+
+    fn push(&mut self, op: Push) {
+        match op {
+            Push::Php => self.push8(self.snes.cpu.flags.raw()),
+            other => todo!("Implement push instruction {other:?}"),
+        }
+    }
+
+    fn pop(&mut self, op: Pop) {
+        match op {
+            Pop::Plp => self.snes.cpu.flags = Flags::from_raw(self.pop8()),
+            other => todo!("Implement pop instruction {other:?}"),
         }
     }
 
