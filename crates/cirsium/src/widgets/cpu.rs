@@ -1,4 +1,5 @@
-use gpui::{App, ClickEvent, Div, FontWeight, SharedString, Window, div, prelude::*};
+use gpui::prelude::*;
+use gpui::{App, ClickEvent, Div, FontWeight, SharedString, Window, div};
 
 use crate::assets::icon;
 use crate::components::{ClickHandler, Copyable, Panel, label_text};

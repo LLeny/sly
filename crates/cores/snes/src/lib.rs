@@ -10,10 +10,9 @@ pub use cpu::{Cpu, Disasm};
 pub use error::SnesError;
 pub use mmio::Mmio;
 
-use crate::{
-    interrupt::Irq,
-    mmio::{Address, dma::Dma},
-};
+use crate::interrupt::Irq;
+use crate::mmio::Address;
+use crate::mmio::dma::Dma;
 
 pub struct Snes {
     pub cpu: Cpu,

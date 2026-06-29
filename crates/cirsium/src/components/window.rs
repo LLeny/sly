@@ -1,6 +1,7 @@
+use gpui::prelude::*;
 use gpui::{
-    App, ClickEvent, Div, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window, div,
-    prelude::*, px, svg,
+    App, ClickEvent, Div, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window, div, px,
+    svg,
 };
 
 #[cfg(not(target_os = "macos"))]

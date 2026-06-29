@@ -1,4 +1,5 @@
-use gpui::{App, ClickEvent, Div, Hsla, SharedString, Stateful, Window, div, prelude::*, px, svg};
+use gpui::prelude::*;
+use gpui::{App, ClickEvent, Div, Hsla, SharedString, Stateful, Window, div, px, svg};
 
 use crate::assets::icon;
 use crate::theme::{MONO_FONT, Theme, with_alpha};

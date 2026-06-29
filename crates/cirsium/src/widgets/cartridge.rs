@@ -1,7 +1,5 @@
-use gpui::{
-    App, ClickEvent, Div, FontWeight, ObjectFit, SharedString, Window, div, img, prelude::*, px,
-    svg,
-};
+use gpui::prelude::*;
+use gpui::{App, ClickEvent, Div, FontWeight, ObjectFit, SharedString, Window, div, img, px, svg};
 
 use crate::assets::icon;
 use crate::components::{ClickHandler, Copyable, Panel, label_text};

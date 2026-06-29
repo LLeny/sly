@@ -1,8 +1,8 @@
 use std::time::Duration;
 
+use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, ClickEvent, ClipboardItem, Div, Entity, SharedString, Window, div, prelude::*,
-    px, svg,
+    AnyElement, App, ClickEvent, ClipboardItem, Div, Entity, SharedString, Window, div, px, svg,
 };
 
 use crate::assets::icon;

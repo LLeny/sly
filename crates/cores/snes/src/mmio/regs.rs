@@ -1,8 +1,6 @@
-use crate::{
-    Snes,
-    macros::{mmio_passthrough, register_mmio},
-    mmio::MmioReg,
-};
+use crate::Snes;
+use crate::macros::{mmio_passthrough, register_mmio};
+use crate::mmio::MmioReg;
 
 register_mmio! {
     /// NMITIMEN

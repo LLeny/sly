@@ -1,6 +1,7 @@
+use gpui::prelude::*;
 use gpui::{
     Anchor, App, ClickEvent, MouseDownEvent, Pixels, Point, SharedString, Window, anchored,
-    deferred, div, prelude::*, px,
+    deferred, div, px,
 };
 
 use super::ClickHandler;

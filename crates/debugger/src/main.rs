@@ -16,10 +16,11 @@ use cirsium::widgets::{
     DisassemblyWidget,
 };
 use cirsium::{Assets, Theme, ThemeMode, set_theme};
+use gpui::prelude::*;
 use gpui::{
     App, Bounds, ClickEvent, ClipboardItem, Context, MouseDownEvent, Pixels, Point, QuitMode,
     SharedString, Task, TitlebarOptions, Window, WindowBounds, WindowDecorations, WindowOptions,
-    div, prelude::*, px, size,
+    div, px, size,
 };
 use gpui_platform::application;
 use reqwest_client::ReqwestClient;

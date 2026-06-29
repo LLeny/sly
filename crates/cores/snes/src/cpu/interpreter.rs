@@ -1,12 +1,8 @@
 use super::decoder;
-use crate::{
-    Snes,
-    cpu::{
-        Flags,
-        decoder::{Alu, Call, Pop, Push, Transfer},
-    },
-    mmio::Address,
-};
+use crate::Snes;
+use crate::cpu::Flags;
+use crate::cpu::decoder::{Alu, Call, Compare, Pop, Push, Transfer};
+use crate::mmio::Address;
 use decoder::{Branches, FlagMask, FlagOps, Instruction, Jump, Load, RegStep, Store, SwTrap};
 
 enum AddrMode {
@@ -124,6 +120,16 @@ impl<'a> InterpreterView<'a> {
         }
     }
 
+    /// Read the low byte from `ea`, and the high byte from the next address when
+    /// the accumulator is in 16bit mode.
+    fn read(&self, ea: Address) -> u16 {
+        if self.snes.cpu.flags.is_acc_16bits() {
+            self.snes.read16(ea)
+        } else {
+            self.snes.read8(ea) as u16
+        }
+    }
+
     /// Push a byte onto the stack.
     fn push8(&mut self, value: u8) {
         let sp = self.snes.cpu.stack_pointer;
@@ -191,6 +197,7 @@ impl InterpreterView<'_> {
             Instruction::Call(op) => self.call(op),
             Instruction::Push(op) => self.push(op),
             Instruction::Pop(op) => self.pop(op),
+            Instruction::Compare(op) => self.compare(op),
 
             Instruction::BrlRell { disp } => self.branch(disp),
             Instruction::Xce => self.xce(),
@@ -381,6 +388,34 @@ impl InterpreterView<'_> {
             Pop::Plp => self.snes.cpu.flags = Flags::from_raw(self.pop8()),
             other => todo!("Implement pop instruction {other:?}"),
         }
+    }
+
+    fn compare(&mut self, op: Compare) {
+        match op {
+            Compare::CmpAbs { addr } => {
+                let ea = self.resolve(AddrMode::Abs(addr));
+                let value = self.read(ea);
+                let wide = self.snes.cpu.flags.is_acc_16bits();
+                self.compare_values(self.snes.cpu.acc, value, wide);
+            }
+            other => todo!("Implement compare instruction {other:?}"),
+        }
+    }
+
+    fn compare_values(&mut self, reg: u16, value: u16, wide: bool) {
+        let (mask, sign) = if wide {
+            (0xffff, 0x8000)
+        } else {
+            (0x00ff, 0x0080)
+        };
+        let reg = reg & mask;
+        let value = value & mask;
+        let result = reg.wrapping_sub(value) & mask;
+
+        let flags = &mut self.snes.cpu.flags;
+        flags.set_carry(reg >= value);
+        flags.set_zero_(result == 0);
+        flags.set_negative(result & sign != 0);
     }
 
     fn xce(&mut self) {

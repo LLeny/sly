@@ -1,4 +1,5 @@
-use gpui::{Div, FontWeight, SharedString, div, prelude::*, px};
+use gpui::prelude::*;
+use gpui::{Div, FontWeight, SharedString, div, px};
 
 use super::primitives::separator;
 use crate::theme::Theme;

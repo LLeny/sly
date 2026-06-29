@@ -1,8 +1,9 @@
 use std::rc::Rc;
 
+use gpui::prelude::*;
 use gpui::{
     App, ClickEvent, Div, Hsla, MouseButton, Pixels, Point, SharedString, Stateful,
-    UniformListScrollHandle, Window, div, prelude::*, px, svg, uniform_list,
+    UniformListScrollHandle, Window, div, px, svg, uniform_list,
 };
 
 use crate::assets::icon;
