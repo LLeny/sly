@@ -24,6 +24,8 @@ use cores::SnesTarget;
 use target::DebugTarget;
 
 fn main() {
+    tracing_subscriber::fmt().without_time().init();
+
     let Some(path) = std::env::args().nth(1) else {
         eprintln!("usage: debugger <rom.sfc>");
         std::process::exit(2);

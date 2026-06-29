@@ -1481,6 +1481,7 @@ dependencies = [
  "logos",
  "reqwest_client",
  "snes",
+ "tracing-subscriber",
  "urlencoding",
 ]
 
