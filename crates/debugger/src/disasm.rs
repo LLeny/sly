@@ -1,9 +1,9 @@
 use cirsium::widgets::DisassemblyView;
 use gpui::{Pixels, Point, ScrollStrategy, SharedString, UniformListScrollHandle};
 
-use crate::session::Session;
+use crate::target::DebugTarget;
 
-const LEAD_BYTES: u16 = 48;
+const LEAD_BYTES: u32 = 48;
 const COUNT: usize = 200;
 
 pub struct Menu {
@@ -20,7 +20,7 @@ pub struct Disasm {
     pub menu: Option<Menu>,
     follow_pc: bool,
     show_bytes: bool,
-    base: u16,
+    base: u32,
     selected: Option<u32>,
 }
 
@@ -45,19 +45,19 @@ impl Disasm {
         self.show_bytes
     }
 
-    pub fn recompute(&mut self, session: &Session) {
-        let pc = session.pc();
+    pub fn recompute(&mut self, target: &dyn DebugTarget) {
+        let pc = target.pc();
         let (view, base) = if self.follow_pc {
             let base = pc.saturating_sub(LEAD_BYTES);
-            let view = session.disassemble(base, COUNT);
+            let view = target.disassemble(base, COUNT);
 
             if view.lines.iter().any(|l| l.current) {
                 (view, base)
             } else {
-                (session.disassemble(pc, COUNT), pc)
+                (target.disassemble(pc, COUNT), pc)
             }
         } else {
-            (session.disassemble(self.base, COUNT), self.base)
+            (target.disassemble(self.base, COUNT), self.base)
         };
 
         self.base = base;
@@ -81,7 +81,11 @@ impl Disasm {
 
     pub fn select(&mut self, ix: usize) {
         if let Some(line) = self.view.lines.get(ix) {
-            self.selected = Some(line.addr);
+            self.selected = if self.selected == Some(line.addr) {
+                None
+            } else {
+                Some(line.addr)
+            };
             self.apply_selection();
         }
     }
@@ -104,9 +108,9 @@ impl Disasm {
         self.menu.take().is_some()
     }
 
-    pub fn toggle_follow(&mut self, session: &Session) {
+    pub fn toggle_follow(&mut self, target: &dyn DebugTarget) {
         self.follow_pc = !self.follow_pc;
-        self.recompute(session);
+        self.recompute(target);
     }
 
     pub fn toggle_bytes(&mut self) {

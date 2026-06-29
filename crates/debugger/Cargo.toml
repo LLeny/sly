@@ -10,3 +10,5 @@ cirsium = { path = "../cirsium" }
 snes = { path = "../cores/snes" }
 reqwest_client = { git = "https://github.com/ioncodes/zed", rev = "f10625819af32278aaad3dfb38de2f267bedeb6d" }
 urlencoding = "2.1.3"
+crc32fast = "1.5.0"
+logos = "0.16.1"

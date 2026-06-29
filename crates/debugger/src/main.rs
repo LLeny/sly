@@ -1,6 +1,8 @@
 mod art;
+mod cores;
+mod db;
 mod disasm;
-mod session;
+mod target;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -25,18 +27,19 @@ use gpui::{
 use gpui_platform::application;
 use reqwest_client::ReqwestClient;
 
-use art::NintendoGamesIcons;
+use art::LibretroThumbnails;
+use cores::SnesTarget;
 use disasm::Disasm;
-use session::Session;
+use target::DebugTarget;
 
 fn main() {
     let Some(path) = std::env::args().nth(1) else {
         eprintln!("usage: debugger <rom.sfc>");
         std::process::exit(2);
     };
-    let provider = NintendoGamesIcons::new();
-    let session = match Session::load(&path, &provider) {
-        Ok(session) => session,
+    let provider = LibretroThumbnails::new();
+    let target: Box<dyn DebugTarget> = match SnesTarget::load(&path, &provider) {
+        Ok(target) => Box::new(target),
         Err(err) => {
             eprintln!("failed to load {path}: {err}");
             std::process::exit(1);
@@ -67,7 +70,7 @@ fn main() {
                 window_decorations: Some(WindowDecorations::Client),
                 ..Default::default()
             },
-            |_window, cx| cx.new(|_cx| Debugger::new(session)),
+            |_window, cx| cx.new(|_cx| Debugger::new(target)),
         )
         .unwrap();
         cx.activate(true);
@@ -75,7 +78,7 @@ fn main() {
 }
 
 struct Debugger {
-    session: Session,
+    target: Box<dyn DebugTarget>,
     cartridge: CartridgeView,
     cpu: CpuView,
     status: StatusView,
@@ -87,15 +90,15 @@ struct Debugger {
 }
 
 impl Debugger {
-    fn new(session: Session) -> Self {
+    fn new(target: Box<dyn DebugTarget>) -> Self {
         let mut disasm = Disasm::new();
-        disasm.recompute(&session);
+        disasm.recompute(target.as_ref());
 
         Self {
-            cartridge: session.cartridge.clone(),
-            cpu: session.cpu_view(),
-            status: session.status("paused"),
-            session,
+            cartridge: target.cartridge().clone(),
+            cpu: target.cpu_view(),
+            status: target.status("paused"),
+            target,
             disasm,
             collapsed: HashSet::new(),
             settings: None,
@@ -122,7 +125,7 @@ impl Debugger {
 
         self.running = running;
         self.status.state = self
-            .session
+            .target
             .caption(if running { "running" } else { "paused" });
 
         if running {
@@ -152,15 +155,15 @@ impl Debugger {
             return false;
         }
 
-        let ok = self.session.run_frame();
+        let ok = self.target.run_frame();
 
-        self.cpu = self.session.cpu_view();
-        self.disasm.recompute(&self.session);
+        self.cpu = self.target.cpu_view();
+        self.disasm.recompute(self.target.as_ref());
         if ok {
-            self.status.state = self.session.caption("running");
+            self.status.state = self.target.caption("running");
         } else {
             self.running = false;
-            self.status.state = self.session.caption("unimplemented op");
+            self.status.state = self.target.caption("unimplemented op");
         }
 
         cx.notify();
@@ -168,37 +171,37 @@ impl Debugger {
     }
 
     fn step(&mut self, cx: &mut Context<Self>) {
-        let ok = self.session.step();
+        let ok = self.target.step();
 
-        self.cpu = self.session.cpu_view();
+        self.cpu = self.target.cpu_view();
         self.status.state = self
-            .session
+            .target
             .caption(if ok { "paused" } else { "unimplemented op" });
         self.running = false;
         self.run_task = None;
-        self.disasm.recompute(&self.session);
+        self.disasm.recompute(self.target.as_ref());
 
         cx.notify();
     }
 
     fn reset(&mut self, cx: &mut Context<Self>) {
-        self.session.reset();
+        self.target.reset();
 
-        self.cpu = self.session.cpu_view();
-        self.status.state = self.session.caption("reset");
+        self.cpu = self.target.cpu_view();
+        self.status.state = self.target.caption("reset");
         self.running = false;
         self.run_task = None;
-        self.disasm.recompute(&self.session);
+        self.disasm.recompute(self.target.as_ref());
 
         cx.notify();
     }
 
     fn set_pc_to(&mut self, addr: u32, cx: &mut Context<Self>) {
         self.disasm.close_menu();
-        self.session.set_pc(addr as u16);
-        self.cpu = self.session.cpu_view();
-        self.status.state = self.session.caption("pc set");
-        self.disasm.recompute(&self.session);
+        self.target.set_pc(addr);
+        self.cpu = self.target.cpu_view();
+        self.status.state = self.target.caption("pc set");
+        self.disasm.recompute(self.target.as_ref());
         cx.notify();
     }
 
@@ -219,7 +222,7 @@ impl Debugger {
     }
 
     fn toggle_follow(&mut self, cx: &mut Context<Self>) {
-        self.disasm.toggle_follow(&self.session);
+        self.disasm.toggle_follow(self.target.as_ref());
         cx.notify();
     }
 
@@ -427,6 +430,7 @@ impl Render for Debugger {
                             .flex_col()
                             .flex_1()
                             .min_w(px(0.))
+                            .min_h(px(0.))
                             .gap_2()
                             .child(disassembly)
                             .child(workspace),

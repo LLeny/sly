@@ -1,42 +1,50 @@
 use cirsium::components::StatusView;
 use cirsium::widgets::{
-    CartridgeField, CartridgeView, CpuView, DisasmLine, DisasmToken, DisassemblyView, FlagView,
-    RegisterView, TokenKind,
+    CartridgeField, CartridgeView, CpuView, DisasmLine, DisassemblyView, FlagView, RegisterView,
+    TokenKind,
 };
 use gpui::SharedString;
 use snes::cartridge::{MapMode, Speed};
+use snes::cpu::disasm::InstructionClass;
 use snes::mmio::Address;
 use snes::{Cartridge, Cpu, Snes};
 
 use crate::art::{AssetProvider, GameRef, System};
+use crate::cores::disasm::{SyntaxSpec, tokenize};
+use crate::target::DebugTarget;
 
-pub struct Session {
+pub struct SnesTarget {
     core: Snes,
-    pub cartridge: CartridgeView,
+    cartridge: CartridgeView,
     system: SharedString,
     label: SharedString,
     segments: Vec<SharedString>,
 }
 
-impl Session {
+impl SnesTarget {
     pub fn load(
         path: &str,
         provider: &dyn AssetProvider,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let rom = std::fs::read(path)?;
+        let title = crate::db::title(System::Snes, &rom);
         let cart = Cartridge::new(rom)?;
 
         let file_name = std::path::Path::new(path)
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.to_string());
-        let rom_stem = std::path::Path::new(path)
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| file_name.clone());
+
+        let name: SharedString = title.map(SharedString::from).unwrap_or_else(|| {
+            std::path::Path::new(path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| file_name.clone())
+                .into()
+        });
 
         let mut cartridge = cartridge_view(&cart);
-        cartridge.cover = provider.cover_art(&GameRef::new(System::Snes, rom_stem));
+        cartridge.cover = provider.cover_art(&GameRef::new(System::Snes, name));
 
         let segments = vec![
             mapper_name(&cart).into(),
@@ -53,18 +61,6 @@ impl Session {
         })
     }
 
-    pub fn pc(&self) -> u16 {
-        self.core.cpu.pc
-    }
-
-    pub fn step(&mut self) -> bool {
-        self.guarded(|core| core.step())
-    }
-
-    pub fn run_frame(&mut self) -> bool {
-        self.guarded(|core| core.run_frame())
-    }
-
     fn guarded(&mut self, f: impl FnOnce(&mut Snes)) -> bool {
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
@@ -72,24 +68,42 @@ impl Session {
         std::panic::set_hook(prev);
         result.is_ok()
     }
+}
 
-    pub fn reset(&mut self) {
+impl DebugTarget for SnesTarget {
+    fn pc(&self) -> u32 {
+        self.core.cpu.pc as u32
+    }
+
+    fn set_pc(&mut self, addr: u32) {
+        self.core.cpu.pc = addr as u16;
+    }
+
+    fn step(&mut self) -> bool {
+        self.guarded(|core| core.step())
+    }
+
+    fn run_frame(&mut self) -> bool {
+        self.guarded(|core| core.run_frame())
+    }
+
+    fn reset(&mut self) {
         self.core.cpu = Cpu::new(self.core.read16(Address::new(0x00, 0xFFFC)));
     }
 
-    pub fn set_pc(&mut self, addr: u16) {
-        self.core.cpu.pc = addr;
-    }
-
-    pub fn cpu_view(&self) -> CpuView {
+    fn cpu_view(&self) -> CpuView {
         cpu_view(&self.core.cpu)
     }
 
-    pub fn disassemble(&self, base: u16, count: usize) -> DisassemblyView {
-        disasm_view(&self.core, base, count)
+    fn disassemble(&self, base: u32, count: usize) -> DisassemblyView {
+        disasm_view(&self.core, base as u16, count)
     }
 
-    pub fn status(&self, label: &str) -> StatusView {
+    fn cartridge(&self) -> &CartridgeView {
+        &self.cartridge
+    }
+
+    fn status(&self, label: &str) -> StatusView {
         StatusView {
             system: self.system.clone(),
             session: self.label.clone(),
@@ -99,7 +113,7 @@ impl Session {
         }
     }
 
-    pub fn caption(&self, label: &str) -> SharedString {
+    fn caption(&self, label: &str) -> SharedString {
         caption(label, &self.core)
     }
 }
@@ -161,15 +175,18 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> DisassemblyView {
     for _ in 0..count {
         let d = snes.disassemble_at(addr);
         let len = d.length.max(1);
-        let tokens = tokenize(&d.text);
-        lines.push(DisasmLine::new(
-            addr as u32,
-            format!("{bank:02X}:{addr:04X}"),
-            read_bytes(snes, bank, addr, len),
-            d.text,
-            tokens,
-            addr == pc,
-        ));
+        let tokens = tokenize(&d.text, mnemonic_kind(d.class), &SNES_SYNTAX);
+        lines.push(
+            DisasmLine::new(
+                addr as u32,
+                format!("{bank:02X}:{addr:04X}"),
+                read_bytes(snes, bank, addr, len),
+                d.text,
+                tokens,
+                addr == pc,
+            )
+            .target(d.target),
+        );
         addr = addr.wrapping_add(len as u16);
     }
 
@@ -191,63 +208,20 @@ fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
         .join(" ")
 }
 
-fn tokenize(text: &str) -> Vec<DisasmToken> {
-    let b = text.as_bytes();
-    let n = b.len();
-    let mut i = 0;
-    let mut tokens = Vec::new();
-
-    let start = i;
-    while i < n && b[i].is_ascii_alphabetic() {
-        i += 1;
+fn mnemonic_kind(class: InstructionClass) -> TokenKind {
+    match class {
+        InstructionClass::ControlFlow => TokenKind::MnemonicFlow,
+        InstructionClass::Memory => TokenKind::MnemonicMemory,
+        InstructionClass::Arithmetic => TokenKind::MnemonicAlu,
+        InstructionClass::Transfer => TokenKind::MnemonicTransfer,
+        InstructionClass::System => TokenKind::MnemonicSystem,
+        InstructionClass::Other => TokenKind::Mnemonic,
     }
-
-    if i > start {
-        tokens.push(DisasmToken::new(&text[start..i], TokenKind::Mnemonic));
-    }
-
-    while i < n && b[i] == b' ' {
-        i += 1;
-    }
-
-    while i < n {
-        let c = b[i];
-        if c == b'#' || c == b'$' {
-            let s = i;
-            i += 1;
-            if c == b'#' && i < n && b[i] == b'$' {
-                i += 1;
-            }
-            while i < n && b[i].is_ascii_hexdigit() {
-                i += 1;
-            }
-            tokens.push(DisasmToken::new(&text[s..i], TokenKind::Number));
-        } else if c.is_ascii_alphabetic() {
-            let s = i;
-            while i < n && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
-                i += 1;
-            }
-            let word = &text[s..i];
-            let kind = match word {
-                "A" | "X" | "Y" | "S" => TokenKind::Register,
-                _ => TokenKind::Plain,
-            };
-            tokens.push(DisasmToken::new(word, kind));
-        } else if matches!(c, b',' | b'(' | b')' | b'[' | b']') {
-            tokens.push(DisasmToken::new(&text[i..i + 1], TokenKind::Punctuation));
-            i += 1;
-        } else {
-            let s = i;
-            i += 1;
-            while i < n && b[i] == c {
-                i += 1;
-            }
-            tokens.push(DisasmToken::new(&text[s..i], TokenKind::Plain));
-        }
-    }
-
-    tokens
 }
+
+const SNES_SYNTAX: SyntaxSpec = SyntaxSpec {
+    registers: &["A", "X", "Y", "S"],
+};
 
 fn cartridge_view(cart: &Cartridge) -> CartridgeView {
     let speed = match cart.memory_map() {

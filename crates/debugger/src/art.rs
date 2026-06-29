@@ -7,6 +7,36 @@ pub enum System {
     Snes,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Header {
+    None,
+    SnesCopier,
+}
+
+#[derive(Clone, Copy)]
+pub struct SystemInfo {
+    pub libretro_name: &'static str,
+    pub header: Header,
+}
+
+impl System {
+    #[allow(dead_code)]
+    pub const ALL: &'static [System] = &[System::Snes];
+
+    pub const fn info(self) -> SystemInfo {
+        match self {
+            System::Nes => SystemInfo {
+                libretro_name: "Nintendo - Nintendo Entertainment System",
+                header: Header::None,
+            },
+            System::Snes => SystemInfo {
+                libretro_name: "Nintendo - Super Nintendo Entertainment System",
+                header: Header::SnesCopier,
+            },
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct GameRef {
     pub system: System,
@@ -26,46 +56,41 @@ pub trait AssetProvider: Send + Sync {
     fn cover_art(&self, game: &GameRef) -> Option<SharedString>;
 }
 
-pub struct NintendoGamesIcons {
+pub struct LibretroThumbnails {
     base_url: SharedString,
 }
 
-impl NintendoGamesIcons {
+impl LibretroThumbnails {
     pub fn new() -> Self {
         Self {
-            base_url: "https://raw.githubusercontent.com/ZeroSuf3r/nintendo-games-icons/master"
-                .into(),
+            base_url: "https://thumbnails.libretro.com".into(),
         }
     }
 }
 
-impl Default for NintendoGamesIcons {
+impl Default for LibretroThumbnails {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AssetProvider for NintendoGamesIcons {
+impl AssetProvider for LibretroThumbnails {
     fn cover_art(&self, game: &GameRef) -> Option<SharedString> {
-        if !matches!(game.system, System::Nes | System::Snes) {
-            return None;
-        }
-
         let name = game.name.trim();
         if name.is_empty() {
             return None;
         }
 
-        let bucket = first_char_bucket(name);
-        let file = urlencoding::encode(name);
-        Some(format!("{}/{}/{}.png", self.base_url, bucket, file).into())
+        let system = urlencoding::encode(game.system.info().libretro_name);
+        let sanitized = sanitize(name);
+        let file = urlencoding::encode(&sanitized);
+        Some(format!("{}/{}/Named_Boxarts/{}.png", self.base_url, system, file).into())
     }
 }
 
-fn first_char_bucket(name: &str) -> String {
-    match name.chars().next() {
-        Some(c) if c.is_ascii_digit() => "0-9".to_string(),
-        Some(c) => c.to_ascii_uppercase().to_string(),
-        None => "0-9".to_string(),
-    }
+fn sanitize(name: &str) -> String {
+    const SPECIAL: &str = "&*/:`<>?\\|\"";
+    name.chars()
+        .map(|c| if SPECIAL.contains(c) { '_' } else { c })
+        .collect()
 }

@@ -2,3 +2,6 @@
 	path = submodules/chipi-spec
 	url = https://github.com/ioncodes/chipi-spec
 	branch = 1.0
+[submodule "submodules/libretro-database"]
+	path = submodules/libretro-database
+	url = https://github.com/libretro/libretro-database

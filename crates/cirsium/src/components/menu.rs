@@ -17,6 +17,7 @@ fn overlay(
 ) -> impl IntoElement {
     let panel = div()
         .id(id)
+        .occlude()
         .bg(theme.bg_panel)
         .border_1()
         .border_color(theme.border_strong)

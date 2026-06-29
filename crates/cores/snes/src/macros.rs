@@ -40,4 +40,5 @@ macro_rules! mmio_passthrough {
     };
 }
 
-pub(crate) use {mmio_passthrough, register_mmio};
+pub(crate) use mmio_passthrough;
+pub(crate) use register_mmio;

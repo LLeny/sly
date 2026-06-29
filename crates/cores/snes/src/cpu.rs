@@ -2,7 +2,7 @@ mod decoder;
 pub mod disasm;
 mod interpreter;
 
-pub use disasm::{Disasm, disassemble_at};
+pub use disasm::disassemble_at;
 
 use crate::Snes;
 use crate::mmio::Address;

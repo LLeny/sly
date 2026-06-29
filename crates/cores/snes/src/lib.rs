@@ -6,10 +6,11 @@ mod macros;
 pub mod mmio;
 
 pub use cartridge::Cartridge;
-pub use cpu::{Cpu, Disasm};
+pub use cpu::Cpu;
 pub use error::SnesError;
 pub use mmio::Mmio;
 
+use crate::cpu::disasm::Disasm;
 use crate::interrupt::Irq;
 use crate::mmio::Address;
 use crate::mmio::dma::Dma;

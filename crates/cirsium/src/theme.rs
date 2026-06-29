@@ -53,6 +53,16 @@ pub struct Theme {
     pub code_address: Hsla,
     pub code_comment: Hsla,
     pub code_number: Hsla,
+
+    pub code_flow: Hsla,
+    pub code_memory: Hsla,
+    pub code_alu: Hsla,
+    pub code_transfer: Hsla,
+    pub code_system: Hsla,
+    pub code_register: Hsla,
+    pub code_immediate: Hsla,
+    pub code_sigil: Hsla,
+    pub code_punctuation: Hsla,
 }
 
 impl Theme {
@@ -99,7 +109,17 @@ impl Theme {
             code_opcode: rgb(0x86c98f).into(),
             code_address: rgb(0x86868f).into(),
             code_comment: rgb(0x64645f).into(),
-            code_number: rgb(0xceae74).into(),
+            code_number: rgb(0xd7b87e).into(),
+
+            code_flow: rgb(0xe6a0c0).into(),
+            code_memory: rgb(0x8fbde6).into(),
+            code_alu: rgb(0xe6b58f).into(),
+            code_transfer: rgb(0xc6a8ec).into(),
+            code_system: rgb(0x8fe0cf).into(),
+            code_register: rgb(0x7fd4d4).into(),
+            code_immediate: rgb(0xa79bcf).into(),
+            code_sigil: rgb(0x9c8a5e).into(),
+            code_punctuation: rgb(0x6c6c74).into(),
         }
     }
 
@@ -136,6 +156,16 @@ impl Theme {
             code_address: rgb(0x6c6c74).into(),
             code_comment: rgb(0x82826a).into(),
             code_number: rgb(0x9a5a12).into(),
+
+            code_flow: rgb(0xb83a78).into(),
+            code_memory: rgb(0x2f6fb0).into(),
+            code_alu: rgb(0xb5651f).into(),
+            code_transfer: rgb(0x7a3ac4).into(),
+            code_system: rgb(0x12806a).into(),
+            code_register: rgb(0x1f8a8a).into(),
+            code_immediate: rgb(0x5f4fa0).into(),
+            code_sigil: rgb(0x8a7340).into(),
+            code_punctuation: rgb(0x8a8a92).into(),
         }
     }
 }

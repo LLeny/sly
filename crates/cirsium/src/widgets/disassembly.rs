@@ -3,15 +3,18 @@ use std::rc::Rc;
 use gpui::prelude::*;
 use gpui::{
     App, ClickEvent, Div, Hsla, MouseButton, Pixels, Point, SharedString, Stateful,
-    UniformListScrollHandle, Window, div, px, svg, uniform_list,
+    UniformListScrollHandle, Window, canvas, div, px, svg, uniform_list,
 };
 
 use crate::assets::icon;
 use crate::components::{ClickHandler, Panel};
 use crate::theme::Theme;
 
+mod arrows;
+use arrows::{GutterCell, arrow_gutters, paint_arrows};
+
 const ROW_HEIGHT: f32 = 20.;
-const LIST_HEIGHT: f32 = 260.;
+const MIN_LIST_HEIGHT: f32 = 120.;
 const BYTES_WIDTH: f32 = 96.;
 
 type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
@@ -20,7 +23,14 @@ type ContextCallback = Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App) + 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TokenKind {
     Mnemonic,
+    MnemonicFlow,
+    MnemonicMemory,
+    MnemonicAlu,
+    MnemonicTransfer,
+    MnemonicSystem,
     Number,
+    ImmPrefix,
+    HexPrefix,
     Register,
     Punctuation,
     Plain,
@@ -44,9 +54,16 @@ impl DisasmToken {
 fn token_color(theme: &Theme, kind: TokenKind) -> Hsla {
     match kind {
         TokenKind::Mnemonic => theme.code_opcode,
+        TokenKind::MnemonicFlow => theme.code_flow,
+        TokenKind::MnemonicMemory => theme.code_memory,
+        TokenKind::MnemonicAlu => theme.code_alu,
+        TokenKind::MnemonicTransfer => theme.code_transfer,
+        TokenKind::MnemonicSystem => theme.code_system,
         TokenKind::Number => theme.code_number,
-        TokenKind::Register => theme.info,
-        TokenKind::Punctuation => theme.text_dim,
+        TokenKind::ImmPrefix => theme.code_immediate,
+        TokenKind::HexPrefix => theme.code_sigil,
+        TokenKind::Register => theme.code_register,
+        TokenKind::Punctuation => theme.code_punctuation,
         TokenKind::Plain => theme.text_secondary,
     }
 }
@@ -58,6 +75,7 @@ pub struct DisasmLine {
     pub bytes: SharedString,
     pub text: SharedString,
     pub tokens: Vec<DisasmToken>,
+    pub target: Option<u32>,
     pub current: bool,
     pub selected: bool,
 }
@@ -77,9 +95,15 @@ impl DisasmLine {
             bytes: bytes.into(),
             text: text.into(),
             tokens,
+            target: None,
             current,
             selected: false,
         }
+    }
+
+    pub fn target(mut self, target: Option<u32>) -> Self {
+        self.target = target;
+        self
     }
 }
 
@@ -151,9 +175,11 @@ impl RenderOnce for DisassemblyWidget {
 
         let show_bytes = self.view.show_bytes;
         let lines = self.view.lines;
+        let (gutters, arrows_width) = arrow_gutters(&lines);
         let on_select = self.on_select;
         let on_context = self.on_context;
         let count = lines.len();
+        let empty_gutter = GutterCell::default();
         let list = uniform_list("disasm-list", count, move |range, _window, cx| {
             let theme = Theme::global(cx);
             let t = &*theme;
@@ -163,6 +189,8 @@ impl RenderOnce for DisassemblyWidget {
                         t,
                         ix,
                         &lines[ix],
+                        gutters.get(ix).unwrap_or(&empty_gutter),
+                        arrows_width,
                         show_bytes,
                         on_select.clone(),
                         on_context.clone(),
@@ -171,11 +199,13 @@ impl RenderOnce for DisassemblyWidget {
                 .collect::<Vec<_>>()
         })
         .track_scroll(&self.scroll)
-        .h(px(LIST_HEIGHT));
+        .flex_1()
+        .min_h(px(MIN_LIST_HEIGHT));
 
         let mut panel = Panel::new(Self::ID, "Disassembly")
             .glyph(icon::CODE)
             .collapsed(self.collapsed)
+            .grow(true)
             .on_toggle_opt(self.on_toggle)
             .child(list);
         if let Some(addr) = current_addr {
@@ -190,6 +220,8 @@ fn disasm_row(
     theme: &Theme,
     ix: usize,
     line: &DisasmLine,
+    arrows: &GutterCell,
+    arrows_width: f32,
     show_bytes: bool,
     on_select: Option<SelectCallback>,
     on_context: Option<ContextCallback>,
@@ -220,16 +252,31 @@ fn disasm_row(
         .rounded_md()
         .when(line.current, |d| d.bg(theme.accent_soft))
         .when(line.selected && !line.current, |d| d.bg(theme.bg_panel_alt))
-        .child(gutter)
-        .child(
-            div()
-                .font_family(theme.mono_font)
-                .text_sm()
-                .min_w(px(58.))
-                .flex_none()
-                .text_color(theme.code_address)
-                .child(line.address.clone()),
+        .child(gutter);
+
+    if arrows_width > 0. {
+        let draws = arrows.clone();
+        row = row.child(
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| paint_arrows(window, bounds, &draws),
+            )
+            .flex_none()
+            .w(px(arrows_width))
+            .h(px(ROW_HEIGHT)),
         );
+    }
+
+    row = row.child(
+        div()
+            .font_family(theme.mono_font)
+            .text_sm()
+            .min_w(px(58.))
+            .flex_none()
+            .text_color(theme.code_address)
+            .child(line.address.clone()),
+    );
+
     if show_bytes {
         row = row.child(
             div()
