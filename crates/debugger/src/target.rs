@@ -1,6 +1,7 @@
 use cirsium::Highlight;
 use cirsium::components::StatusView;
-use cirsium::widgets::{CartridgeView, CpuView, DisassemblyView, MemoryRegion};
+use cirsium::widgets::{CartridgeView, MemoryRegion};
+use debugger_model::{CpuView, DisasmLine};
 use gpui::SharedString;
 
 use crate::breakpoints::BreakpointMark;
@@ -18,7 +19,7 @@ pub trait DebugTarget {
     fn pc(&self, cpu: &CpuId) -> u32;
     fn set_pc(&mut self, cpu: &CpuId, addr: u32);
     fn cpu_view(&self, cpu: &CpuId) -> CpuView;
-    fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> DisassemblyView;
+    fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> Vec<DisasmLine>;
 
     fn step(&mut self) -> bool;
     fn run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome;

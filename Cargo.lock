@@ -1029,6 +1029,7 @@ dependencies = [
 name = "cirsium"
 version = "0.1.0"
 dependencies = [
+ "debugger-model",
  "gpui",
  "rust-embed",
 ]
@@ -1476,14 +1477,21 @@ version = "0.1.0"
 dependencies = [
  "cirsium",
  "crc32fast",
+ "debugger-model",
  "gpui",
  "gpui_platform",
- "logos",
  "reqwest_client",
  "snes",
  "tracing",
  "tracing-subscriber",
  "urlencoding",
+]
+
+[[package]]
+name = "debugger-model"
+version = "0.1.0"
+dependencies = [
+ "logos",
 ]
 
 [[package]]

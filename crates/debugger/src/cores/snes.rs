@@ -1,8 +1,9 @@
 use cirsium::Highlight;
 use cirsium::components::StatusView;
-use cirsium::widgets::{
-    BreakpointKind, CartridgeField, CartridgeView, CpuView, DisasmLine, DisasmToken,
-    DisassemblyView, FlagView, MemoryRegion, RegisterView, TokenKind,
+use cirsium::widgets::{BreakpointKind, CartridgeField, CartridgeView, MemoryRegion};
+use debugger_model::{
+    CpuView, DisasmLine, DisasmToken, FlagView, RegisterView, SyntaxSpec, TokenKind,
+    strip_symbol_sigils, tokenize,
 };
 use gpui::SharedString;
 use snes::apu::{Apu, spc700};
@@ -13,7 +14,6 @@ use snes::{Cartridge, Cpu, Snes};
 
 use crate::art::{AssetProvider, GameRef, System};
 use crate::breakpoints::BreakpointMark;
-use crate::cores::disasm::{SyntaxSpec, strip_symbol_sigils, tokenize};
 use crate::processor::{CpuDescriptor, CpuId};
 use crate::target::{DebugTarget, RunOutcome};
 
@@ -268,7 +268,7 @@ impl DebugTarget for SnesTarget {
         }
     }
 
-    fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> DisassemblyView {
+    fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> Vec<DisasmLine> {
         match cpu.as_str() {
             CPU_SPC => spc_disasm_view(&self.core.apu, base as u16, count),
             _ => disasm_view(&self.core, base as u16, count),
@@ -394,7 +394,7 @@ fn cpu_view(cpu: &snes::Cpu) -> CpuView {
     }
 }
 
-fn disasm_view(snes: &Snes, base: u16, count: usize) -> DisassemblyView {
+fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
     let bank = snes.cpu.program_bank;
     let pc = snes.cpu.pc;
     let mut addr = base;
@@ -426,10 +426,7 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> DisassemblyView {
         addr = addr.wrapping_add(len as u16);
     }
 
-    DisassemblyView {
-        lines,
-        show_bytes: false,
-    }
+    lines
 }
 
 fn spc_cpu_view(spc: &spc700::Spc700) -> CpuView {
@@ -457,7 +454,7 @@ fn spc_cpu_view(spc: &spc700::Spc700) -> CpuView {
     }
 }
 
-fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> DisassemblyView {
+fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> Vec<DisasmLine> {
     let pc = apu.spc700.pc;
     let mut addr = base;
     let mut lines = Vec::with_capacity(count);
@@ -484,10 +481,7 @@ fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> DisassemblyView {
         addr = addr.wrapping_add(len as u16);
     }
 
-    DisassemblyView {
-        lines,
-        show_bytes: false,
-    }
+    lines
 }
 
 fn spc_read_bytes(apu: &Apu, addr: u16, len: u8) -> String {

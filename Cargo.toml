@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/cirsium", "crates/cores/snes", "crates/debugger", "crates/playground"]
+members = ["crates/cirsium", "crates/cores/snes", "crates/debugger", "crates/debugger-model", "crates/playground"]
 
 [patch.crates-io]
 async-process = { git = "https://github.com/zed-industries/async-process.git", rev = "0b6d6713570af61806e1e5cb40e0f757cb93fd9d" }

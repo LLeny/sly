@@ -3,16 +3,9 @@ use std::hash::Hash;
 
 use gpui::Hsla;
 
-use crate::theme::Theme;
+pub use debugger_model::Highlight;
 
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
-pub enum Highlight {
-    #[default]
-    None,
-    Read,
-    Written,
-    Changed,
-}
+use crate::theme::Theme;
 
 pub fn highlight_color(theme: &Theme, highlight: Highlight) -> Hsla {
     match highlight {

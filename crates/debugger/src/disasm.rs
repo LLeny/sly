@@ -54,12 +54,12 @@ impl Disasm {
 
     pub fn recompute(&mut self, target: &dyn DebugTarget) {
         let pc = target.pc(&self.cpu);
-        let (view, base) = if self.follow_pc {
+        let (lines, base) = if self.follow_pc {
             let base = pc.saturating_sub(LEAD_BYTES);
-            let view = target.disassemble(&self.cpu, base, COUNT);
+            let lines = target.disassemble(&self.cpu, base, COUNT);
 
-            if view.lines.iter().any(|l| l.current) {
-                (view, base)
+            if lines.iter().any(|l| l.current) {
+                (lines, base)
             } else {
                 (target.disassemble(&self.cpu, pc, COUNT), pc)
             }
@@ -68,8 +68,10 @@ impl Disasm {
         };
 
         self.base = base;
-        self.view = view;
-        self.view.show_bytes = self.show_bytes;
+        self.view = DisassemblyView {
+            lines: lines.into_iter().map(Into::into).collect(),
+            show_bytes: self.show_bytes,
+        };
         self.apply_selection();
         self.apply_breakpoints();
 

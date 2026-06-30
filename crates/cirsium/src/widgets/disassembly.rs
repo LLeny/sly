@@ -21,22 +21,7 @@ const BYTES_WIDTH: f32 = 96.;
 type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
 type ContextCallback = Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App) + 'static>;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TokenKind {
-    Mnemonic,
-    MnemonicFlow,
-    MnemonicMemory,
-    MnemonicAlu,
-    MnemonicTransfer,
-    MnemonicSystem,
-    Number,
-    ImmPrefix,
-    HexPrefix,
-    Register,
-    Symbol,
-    Punctuation,
-    Plain,
-}
+pub use debugger_model::TokenKind;
 
 #[derive(Clone)]
 pub struct DisasmToken {
@@ -49,6 +34,15 @@ impl DisasmToken {
         Self {
             text: text.into(),
             kind,
+        }
+    }
+}
+
+impl From<debugger_model::DisasmToken> for DisasmToken {
+    fn from(token: debugger_model::DisasmToken) -> Self {
+        Self {
+            text: SharedString::from(token.text.as_ref()),
+            kind: token.kind,
         }
     }
 }
@@ -117,6 +111,23 @@ impl DisasmLine {
     pub fn note(mut self, note: impl Into<SharedString>) -> Self {
         self.note = note.into();
         self
+    }
+}
+
+impl From<debugger_model::DisasmLine> for DisasmLine {
+    fn from(line: debugger_model::DisasmLine) -> Self {
+        Self {
+            addr: line.addr,
+            address: SharedString::from(line.address.as_ref()),
+            bytes: SharedString::from(line.bytes.as_ref()),
+            text: SharedString::from(line.text.as_ref()),
+            tokens: line.tokens.into_iter().map(Into::into).collect(),
+            note: SharedString::from(line.note.as_ref()),
+            target: line.target,
+            current: line.current,
+            selected: false,
+            breakpoint: None,
+        }
     }
 }
 

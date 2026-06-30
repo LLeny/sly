@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use cirsium::assets::icon;
@@ -9,9 +10,10 @@ use cirsium::components::{
 };
 use cirsium::widgets::{
     BreakpointKind, BreakpointsWidget, CartridgeView, CartridgeWidget, ControlsView,
-    ControlsWidget, CpuView, CpuWidget, DisassemblyWidget, LogWidget, MemoryWidget, RowProvider,
+    ControlsWidget, CpuWidget, DisassemblyWidget, LogWidget, MemoryWidget, RowProvider,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
+use debugger_model::CpuView;
 use gpui::prelude::*;
 use gpui::{
     App, ClickEvent, ClipboardItem, Context, Entity, MouseDownEvent, Pixels, Point, SharedString,
@@ -31,7 +33,7 @@ struct ProcessorPane {
     space: SharedString,
     cpu_view: CpuView,
     disasm: Disasm,
-    reg_changes: ChangeTracker<SharedString>,
+    reg_changes: ChangeTracker<Arc<str>>,
 }
 
 pub(crate) struct Debugger {
@@ -125,7 +127,7 @@ impl Debugger {
 
     fn track_changes(
         mut cpu: CpuView,
-        changes: &mut ChangeTracker<SharedString>,
+        changes: &mut ChangeTracker<Arc<str>>,
         mode: CpuRefresh,
     ) -> CpuView {
         if mode == CpuRefresh::Baseline {
@@ -616,7 +618,7 @@ impl Render for Debugger {
 
         for (pane_ix, pane) in self.panes.iter().enumerate() {
             let cpu_id = SharedString::from(&pane.id);
-            let cpu_widget = CpuWidget::new(pane.cpu_view.clone())
+            let cpu_widget = CpuWidget::new(pane.cpu_view.clone().into())
                 .id(cpu_id.clone())
                 .title(pane.title.clone())
                 .collapsed(self.is_collapsed(&cpu_id))

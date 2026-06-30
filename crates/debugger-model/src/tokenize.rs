@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 
-use cirsium::widgets::{DisasmToken, TokenKind};
 use logos::Logos;
+
+use crate::model::{DisasmToken, TokenKind};
 
 pub struct SyntaxSpec {
     pub registers: &'static [&'static str],

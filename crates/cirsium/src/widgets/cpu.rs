@@ -52,6 +52,36 @@ pub struct CpuView {
     pub flags: Vec<FlagView>,
 }
 
+impl From<debugger_model::RegisterView> for RegisterView {
+    fn from(reg: debugger_model::RegisterView) -> Self {
+        Self {
+            name: SharedString::from(reg.name.as_ref()),
+            value: reg.value,
+            bits: reg.bits,
+            highlight: reg.highlight,
+        }
+    }
+}
+
+impl From<debugger_model::FlagView> for FlagView {
+    fn from(flag: debugger_model::FlagView) -> Self {
+        Self {
+            name: SharedString::from(flag.name.as_ref()),
+            set: flag.set,
+        }
+    }
+}
+
+impl From<debugger_model::CpuView> for CpuView {
+    fn from(view: debugger_model::CpuView) -> Self {
+        Self {
+            isa: SharedString::from(view.isa.as_ref()),
+            registers: view.registers.into_iter().map(Into::into).collect(),
+            flags: view.flags.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 #[derive(IntoElement)]
 pub struct CpuWidget {
     view: CpuView,
