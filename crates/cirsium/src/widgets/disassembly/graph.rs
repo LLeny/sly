@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rust_sugiyama::configure::Config;
 
 use super::{DisasmLine, FlowKind};
 
@@ -9,18 +9,17 @@ pub(super) const BLOCK_GUTTER_W: f32 = 20.;
 pub(super) const BLOCK_PAD_Y: f32 = 5.;
 const CHAR_W: f32 = 7.;
 const MIN_BLOCK_W: f32 = 96.;
-const H_GAP: f32 = 36.;
-const V_GAP: f32 = 38.;
+const VERTEX_SPACING: f64 = 38.;
 const COMPONENT_GAP: f32 = 56.;
 const BACK_LANE_GAP: f32 = 22.;
 const PORT_STUB: f32 = 10.;
 const CHANNEL_STEP: f32 = 8.;
+const LANE_MARGIN: f32 = 6.;
 const MARGIN: f32 = 24.;
 const NOTE_RESERVE: f32 = 150.;
 const MIN_BLOCK_CHARS: usize = 8;
 const BLOCK_BORDER_H: f32 = 2.;
-const ORDER_PASSES: usize = 4;
-const COORD_PASSES: usize = 8;
+const RANK_EPS: f32 = 0.5;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum EdgeKind {
@@ -96,7 +95,6 @@ pub(super) fn build(lines: &[DisasmLine]) -> GraphLayout {
         }
     }
 
-    let nb = blocks.len();
     let target_block = |line: &DisasmLine| -> Option<usize> {
         line.target
             .and_then(|t| addr_index.get(&t))
@@ -130,26 +128,7 @@ pub(super) fn build(lines: &[DisasmLine]) -> GraphLayout {
         }
     }
 
-    let mut succ: Vec<Vec<usize>> = vec![Vec::new(); nb];
-    let mut pred: Vec<Vec<usize>> = vec![Vec::new(); nb];
-    for &(f, t, _) in &edges {
-        if f != t {
-            succ[f].push(t);
-            pred[t].push(f);
-        }
-    }
-
-    let (layer, order) = layer_assignment(nb, &succ);
-    let components = components(nb, &edges);
-
-    let mut running_y = 0.;
-    let mut max_width: f32 = 0.;
-    for comp in components {
-        let (height, width) =
-            layout_component(&comp, &mut blocks, &layer, &order, &succ, &pred, running_y);
-        running_y += height + COMPONENT_GAP;
-        max_width = max_width.max(width);
-    }
+    let (layer, max_width) = layout_blocks(&mut blocks, &edges);
 
     let edges = route_edges(&edges, &blocks, &layer, max_width);
 
@@ -193,254 +172,72 @@ fn block_geometry(lines: &[DisasmLine], start: usize, end: usize) -> GraphBlock 
     }
 }
 
-fn layer_assignment(nb: usize, succ: &[Vec<usize>]) -> (Vec<i32>, Vec<usize>) {
-    let mut state = vec![0u8; nb];
-    let mut disc = vec![usize::MAX; nb];
-    let mut tick = 0usize;
-    let mut back: Vec<(usize, usize)> = Vec::new();
-
-    for s in 0..nb {
-        if state[s] != 0 {
-            continue;
-        }
-        let mut stack: Vec<(usize, usize)> = vec![(s, 0)];
-        state[s] = 1;
-        disc[s] = tick;
-        tick += 1;
-
-        while let Some(&(u, ci)) = stack.last() {
-            if ci < succ[u].len() {
-                stack.last_mut().unwrap().1 += 1;
-                let v = succ[u][ci];
-                match state[v] {
-                    0 => {
-                        state[v] = 1;
-                        disc[v] = tick;
-                        tick += 1;
-                        stack.push((v, 0));
-                    }
-                    1 => back.push((u, v)),
-                    _ => {}
-                }
-            } else {
-                state[u] = 2;
-                stack.pop();
-            }
-        }
-    }
-
-    let back_set: std::collections::HashSet<(usize, usize)> = back.iter().copied().collect();
-
-    let forward: Vec<(usize, usize)> = (0..nb)
-        .flat_map(|u| succ[u].iter().map(move |&v| (u, v)))
-        .filter(|e| !back_set.contains(e))
-        .collect();
-
+fn layout_blocks(blocks: &mut [GraphBlock], edges: &[(usize, usize, EdgeKind)]) -> (Vec<i32>, f32) {
+    let nb = blocks.len();
     let mut layer = vec![0i32; nb];
-    loop {
-        let mut changed = false;
-        for &(u, v) in &forward {
-            if layer[v] < layer[u] + 1 {
-                layer[v] = layer[u] + 1;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
 
-    let mut order: Vec<usize> = (0..nb).collect();
-    order.sort_by_key(|&u| disc[u]);
-
-    (layer, order)
-}
-
-fn components(nb: usize, edges: &[(usize, usize, EdgeKind)]) -> Vec<Vec<usize>> {
-    let mut parent: Vec<usize> = (0..nb).collect();
-    for &(f, t, _) in edges {
-        let (a, b) = (find(&mut parent, f), find(&mut parent, t));
-        if a != b {
-            parent[a] = b;
-        }
-    }
-
-    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
-    for u in 0..nb {
-        let root = find(&mut parent, u);
-        groups.entry(root).or_default().push(u);
-    }
-
-    let mut comps: Vec<Vec<usize>> = groups.into_values().collect();
-    comps.sort_by_key(|c| c.iter().copied().min().unwrap_or(0));
-    comps
-}
-
-fn find(parent: &mut [usize], mut x: usize) -> usize {
-    while parent[x] != x {
-        parent[x] = parent[parent[x]];
-        x = parent[x];
-    }
-    x
-}
-
-#[allow(clippy::needless_range_loop)]
-fn layout_component(
-    comp: &[usize],
-    blocks: &mut [GraphBlock],
-    layer: &[i32],
-    order: &[usize],
-    succ: &[Vec<usize>],
-    pred: &[Vec<usize>],
-    offset_y: f32,
-) -> (f32, f32) {
-    let min_layer = comp.iter().map(|&u| layer[u]).min().unwrap_or(0);
-    let max_layer = comp.iter().map(|&u| layer[u]).max().unwrap_or(0);
-    let depth = (max_layer - min_layer + 1) as usize;
-
-    let mut layers: Vec<Vec<usize>> = vec![Vec::new(); depth];
-    let mut disc_rank: HashMap<usize, usize> = HashMap::new();
-    for (rank, &u) in order.iter().enumerate() {
-        disc_rank.insert(u, rank);
-    }
-
-    let mut comp_nodes = comp.to_vec();
-    comp_nodes.sort_by_key(|u| disc_rank.get(u).copied().unwrap_or(0));
-    for &u in &comp_nodes {
-        layers[(layer[u] - min_layer) as usize].push(u);
-    }
-
-    for _ in 0..ORDER_PASSES {
-        for l in 1..depth {
-            sort_layer_by_neighbor(&mut layers, l, pred, true);
-        }
-        for l in (0..depth.saturating_sub(1)).rev() {
-            sort_layer_by_neighbor(&mut layers, l, succ, false);
-        }
-    }
-
-    let layer_y: Vec<f32> = {
-        let mut ys = vec![0.; depth];
-        let mut cursor = offset_y;
-        for l in 0..depth {
-            ys[l] = cursor;
-            let row_h = layers[l].iter().map(|&u| blocks[u].h).fold(0., f32::max);
-            cursor += row_h + V_GAP;
-        }
-        ys
-    };
-
-    for l in 0..depth {
-        for &u in &layers[l] {
-            blocks[u].y = layer_y[l];
-        }
-    }
-
-    for l in 0..depth {
-        let mut cursor = 0.;
-        for &u in &layers[l] {
-            blocks[u].x = cursor;
-            cursor += blocks[u].w + H_GAP;
-        }
-    }
-
-    for _ in 0..COORD_PASSES {
-        for l in 0..depth {
-            let nodes = &layers[l];
-            let desired: Vec<f32> = nodes
-                .iter()
-                .map(|&u| {
-                    let mut sum = 0.;
-                    let mut cnt = 0.;
-                    for &v in succ[u].iter().chain(pred[u].iter()) {
-                        sum += blocks[v].x + blocks[v].w / 2.;
-                        cnt += 1.;
-                    }
-                    if cnt > 0. {
-                        sum / cnt - blocks[u].w / 2.
-                    } else {
-                        blocks[u].x
-                    }
-                })
-                .collect();
-
-            for k in 0..nodes.len() {
-                let u = nodes[k];
-                let want = desired[k];
-                blocks[u].x = if k == 0 {
-                    want
-                } else {
-                    let prev = nodes[k - 1];
-                    want.max(blocks[prev].x + blocks[prev].w + H_GAP)
-                };
-            }
-        }
-    }
-
-    let mut min_x = f32::MAX;
-    let mut max_x = f32::MIN;
-    let mut max_y = offset_y;
-    for &u in comp {
-        min_x = min_x.min(blocks[u].x);
-        max_x = max_x.max(blocks[u].x + blocks[u].w);
-        max_y = max_y.max(blocks[u].y + blocks[u].h);
-    }
-
-    if min_x.is_finite() {
-        for &u in comp {
-            blocks[u].x -= min_x;
-        }
-    }
-
-    let width = (max_x - min_x).max(0.);
-    let height = max_y - offset_y;
-    (height, width)
-}
-
-fn sort_layer_by_neighbor(
-    layers: &mut [Vec<usize>],
-    l: usize,
-    neighbors: &[Vec<usize>],
-    look_up: bool,
-) {
-    let adj = if look_up {
-        if l == 0 {
-            return;
-        }
-        l - 1
-    } else {
-        if l + 1 >= layers.len() {
-            return;
-        }
-        l + 1
-    };
-    let mut pos: HashMap<usize, usize> = HashMap::new();
-    for (i, &u) in layers[adj].iter().enumerate() {
-        pos.insert(u, i);
-    }
-
-    let mut keyed: Vec<(f32, usize)> = layers[l]
+    let vertices: Vec<(u32, (f64, f64))> = blocks
         .iter()
         .enumerate()
-        .map(|(idx, &u)| {
-            let mut vals: Vec<usize> = neighbors[u]
-                .iter()
-                .filter_map(|v| pos.get(v).copied())
-                .collect();
-            vals.sort_unstable();
-
-            let key = if vals.is_empty() {
-                idx as f32
-            } else {
-                vals[vals.len() / 2] as f32
-            };
-
-            (key, u)
-        })
+        .map(|(i, b)| (i as u32, (b.w as f64, b.h as f64)))
+        .collect();
+    let su_edges: Vec<(u32, u32)> = edges
+        .iter()
+        .filter(|(f, t, _)| f != t)
+        .map(|&(f, t, _)| (f as u32, t as u32))
         .collect();
 
-    keyed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    layers[l] = keyed.into_iter().map(|(_, u)| u).collect();
+    let config = Config {
+        vertex_spacing: VERTEX_SPACING,
+        ..Default::default()
+    };
+    let mut layouts = rust_sugiyama::from_vertices_and_edges(&vertices, &su_edges, &config);
+    layouts.sort_by_key(|(nodes, _, _)| nodes.iter().map(|&(id, _)| id).min().unwrap_or(0));
+
+    let mut running_y = 0.;
+    let mut max_width: f32 = 0.;
+    let mut rank_base = 0i32;
+
+    for (nodes, _, _) in &layouts {
+        let mut ranks: Vec<f32> = nodes.iter().map(|&(_, (_, cy))| cy as f32).collect();
+        ranks.sort_by(|a, b| a.total_cmp(b));
+        ranks.dedup_by(|a, b| (*a - *b).abs() < RANK_EPS);
+
+        let base = rank_base;
+        rank_base += ranks.len() as i32;
+
+        let mut min_left = f32::MAX;
+        let mut min_top = f32::MAX;
+        let mut max_right = f32::MIN;
+        let mut max_bot = f32::MIN;
+        for &(id, (cx, cy)) in nodes {
+            let (cx, cy) = (cx as f32, cy as f32);
+            let (w, h) = (blocks[id].w, blocks[id].h);
+            min_left = min_left.min(cx - w / 2.);
+            min_top = min_top.min(cy - h / 2.);
+            max_right = max_right.max(cx + w / 2.);
+            max_bot = max_bot.max(cy + h / 2.);
+            layer[id] = base
+                + ranks
+                    .iter()
+                    .position(|&r| (r - cy).abs() < RANK_EPS)
+                    .unwrap_or(0) as i32;
+        }
+
+        if !min_left.is_finite() {
+            continue;
+        }
+
+        for &(id, (cx, cy)) in nodes {
+            blocks[id].x = (cx as f32 - blocks[id].w / 2.) - min_left;
+            blocks[id].y = (cy as f32 - blocks[id].h / 2.) - min_top + running_y;
+        }
+
+        running_y += (max_bot - min_top) + COMPONENT_GAP;
+        max_width = max_width.max(max_right - min_left);
+    }
+
+    (layer, max_width)
 }
 
 fn route_edges(
@@ -465,41 +262,109 @@ fn route_edges(
         block.x + block.w * (idx as f32 + 1.) / (total as f32 + 1.)
     };
 
+    let ends: Vec<EdgeEnds> = edges
+        .iter()
+        .enumerate()
+        .map(|(ei, &(f, t, _))| EdgeEnds {
+            sx: port(&blocks[f], out_rank[ei], out_total[f]),
+            tx: port(&blocks[t], in_rank[ei], in_total[t]),
+            sy: blocks[f].y + blocks[f].h,
+            ty: blocks[t].y,
+        })
+        .collect();
+
+    let is_forward = |f: usize, t: usize| f != t && layer[t] == layer[f] + 1;
+
     let mut back_lane = 0usize;
-    edges
+    let mut routed: Vec<GraphEdge> = edges
         .iter()
         .enumerate()
         .map(|(ei, &(f, t, kind))| {
-            let sx = port(&blocks[f], out_rank[ei], out_total[f]);
-            let tx = port(&blocks[t], in_rank[ei], in_total[t]);
-            let sy = blocks[f].y + blocks[f].h;
-            let ty = blocks[t].y;
-
+            let e = &ends[ei];
             let points = if f == t {
-                self_loop(&blocks[f], sx, tx)
-            } else if layer[t] == layer[f] + 1 {
-                let in_n = in_total[t] as f32;
-                let bias = (in_rank[ei] as f32 - (in_n - 1.) / 2.) * CHANNEL_STEP;
-                let channel = (sy + ty) / 2. + bias;
-                forward_route(sx, sy, tx, ty, channel)
+                self_loop(&blocks[f], e.sx, e.tx)
+            } else if is_forward(f, t) {
+                forward_route(e.sx, e.sy, e.tx, e.ty, (e.sy + e.ty) / 2.)
             } else {
                 let lane = max_width + BACK_LANE_GAP * (1 + back_lane) as f32;
-                let stub = (back_lane % 4) as f32 * 4.;
                 back_lane += 1;
-                back_route(sx, sy, tx, ty, lane, stub)
+                back_route(e.sx, e.sy, e.tx, e.ty, lane)
             };
             GraphEdge { kind, points }
         })
-        .collect()
+        .collect();
+
+    separate_channels(&mut routed);
+    routed
+}
+
+struct EdgeEnds {
+    sx: f32,
+    tx: f32,
+    sy: f32,
+    ty: f32,
+}
+
+fn separate_channels(edges: &mut [GraphEdge]) {
+    let mut segs: Vec<(usize, usize, f32, f32, f32)> = Vec::new();
+    for (ei, edge) in edges.iter().enumerate() {
+        for i in 0..edge.points.len().saturating_sub(1) {
+            let (x0, y0) = edge.points[i];
+            let (x1, y1) = edge.points[i + 1];
+            if (y0 - y1).abs() < 0.5 && (x0 - x1).abs() > 0.5 {
+                segs.push((ei, i, y0, x0.min(x1), x0.max(x1)));
+            }
+        }
+    }
+    segs.sort_by(|a, b| a.2.total_cmp(&b.2));
+
+    let mut start = 0;
+    while start < segs.len() {
+        let mut end = start + 1;
+        while end < segs.len() && segs[end].2 - segs[end - 1].2 < CHANNEL_STEP {
+            end += 1;
+        }
+
+        let cluster = &mut segs[start..end];
+        let mean = cluster.iter().map(|s| s.2).sum::<f32>() / cluster.len() as f32;
+        cluster.sort_by(|a, b| a.3.total_cmp(&b.3));
+
+        let mut lane_right: Vec<f32> = Vec::new();
+        let lanes_of: Vec<usize> = cluster
+            .iter()
+            .map(|s| {
+                let slot = lane_right.iter().position(|&r| r <= s.3 - LANE_MARGIN);
+                match slot {
+                    Some(l) => {
+                        lane_right[l] = s.4;
+                        l
+                    }
+                    None => {
+                        lane_right.push(s.4);
+                        lane_right.len() - 1
+                    }
+                }
+            })
+            .collect();
+
+        let lanes = lane_right.len() as f32;
+        for (s, &l) in cluster.iter().zip(&lanes_of) {
+            let y = mean + (l as f32 - (lanes - 1.) / 2.) * CHANNEL_STEP;
+            edges[s.0].points[s.1].1 = y;
+            edges[s.0].points[s.1 + 1].1 = y;
+        }
+
+        start = end;
+    }
 }
 
 fn forward_route(sx: f32, sy: f32, tx: f32, ty: f32, channel: f32) -> Vec<(f32, f32)> {
     vec![(sx, sy), (sx, channel), (tx, channel), (tx, ty)]
 }
 
-fn back_route(sx: f32, sy: f32, tx: f32, ty: f32, lane: f32, stub: f32) -> Vec<(f32, f32)> {
-    let out_y = sy + PORT_STUB + stub;
-    let in_y = ty - PORT_STUB - stub;
+fn back_route(sx: f32, sy: f32, tx: f32, ty: f32, lane: f32) -> Vec<(f32, f32)> {
+    let out_y = sy + PORT_STUB;
+    let in_y = ty - PORT_STUB;
     vec![
         (sx, sy),
         (sx, out_y),
