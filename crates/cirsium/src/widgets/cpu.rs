@@ -45,7 +45,7 @@ impl FlagView {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CpuView {
     pub isa: SharedString,
     pub registers: Vec<RegisterView>,
@@ -55,6 +55,8 @@ pub struct CpuView {
 #[derive(IntoElement)]
 pub struct CpuWidget {
     view: CpuView,
+    id: SharedString,
+    title: SharedString,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
 }
@@ -65,9 +67,21 @@ impl CpuWidget {
     pub fn new(view: CpuView) -> Self {
         Self {
             view,
+            id: Self::ID.into(),
+            title: "CPU".into(),
             collapsed: false,
             on_toggle: None,
         }
+    }
+
+    pub fn id(mut self, id: impl Into<SharedString>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    pub fn title(mut self, title: impl Into<SharedString>) -> Self {
+        self.title = title.into();
+        self
     }
 
     pub fn collapsed(mut self, collapsed: bool) -> Self {
@@ -98,7 +112,7 @@ impl RenderOnce for CpuWidget {
                     div()
                         .flex()
                         .gap_1()
-                        .children(row.iter().map(|r| reg_cell(t, r)))
+                        .children(row.iter().map(|r| reg_cell(t, &self.id, r)))
                 }));
 
         let flags = div()
@@ -117,7 +131,7 @@ impl RenderOnce for CpuWidget {
             .child(registers)
             .child(flags);
 
-        Panel::new(Self::ID, "CPU")
+        Panel::new(self.id, self.title)
             .glyph(icon::CPU)
             .meta(self.view.isa)
             .collapsed(self.collapsed)
@@ -126,7 +140,7 @@ impl RenderOnce for CpuWidget {
     }
 }
 
-fn reg_cell(theme: &Theme, r: &RegisterView) -> Copyable {
+fn reg_cell(theme: &Theme, id: &str, r: &RegisterView) -> Copyable {
     let hex = r.hex();
     let inner = div()
         .flex()
@@ -141,7 +155,7 @@ fn reg_cell(theme: &Theme, r: &RegisterView) -> Copyable {
                 .child(hex.clone()),
         );
 
-    Copyable::new(format!("reg-{}", r.name), hex)
+    Copyable::new(format!("{id}-reg-{}", r.name), hex)
         .cell()
         .child(inner)
 }

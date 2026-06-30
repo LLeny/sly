@@ -171,7 +171,6 @@ impl RenderOnce for MemoryWidget {
         let theme = Theme::global(cx);
         let t = &*theme;
 
-        let on_region_open = self.on_region_open;
         let bar = div()
             .flex()
             .items_center()
@@ -182,7 +181,7 @@ impl RenderOnce for MemoryWidget {
                 "mem-region",
                 self.region_label.clone(),
                 move |e, window, cx| {
-                    if let Some(handler) = &on_region_open {
+                    if let Some(handler) = &self.on_region_open {
                         handler(e, window, cx);
                     }
                 },
@@ -190,12 +189,8 @@ impl RenderOnce for MemoryWidget {
             .children(self.header_extra);
 
         let provider = self.rows;
-        let bytes_per_row = self.bytes_per_row;
         let selection = self.selection.map(|(a, b)| (a.min(b), a.max(b)));
         let breakpoints = Rc::new(self.breakpoints);
-        let on_byte_down = self.on_byte_down;
-        let on_byte_drag = self.on_byte_drag;
-        let on_context = self.on_context;
 
         let list = uniform_list("mem-list", self.row_count, move |range, _window, cx| {
             let rows = provider(range, cx);
@@ -206,12 +201,12 @@ impl RenderOnce for MemoryWidget {
                     row::mem_row(
                         t,
                         row,
-                        bytes_per_row,
+                        self.bytes_per_row,
                         selection,
                         &breakpoints,
-                        on_byte_down.clone(),
-                        on_byte_drag.clone(),
-                        on_context.clone(),
+                        self.on_byte_down.clone(),
+                        self.on_byte_drag.clone(),
+                        self.on_context.clone(),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -225,7 +220,7 @@ impl RenderOnce for MemoryWidget {
             .flex_col()
             .h_full()
             .child(bar)
-            .child(row::column_header(t, bytes_per_row))
+            .child(row::column_header(t, self.bytes_per_row))
             .child(list);
 
         let mut panel = Panel::new(Self::ID, "Memory")

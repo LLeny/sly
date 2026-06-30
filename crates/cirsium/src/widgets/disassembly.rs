@@ -130,6 +130,8 @@ pub struct DisassemblyView {
 pub struct DisassemblyWidget {
     view: DisassemblyView,
     scroll: UniformListScrollHandle,
+    id: SharedString,
+    title: SharedString,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
     on_select: Option<SelectCallback>,
@@ -143,11 +145,23 @@ impl DisassemblyWidget {
         Self {
             view,
             scroll,
+            id: Self::ID.into(),
+            title: "Disassembly".into(),
             collapsed: false,
             on_toggle: None,
             on_select: None,
             on_context: None,
         }
+    }
+
+    pub fn id(mut self, id: impl Into<SharedString>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    pub fn title(mut self, title: impl Into<SharedString>) -> Self {
+        self.title = title.into();
+        self
     }
 
     pub fn collapsed(mut self, collapsed: bool) -> Self {
@@ -186,27 +200,27 @@ impl RenderOnce for DisassemblyWidget {
             .find(|l| l.current)
             .map(|l| l.address.clone());
 
-        let show_bytes = self.view.show_bytes;
-        let lines = self.view.lines;
-        let (gutters, arrows_width) = arrow_gutters(&lines);
-        let on_select = self.on_select;
-        let on_context = self.on_context;
-        let count = lines.len();
+        let list_id = SharedString::from(format!("{}-list", self.id));
+        let (gutters, arrows_width) = arrow_gutters(&self.view.lines);
+        let count = self.view.lines.len();
         let empty_gutter = GutterCell::default();
-        let list = uniform_list("disasm-list", count, move |range, _window, cx| {
+        let list = uniform_list(list_id, count, move |range, _window, cx| {
             let theme = Theme::global(cx);
             let t = &*theme;
+            let row_options = DisasmRowOptions {
+                arrows_width,
+                show_bytes: self.view.show_bytes,
+                on_select: self.on_select.clone(),
+                on_context: self.on_context.clone(),
+            };
             range
                 .map(|ix| {
                     disasm_row(
                         t,
                         ix,
-                        &lines[ix],
+                        &self.view.lines[ix],
                         gutters.get(ix).unwrap_or(&empty_gutter),
-                        arrows_width,
-                        show_bytes,
-                        on_select.clone(),
-                        on_context.clone(),
+                        &row_options,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -215,7 +229,7 @@ impl RenderOnce for DisassemblyWidget {
         .flex_1()
         .min_h(px(MIN_LIST_HEIGHT));
 
-        let mut panel = Panel::new(Self::ID, "Disassembly")
+        let mut panel = Panel::new(self.id, self.title)
             .glyph(icon::CODE)
             .collapsed(self.collapsed)
             .grow(true)
@@ -229,15 +243,19 @@ impl RenderOnce for DisassemblyWidget {
     }
 }
 
+struct DisasmRowOptions {
+    arrows_width: f32,
+    show_bytes: bool,
+    on_select: Option<SelectCallback>,
+    on_context: Option<ContextCallback>,
+}
+
 fn disasm_row(
     theme: &Theme,
     ix: usize,
     line: &DisasmLine,
     arrows: &GutterCell,
-    arrows_width: f32,
-    show_bytes: bool,
-    on_select: Option<SelectCallback>,
-    on_context: Option<ContextCallback>,
+    options: &DisasmRowOptions,
 ) -> Stateful<Div> {
     let mut gutter = div()
         .w(px(13.))
@@ -275,7 +293,7 @@ fn disasm_row(
         )
         .child(gutter);
 
-    if arrows_width > 0. {
+    if options.arrows_width > 0. {
         let draws = arrows.clone();
         row = row.child(
             canvas(
@@ -283,7 +301,7 @@ fn disasm_row(
                 move |bounds, _, window, _| paint_arrows(window, bounds, &draws),
             )
             .flex_none()
-            .w(px(arrows_width))
+            .w(px(options.arrows_width))
             .h(px(ROW_HEIGHT)),
         );
     }
@@ -298,7 +316,7 @@ fn disasm_row(
             .child(line.address.clone()),
     );
 
-    if show_bytes {
+    if options.show_bytes {
         row = row.child(
             div()
                 .font_family(theme.mono_font)
@@ -350,12 +368,12 @@ fn disasm_row(
         let hover_bg = theme.bg_header;
         row = row.hover(move |s| s.bg(hover_bg));
     }
-    if let Some(select) = on_select {
+    if let Some(select) = options.on_select.clone() {
         row = row
             .cursor_pointer()
             .on_click(move |_, window, cx| select(ix, window, cx));
     }
-    if let Some(context) = on_context {
+    if let Some(context) = options.on_context.clone() {
         row = row.on_mouse_down(MouseButton::Right, move |event, window, cx| {
             context(ix, event.position, window, cx)
         });

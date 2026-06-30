@@ -86,18 +86,23 @@ impl RenderOnce for ControlsWidget {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
-        let running = self.view.running;
 
         let buttons = div()
             .flex()
             .items_center()
             .gap_1()
-            .child(ctrl_button(t, "ctrl-run", icon::RUN, running, self.on_run))
+            .child(ctrl_button(
+                t,
+                "ctrl-run",
+                icon::RUN,
+                self.view.running,
+                self.on_run,
+            ))
             .child(ctrl_button(
                 t,
                 "ctrl-pause",
                 icon::PAUSE,
-                !running,
+                !self.view.running,
                 self.on_pause,
             ))
             .child(ctrl_button(t, "ctrl-step", icon::STEP, false, self.on_step))

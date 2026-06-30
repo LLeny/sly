@@ -187,7 +187,6 @@ impl RenderOnce for LogWidget {
         let t = &*theme;
 
         let count = self.view.entries.len();
-        let entries = self.view.entries;
 
         let list = if count == 0 {
             div()
@@ -205,7 +204,7 @@ impl RenderOnce for LogWidget {
                 let theme = Theme::global(cx);
                 let t = &*theme;
                 range
-                    .map(|ix| log_row(t, ix, &entries[ix]))
+                    .map(|ix| log_row(t, ix, &self.view.entries[ix]))
                     .collect::<Vec<_>>()
             })
             .track_scroll(&self.scroll)
@@ -214,16 +213,14 @@ impl RenderOnce for LogWidget {
             .into_any_element()
         };
 
-        let on_target_open = self.on_target_open;
         let target_combo = combobox_button(t, "log-target", self.target_label, move |e, w, cx| {
-            if let Some(handler) = on_target_open.as_ref() {
+            if let Some(handler) = self.on_target_open.as_ref() {
                 handler(e, w, cx);
             }
         });
 
-        let on_level_open = self.on_level_open;
         let level_combo = combobox_button(t, "log-level", self.level_label, move |e, w, cx| {
-            if let Some(handler) = on_level_open.as_ref() {
+            if let Some(handler) = self.on_level_open.as_ref() {
                 handler(e, w, cx);
             }
         });

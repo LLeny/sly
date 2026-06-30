@@ -169,16 +169,14 @@ impl RenderOnce for BreakpointsWidget {
         let theme = Theme::global(cx);
         let t = &*theme;
 
-        let on_kind_open = self.on_kind_open;
         let kind_combo = combobox_button(t, "bp-kind", self.draft_kind.tag(), move |e, w, cx| {
-            if let Some(handler) = on_kind_open.as_ref() {
+            if let Some(handler) = self.on_kind_open.as_ref() {
                 handler(e, w, cx);
             }
         });
 
-        let on_add = self.on_add;
         let add_button = field_button(t, "bp-add", icon::PLUS, move |e, w, cx| {
-            if let Some(handler) = on_add.as_ref() {
+            if let Some(handler) = self.on_add.as_ref() {
                 handler(e, w, cx);
             }
         });
@@ -191,16 +189,15 @@ impl RenderOnce for BreakpointsWidget {
             .children(self.address_input)
             .child(add_button);
 
-        let on_remove = self.on_remove;
-        let on_toggle_entry = self.on_toggle_entry;
         let count = self.view.entries.len();
-        let scrollable = self.scrollable;
 
         let mut list = div()
             .id("bp-list")
             .flex()
             .flex_col()
-            .when(scrollable, |d| d.flex_1().min_h(px(0.)).overflow_y_scroll());
+            .when(self.scrollable, |d| {
+                d.flex_1().min_h(px(0.)).overflow_y_scroll()
+            });
         if count == 0 {
             list = list
                 .flex_1()
@@ -216,23 +213,27 @@ impl RenderOnce for BreakpointsWidget {
                         .child("No breakpoints"),
                 );
         } else {
-            list =
-                list.children(self.view.entries.into_iter().map(|entry| {
-                    breakpoint_row(t, entry, on_toggle_entry.clone(), on_remove.clone())
-                }));
+            list = list.children(self.view.entries.into_iter().map(|entry| {
+                breakpoint_row(
+                    t,
+                    entry,
+                    self.on_toggle_entry.clone(),
+                    self.on_remove.clone(),
+                )
+            }));
         }
 
         let body = div()
             .flex()
             .flex_col()
             .gap_2()
-            .when(scrollable, |d| d.flex_1().min_h(px(0.)))
+            .when(self.scrollable, |d| d.flex_1().min_h(px(0.)))
             .child(add_row)
             .child(list);
 
         Panel::new(Self::ID, "Breakpoints")
             .glyph(icon::BREAKPOINT)
-            .grow(scrollable)
+            .grow(self.scrollable)
             .collapsed(self.collapsed)
             .meta(format!("{count}"))
             .on_toggle_opt(self.on_toggle)

@@ -20,6 +20,21 @@ pub trait DebugTarget {
     fn reset(&mut self);
     fn cpu_view(&self) -> CpuView;
     fn disassemble(&self, base: u32, count: usize) -> DisassemblyView;
+
+    fn has_spc(&self) -> bool {
+        false
+    }
+    fn spc_pc(&self) -> u32 {
+        0
+    }
+    fn spc_set_pc(&mut self, _addr: u32) {}
+    fn spc_cpu_view(&self) -> CpuView {
+        CpuView::default()
+    }
+    fn spc_disassemble(&self, _base: u32, _count: usize) -> DisassemblyView {
+        DisassemblyView::default()
+    }
+
     fn cartridge(&self) -> &CartridgeView;
     fn status(&self, label: &str) -> StatusView;
     fn caption(&self, label: &str) -> SharedString;

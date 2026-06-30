@@ -5,6 +5,7 @@ use cirsium::widgets::{
     DisassemblyView, FlagView, MemoryRegion, RegisterView, TokenKind,
 };
 use gpui::SharedString;
+use snes::apu::{Apu, spc700};
 use snes::cartridge::{MapMode, Speed};
 use snes::cpu::disasm::{Disasm, InstructionClass};
 use snes::mmio::{Address, MemKind, MemoryAccess};
@@ -143,7 +144,9 @@ impl SnesTarget {
     }
 }
 
-struct SilencedPanics(Option<Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>>);
+type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
+
+struct SilencedPanics(Option<PanicHook>);
 
 impl SilencedPanics {
     fn new() -> Self {
@@ -229,6 +232,26 @@ impl DebugTarget for SnesTarget {
 
     fn disassemble(&self, base: u32, count: usize) -> DisassemblyView {
         disasm_view(&self.core, base as u16, count)
+    }
+
+    fn has_spc(&self) -> bool {
+        true
+    }
+
+    fn spc_pc(&self) -> u32 {
+        self.core.apu.spc700.pc as u32
+    }
+
+    fn spc_set_pc(&mut self, addr: u32) {
+        self.core.apu.spc700.pc = addr as u16;
+    }
+
+    fn spc_cpu_view(&self) -> CpuView {
+        spc_cpu_view(&self.core.apu.spc700)
+    }
+
+    fn spc_disassemble(&self, base: u32, count: usize) -> DisassemblyView {
+        spc_disasm_view(&self.core.apu, base as u16, count)
     }
 
     fn cartridge(&self) -> &CartridgeView {
@@ -320,7 +343,7 @@ fn cpu_view(cpu: &snes::Cpu) -> CpuView {
     let p = f.raw() as u32;
 
     CpuView {
-        isa: "65C816".into(),
+        isa: "Ricoh 5A22".into(),
         registers: vec![
             RegisterView::new("A", cpu.acc as u32, acc_bits),
             RegisterView::new("X", cpu.index_x as u32, idx_bits),
@@ -383,7 +406,95 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> DisassemblyView {
     }
 }
 
+fn spc_cpu_view(spc: &spc700::Spc700) -> CpuView {
+    let psw = &spc.psw;
+    CpuView {
+        isa: "S-SMP".into(),
+        registers: vec![
+            RegisterView::new("A", spc.a as u32, 8),
+            RegisterView::new("X", spc.x as u32, 8),
+            RegisterView::new("Y", spc.y as u32, 8),
+            RegisterView::new("SP", spc.sp as u32, 8),
+            RegisterView::new("PSW", psw.raw() as u32, 8),
+            RegisterView::new("PC", spc.pc as u32, 16),
+        ],
+        flags: vec![
+            FlagView::new("N", psw.negative()),
+            FlagView::new("V", psw.overflow()),
+            FlagView::new("P", psw.direct_page()),
+            FlagView::new("B", psw.brk()),
+            FlagView::new("H", psw.half_carry()),
+            FlagView::new("I", psw.irq_enable()),
+            FlagView::new("Z", psw.zero_()),
+            FlagView::new("C", psw.carry()),
+        ],
+    }
+}
+
+fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> DisassemblyView {
+    let pc = apu.spc700.pc;
+    let mut addr = base;
+    let mut lines = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        let (text, len, target) = spc700::disassemble(apu, addr);
+        let len = len.max(1);
+        let tokens = tokenize(&text, spc_mnemonic_kind(&text), &SPC_SYNTAX);
+        let note = target.map_or(String::new(), |t| format!("→ ${t:04X}"));
+
+        lines.push(
+            DisasmLine::new(
+                addr as u32,
+                format!("{addr:04X}"),
+                spc_read_bytes(apu, addr, len),
+                &*text,
+                tokens,
+                addr == pc,
+            )
+            .target(target.map(|t| t as u32))
+            .note(note),
+        );
+
+        addr = addr.wrapping_add(len as u16);
+    }
+
+    DisassemblyView {
+        lines,
+        show_bytes: false,
+    }
+}
+
+fn spc_read_bytes(apu: &Apu, addr: u16, len: u8) -> String {
+    format_bytes(len, |offset| apu.peek(addr.wrapping_add(offset)))
+}
+
+fn spc_mnemonic_kind(text: &str) -> TokenKind {
+    let mnemonic = text.split_ascii_whitespace().next().unwrap_or(text);
+    match mnemonic {
+        "bra" | "beq" | "bne" | "bcs" | "bcc" | "bvs" | "bvc" | "bmi" | "bpl" | "jmp" | "call"
+        | "pcall" | "tcall" | "ret" | "reti" | "cbne" | "dbnz" | "bbs" | "bbc" => {
+            TokenKind::MnemonicFlow
+        }
+        "mov" | "movw" | "push" | "pop" => TokenKind::MnemonicMemory,
+        "or" | "and" | "eor" | "cmp" | "adc" | "sbc" | "inc" | "dec" | "asl" | "lsr" | "rol"
+        | "ror" | "xcn" | "mul" | "div" | "daa" | "das" | "addw" | "subw" | "incw" | "decw"
+        | "cmpw" => TokenKind::MnemonicAlu,
+        _ => TokenKind::MnemonicSystem,
+    }
+}
+
+const SPC_SYNTAX: SyntaxSpec = SyntaxSpec {
+    registers: &["A", "X", "Y", "SP", "YA", "PSW", "C"],
+    symbols: |_| false,
+};
+
 fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
+    format_bytes(len, |offset| {
+        snes.peek8(Address::new(bank, addr.wrapping_add(offset)))
+    })
+}
+
+fn format_bytes(len: u8, mut byte_at: impl FnMut(u16) -> u8) -> String {
     use std::fmt::Write;
 
     let mut out = String::with_capacity(len as usize * 3);
@@ -391,9 +502,7 @@ fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
         if i != 0 {
             out.push(' ');
         }
-
-        let byte = snes.peek8(Address::new(bank, addr.wrapping_add(i as u16)));
-        let _ = write!(out, "{byte:02X}");
+        let _ = write!(out, "{:02X}", byte_at(i as u16));
     }
     out
 }
@@ -411,10 +520,11 @@ fn disasm_note(tokens: &[DisasmToken], d: &Disasm, bank: u8, ea: Option<Address>
     if let Some(ea) = ea {
         let name = snes::mmio::symbol(ea.address()).map_or(String::new(), |n| format!(" = {n}"));
         parts.push(format!("→ {:02X}:{:04X}{name}", ea.bank(), ea.address()));
-    } else if parts.is_empty() && d.class == InstructionClass::ControlFlow {
-        if let Some(target) = d.target {
-            parts.push(format!("→ {bank:02X}:{target:04X}"));
-        }
+    } else if parts.is_empty()
+        && d.class == InstructionClass::ControlFlow
+        && let Some(target) = d.target
+    {
+        parts.push(format!("→ {bank:02X}:{target:04X}"));
     }
 
     parts.join("  ")

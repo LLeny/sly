@@ -56,6 +56,7 @@ impl Snes {
 
     pub fn step(&mut self) {
         cpu::step(self);
+        apu::spc700::step(&mut self.apu);
     }
 
     pub fn run_frame(&mut self) {

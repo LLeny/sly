@@ -1,6 +1,7 @@
 use crate::apu::regs::Control;
 
 mod regs;
+pub mod spc700;
 
 const IPL_ROM: &[u8] = include_bytes!("../assets/spc700.rom");
 
@@ -16,10 +17,21 @@ pub struct Apu {
 
     // 64 KB RAM
     ram: [u8; 0x10000],
+
+    // SPC-700 core registers
+    pub spc700: spc700::Spc700,
+}
+
+impl Default for Apu {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Apu {
     pub fn new() -> Self {
+        let reset_vector = u16::from_le_bytes([IPL_ROM[0x3E], IPL_ROM[0x3F]]);
+
         Self {
             unknown: 0,
             control: Control::default(),
@@ -29,10 +41,15 @@ impl Apu {
             timer_settings: [0; 3],
             timer_counters: [0; 3],
             ram: [0; 0x10000],
+            spc700: spc700::Spc700::new(reset_vector),
         }
     }
 
     pub fn read(&mut self, addr: u16) -> u8 {
+        self.peek(addr)
+    }
+
+    pub fn peek(&self, addr: u16) -> u8 {
         match addr {
             0x00F0..=0x00F7 | 0x00FA..=0x00FF => self.read_io(addr as u8),
             0xFFC0..=0xFFFF if self.control.ipl_rom_enable() => IPL_ROM[(addr - 0xFFC0) as usize],

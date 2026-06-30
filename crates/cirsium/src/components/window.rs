@@ -19,12 +19,7 @@ pub fn title_bar(theme: &Theme, title: impl Into<SharedString>, controls: impl I
         .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move());
 
     #[cfg(not(target_os = "macos"))]
-    let leading = leading.child(
-        svg()
-            .path(icon::LOGO)
-            .size(px(15.))
-            .text_color(theme.accent),
-    );
+    let leading = leading.child(svg().path(icon::LOGO).size(px(15.)).text_color(theme.logo));
 
     let leading = leading.child(
         div()

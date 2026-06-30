@@ -62,7 +62,7 @@ pub fn tokenize(text: &str, mnemonic: TokenKind, syntax: &SyntaxSpec) -> Vec<Dis
 
     let split = text
         .bytes()
-        .position(|b| !b.is_ascii_alphabetic())
+        .position(|b| b.is_ascii_whitespace())
         .unwrap_or(text.len());
     if split > 0 {
         tokens.push(DisasmToken::new(&text[..split], mnemonic));

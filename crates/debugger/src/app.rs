@@ -19,7 +19,7 @@ use gpui::{
 };
 
 use crate::breakpoints::Breakpoints;
-use crate::disasm::Disasm;
+use crate::disasm::{Disasm, DisasmSource};
 use crate::logging::{LogBuffer, Logs};
 use crate::memory::{self, Memory};
 use crate::target::{DebugTarget, RunOutcome};
@@ -41,6 +41,10 @@ pub(crate) struct Debugger {
     running: bool,
     run_task: Option<Task<()>>,
     reg_changes: ChangeTracker<SharedString>,
+    has_spc: bool,
+    spc_cpu: CpuView,
+    spc_disasm: Disasm,
+    spc_reg_changes: ChangeTracker<SharedString>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -48,6 +52,9 @@ enum CpuRefresh {
     Highlight,
     Baseline,
 }
+
+const SPC_CPU_ID: &str = "spc-cpu";
+const SPC_DISASM_ID: &str = "spc-disasm";
 
 impl Debugger {
     pub(crate) fn new(
@@ -57,6 +64,9 @@ impl Debugger {
     ) -> Self {
         let mut disasm = Disasm::new();
         disasm.recompute(target.as_ref());
+
+        let has_spc = target.has_spc();
+        let spc_disasm = Disasm::for_source(DisasmSource::Spc);
 
         let jump_input = cx.new(|cx| TextInput::new(cx, "go to...").hex_only(true).max_len(6));
         cx.subscribe(&jump_input, Self::on_jump_event).detach();
@@ -71,6 +81,7 @@ impl Debugger {
         let mut debugger = Self {
             cartridge: target.cartridge().clone(),
             cpu: target.cpu_view(),
+            spc_cpu: target.spc_cpu_view(),
             status: target.status("paused"),
             memory: Memory::new(target.as_ref()),
             breakpoints: Breakpoints::default(),
@@ -85,26 +96,47 @@ impl Debugger {
             running: false,
             run_task: None,
             reg_changes: ChangeTracker::default(),
+            has_spc,
+            spc_disasm,
+            spc_reg_changes: ChangeTracker::default(),
         };
         debugger.refresh_cpu(CpuRefresh::Baseline);
+        debugger.refresh_spc(CpuRefresh::Baseline);
         debugger
     }
 
     fn refresh_cpu(&mut self, mode: CpuRefresh) {
-        let mut cpu = self.target.cpu_view();
+        let view = self.target.cpu_view();
+        self.cpu = Self::track_changes(view, &mut self.reg_changes, mode);
+    }
+
+    fn refresh_spc(&mut self, mode: CpuRefresh) {
+        if !self.has_spc {
+            return;
+        }
+        let view = self.target.spc_cpu_view();
+        self.spc_cpu = Self::track_changes(view, &mut self.spc_reg_changes, mode);
+        self.spc_disasm.recompute(self.target.as_ref());
+    }
+
+    fn track_changes(
+        mut cpu: CpuView,
+        changes: &mut ChangeTracker<SharedString>,
+        mode: CpuRefresh,
+    ) -> CpuView {
         if mode == CpuRefresh::Baseline {
-            self.reg_changes.clear();
+            changes.clear();
         }
 
         for reg in &mut cpu.registers {
             let (key, value) = (reg.name.clone(), reg.value as u64);
-            let highlight = self.reg_changes.highlight(key, value);
+            let highlight = changes.highlight(key, value);
             reg.highlight = match mode {
                 CpuRefresh::Highlight => highlight,
                 CpuRefresh::Baseline => Highlight::None,
             };
         }
-        self.cpu = cpu;
+        cpu
     }
 
     fn is_collapsed(&self, id: &'static str) -> bool {
@@ -159,6 +191,7 @@ impl Debugger {
 
         self.refresh_cpu(CpuRefresh::Highlight);
         self.disasm.recompute(self.target.as_ref());
+        self.refresh_spc(CpuRefresh::Highlight);
         self.follow_memory();
 
         let keep_going = outcome == RunOutcome::Done;
@@ -186,6 +219,7 @@ impl Debugger {
         self.running = false;
         self.run_task = None;
         self.disasm.recompute(self.target.as_ref());
+        self.refresh_spc(CpuRefresh::Highlight);
         self.follow_memory();
 
         cx.notify();
@@ -199,6 +233,7 @@ impl Debugger {
         self.running = false;
         self.run_task = None;
         self.disasm.recompute(self.target.as_ref());
+        self.refresh_spc(CpuRefresh::Baseline);
 
         cx.notify();
     }
@@ -226,6 +261,30 @@ impl Debugger {
         if self.disasm.close_menu() {
             cx.notify();
         }
+    }
+
+    fn spc_disasm_select(&mut self, ix: usize, cx: &mut Context<Self>) {
+        self.spc_disasm.select(ix);
+        cx.notify();
+    }
+
+    fn spc_disasm_open_menu(&mut self, ix: usize, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.spc_disasm.open_menu(ix, position);
+        cx.notify();
+    }
+
+    fn spc_close_menu(&mut self, cx: &mut Context<Self>) {
+        if self.spc_disasm.close_menu() {
+            cx.notify();
+        }
+    }
+
+    fn spc_set_pc_to(&mut self, addr: u32, cx: &mut Context<Self>) {
+        self.spc_disasm.close_menu();
+        self.target.spc_set_pc(addr);
+        self.refresh_spc(CpuRefresh::Highlight);
+        self.status.state = self.target.caption("spc pc set");
+        cx.notify();
     }
 
     fn memory_set_region(&mut self, id: SharedString, cx: &mut Context<Self>) {
@@ -385,11 +444,17 @@ impl Debugger {
 
     fn toggle_follow(&mut self, cx: &mut Context<Self>) {
         self.disasm.toggle_follow(self.target.as_ref());
+        if self.has_spc {
+            self.spc_disasm.toggle_follow(self.target.as_ref());
+        }
         cx.notify();
     }
 
     fn toggle_bytes(&mut self, cx: &mut Context<Self>) {
         self.disasm.toggle_bytes();
+        if self.has_spc {
+            self.spc_disasm.toggle_bytes();
+        }
         cx.notify();
     }
 
@@ -501,8 +566,15 @@ impl Render for Debugger {
             .on_toggle(cx.listener(|this, _, _, cx| this.toggle(CartridgeWidget::ID, cx)));
 
         let cpu = CpuWidget::new(self.cpu.clone())
+            .title("65C816")
             .collapsed(self.is_collapsed(CpuWidget::ID))
             .on_toggle(cx.listener(|this, _, _, cx| this.toggle(CpuWidget::ID, cx)));
+
+        let spc_cpu = CpuWidget::new(self.spc_cpu.clone())
+            .id(SPC_CPU_ID)
+            .title("SPC700")
+            .collapsed(self.is_collapsed(SPC_CPU_ID))
+            .on_toggle(cx.listener(|this, _, _, cx| this.toggle(SPC_CPU_ID, cx)));
 
         let controls_view = ControlsView {
             running: self.running,
@@ -539,6 +611,7 @@ impl Render for Debugger {
                 });
         let disassembly =
             DisassemblyWidget::new(self.disasm.view.clone(), self.disasm.scroll.clone())
+                .title("65C816 Disassembly")
                 .collapsed(self.is_collapsed(DisassemblyWidget::ID))
                 .on_toggle(cx.listener(|this, _, _, cx| this.toggle(DisassemblyWidget::ID, cx)))
                 .on_select({
@@ -548,6 +621,23 @@ impl Render for Debugger {
                 .on_context({
                     let this = this.clone();
                     move |ix, pos, _, cx| this.update(cx, |d, cx| d.disasm_open_menu(ix, pos, cx))
+                });
+
+        let spc_disassembly =
+            DisassemblyWidget::new(self.spc_disasm.view.clone(), self.spc_disasm.scroll.clone())
+                .id(SPC_DISASM_ID)
+                .title("SPC700 Disassembly")
+                .collapsed(self.is_collapsed(SPC_DISASM_ID))
+                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(SPC_DISASM_ID, cx)))
+                .on_select({
+                    let this = this.clone();
+                    move |ix, _, cx| this.update(cx, |d, cx| d.spc_disasm_select(ix, cx))
+                })
+                .on_context({
+                    let this = this.clone();
+                    move |ix, pos, _, cx| {
+                        this.update(cx, |d, cx| d.spc_disasm_open_menu(ix, pos, cx))
+                    }
                 });
 
         let disasm_menu = self.disasm.menu.as_ref().map(|menu| {
@@ -594,6 +684,34 @@ impl Render for Debugger {
                 menu.position,
                 items,
                 cx.listener(|this, _: &MouseDownEvent, _, cx| this.close_menu(cx)),
+            )
+        });
+
+        let spc_disasm_menu = self.spc_disasm.menu.as_ref().map(|menu| {
+            let addr = menu.addr;
+            let items = vec![
+                MenuItem::new(
+                    "Copy Address",
+                    clipboard_listener(cx, menu.address.clone(), Debugger::spc_close_menu),
+                ),
+                MenuItem::new(
+                    "Copy Bytes",
+                    clipboard_listener(cx, menu.bytes.clone(), Debugger::spc_close_menu),
+                ),
+                MenuItem::new(
+                    "Copy Disassembly",
+                    clipboard_listener(cx, menu.text.clone(), Debugger::spc_close_menu),
+                ),
+                MenuItem::new(
+                    "Set PC to here",
+                    cx.listener(move |this, _, _, cx| this.spc_set_pc_to(addr, cx)),
+                ),
+            ];
+            context_menu(
+                t,
+                menu.position,
+                items,
+                cx.listener(|this, _: &MouseDownEvent, _, cx| this.spc_close_menu(cx)),
             )
         });
 
@@ -858,7 +976,6 @@ impl Render for Debugger {
                                     .gap_2()
                                     .child(div().flex_none().child(controls))
                                     .child(breakpoints)
-                                    .child(div().flex_none().child(cpu))
                                     .child(div().flex_none().child(cartridge)),
                             )
                             .child(
@@ -870,13 +987,28 @@ impl Render for Debugger {
                                     .min_h(px(0.))
                                     .gap_2()
                                     .child(disassembly)
+                                    .when(self.has_spc, |col| col.child(spc_disassembly))
                                     .child(memory_widget),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .w(px(300.))
+                                    .flex_none()
+                                    .min_h(px(0.))
+                                    .gap_2()
+                                    .child(div().flex_none().child(cpu))
+                                    .when(self.has_spc, |col| {
+                                        col.child(div().flex_none().child(spc_cpu))
+                                    }),
                             ),
                     )
                     .child(log_region),
             )
             .child(status_bar(t, &self.status))
             .children(disasm_menu)
+            .children(spc_disasm_menu)
             .children(settings_popup)
             .children(bp_combo)
             .children(memory_combo)

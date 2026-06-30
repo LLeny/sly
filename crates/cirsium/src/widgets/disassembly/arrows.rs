@@ -141,6 +141,15 @@ pub(super) fn arrow_gutters(lines: &[DisasmLine]) -> (Vec<GutterCell>, f32) {
         });
     }
 
+    for cell in cells.iter_mut() {
+        cell.sort_by_key(|draw| match *draw {
+            GutterDraw::Through { .. } => 0u8,
+            GutterDraw::Elbow { x_end, .. } if x_end >= width => 1,
+            GutterDraw::Elbow { .. } => 2,
+            GutterDraw::Head { .. } => 3,
+        });
+    }
+
     (cells, width)
 }
 

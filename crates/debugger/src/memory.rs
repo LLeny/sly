@@ -85,14 +85,12 @@ impl Memory {
     }
 
     pub fn rows_for(&self, range: Range<usize>, target: &dyn DebugTarget) -> Vec<MemoryRow> {
-        let base = self.current.base;
-        let size = self.current.size;
         let region = self.current.id.as_ref();
         range
             .map(|row_ix| {
                 let offset = (row_ix * BYTES_PER_ROW) as u32;
-                let addr = base.wrapping_add(offset);
-                let len = (size.saturating_sub(offset) as usize).min(BYTES_PER_ROW);
+                let addr = self.current.base.wrapping_add(offset);
+                let len = (self.current.size.saturating_sub(offset) as usize).min(BYTES_PER_ROW);
                 let bytes = target.read_memory(region, addr, len);
                 let highlights = target.memory_highlights(region, addr, len);
                 let cells = bytes
@@ -120,12 +118,11 @@ impl Memory {
 
     fn scroll_to_addr(&mut self, addr: u32) -> Option<u32> {
         let base = self.current.base;
-        let size = self.current.size;
-        if size == 0 {
+        if self.current.size == 0 {
             return None;
         }
 
-        let clamped = addr.clamp(base, base + size - 1);
+        let clamped = addr.clamp(base, base + self.current.size - 1);
         let row = ((clamped - base) as usize) / BYTES_PER_ROW;
         self.scroll.scroll_to_item_strict(row, ScrollStrategy::Top);
 
