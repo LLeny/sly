@@ -1,6 +1,6 @@
 use super::decoder::{Instruction, Load};
 use crate::apu::Apu;
-use crate::apu::spc700::decoder::{Branches, MoveMem, MoveReg, RegStep, Store};
+use crate::apu::spc700::decoder::{Alu, Branches, MoveMem, MoveReg, RegStep, Store};
 
 pub(super) struct Interpreter<'a> {
     apu: &'a mut Apu,
@@ -30,6 +30,7 @@ impl<'a> Interpreter<'a> {
             Instruction::MoveReg(op) => self.move_reg(op),
             Instruction::MoveMem(op) => self.move_mem(op),
             Instruction::RegStep(op) => self.reg_step(op),
+            Instruction::Alu(op) => self.alu(op),
             Instruction::Branches(op) => self.branches(op),
             other => todo!("Instruction not implemented: {other:?}"),
         }
@@ -130,6 +131,23 @@ impl<'a> Interpreter<'a> {
                 self.apu.spc700.y = self.apu.spc700.y.wrapping_sub(1);
                 self.set_nz(self.apu.spc700.y);
             }
+        }
+    }
+
+    fn alu(&mut self, op: Alu) {
+        match op {
+            Alu::CmpDpImm { imm, dp } => {
+                let page = if self.apu.spc700.psw.direct_page() {
+                    0x100
+                } else {
+                    0
+                };
+                let value = self.apu.read(page | dp as u16);
+                let result = value.wrapping_sub(imm);
+                self.set_nz(result);
+                self.apu.spc700.psw.set_carry(value >= imm);
+            }
+            other => todo!("ALU instruction not implemented: {other:?}"),
         }
     }
 
