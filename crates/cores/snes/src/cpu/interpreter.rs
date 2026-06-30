@@ -178,8 +178,8 @@ impl InterpreterView<'_> {
         let flags = self.snes.cpu.flags;
         let (taken, disp) = match op {
             Branches::BraRel { disp } => (true, disp),
-            Branches::BeqRel { disp } => (flags.zero_(), disp),
-            Branches::BneRel { disp } => (!flags.zero_(), disp),
+            Branches::BeqRel { disp } => (flags.zero(), disp),
+            Branches::BneRel { disp } => (!flags.zero(), disp),
             Branches::BcsRel { disp } => (flags.carry(), disp),
             Branches::BccRel { disp } => (!flags.carry(), disp),
             Branches::BmiRel { disp } => (flags.negative(), disp),
@@ -287,7 +287,7 @@ impl InterpreterView<'_> {
                 cpu.flags.set_carry(wide & 0x1_0000 == 0);
                 cpu.flags
                     .set_overflow((cpu.acc ^ imm) & (cpu.acc ^ result) & 0x8000 != 0);
-                cpu.flags.set_zero_(result == 0);
+                cpu.flags.set_zero(result == 0);
                 cpu.flags.set_negative(result & 0x8000 != 0);
 
                 cpu.acc = result;
@@ -344,7 +344,7 @@ impl InterpreterView<'_> {
 
         let flags = &mut self.snes.cpu.flags;
         flags.set_carry(reg >= value);
-        flags.set_zero_(result == 0);
+        flags.set_zero(result == 0);
         flags.set_negative(result & sign != 0);
     }
 

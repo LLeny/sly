@@ -22,12 +22,6 @@ pub struct Apu {
     pub spc700: spc700::Spc700,
 }
 
-impl Default for Apu {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Apu {
     pub fn new() -> Self {
         let reset_vector = u16::from_le_bytes([IPL_ROM[0x3E], IPL_ROM[0x3F]]);

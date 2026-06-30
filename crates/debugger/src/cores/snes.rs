@@ -448,7 +448,7 @@ fn spc_cpu_view(spc: &spc700::Spc700) -> CpuView {
             FlagView::new("B", psw.brk()),
             FlagView::new("H", psw.half_carry()),
             FlagView::new("I", psw.irq_enable()),
-            FlagView::new("Z", psw.zero_()),
+            FlagView::new("Z", psw.zero()),
             FlagView::new("C", psw.carry()),
         ],
     }

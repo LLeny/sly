@@ -29,7 +29,7 @@ impl<'a> Interpreter<'a> {
                 self.apu.spc700.x = imm;
                 let psw = &mut self.apu.spc700.psw;
                 psw.set_negative(imm & 0x80 != 0);
-                psw.set_zero_(imm == 0);
+                psw.set_zero(imm == 0);
             }
             other => todo!("Load instruction not implemented: {other:?}"),
         }

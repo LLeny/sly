@@ -37,7 +37,7 @@ pub struct Flags {
     pub carry: bool,
 
     #[bits(1, alias = "z")]
-    pub zero_: bool,
+    pub zero: bool,
 
     #[bits(2, alias = "i")]
     pub irq_enable: bool,
