@@ -3,4 +3,4 @@ mod generated {
     chipi_macros::isa!("../../../submodules/chipi-spec/snes/spc700.chipi", style = enum);
 }
 
-pub use generated::Spc700::*;
+pub use generated::SPC700::*;
