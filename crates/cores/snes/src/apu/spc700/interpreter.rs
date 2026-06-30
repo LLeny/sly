@@ -1,5 +1,6 @@
 use super::decoder::{Instruction, Load};
 use crate::apu::Apu;
+use crate::apu::spc700::decoder::{Branches, MoveMem, MoveReg, RegStep, Store};
 
 pub(super) struct Interpreter<'a> {
     apu: &'a mut Apu,
@@ -16,9 +17,20 @@ impl<'a> Interpreter<'a> {
         self.next_pc
     }
 
+    fn set_nz(&mut self, value: u8) {
+        let psw = &mut self.apu.spc700.psw;
+        psw.set_negative(value & 0x80 != 0);
+        psw.set_zero(value == 0);
+    }
+
     pub(super) fn exec(&mut self, inst: Instruction) {
         match inst {
             Instruction::Load(op) => self.load(op),
+            Instruction::Store(op) => self.store(op),
+            Instruction::MoveReg(op) => self.move_reg(op),
+            Instruction::MoveMem(op) => self.move_mem(op),
+            Instruction::RegStep(op) => self.reg_step(op),
+            Instruction::Branches(op) => self.branches(op),
             other => todo!("Instruction not implemented: {other:?}"),
         }
     }
@@ -27,11 +39,108 @@ impl<'a> Interpreter<'a> {
         match op {
             Load::MovXImm { imm } => {
                 self.apu.spc700.x = imm;
-                let psw = &mut self.apu.spc700.psw;
-                psw.set_negative(imm & 0x80 != 0);
-                psw.set_zero(imm == 0);
+                self.set_nz(imm);
+            }
+            Load::MovAImm { imm } => {
+                self.apu.spc700.a = imm;
+                self.set_nz(imm);
             }
             other => todo!("Load instruction not implemented: {other:?}"),
+        }
+    }
+
+    fn store(&mut self, op: Store) {
+        match op {
+            Store::MovXindA => {
+                let page = if self.apu.spc700.psw.direct_page() {
+                    0x100
+                } else {
+                    0
+                };
+                let addr = page | self.apu.spc700.x as u16;
+                self.apu.write(addr, self.apu.spc700.a);
+            }
+            other => todo!("Store instruction not implemented: {other:?}"),
+        }
+    }
+
+    fn move_reg(&mut self, op: MoveReg) {
+        match op {
+            MoveReg::MovAX => {
+                self.apu.spc700.a = self.apu.spc700.x;
+                self.set_nz(self.apu.spc700.a);
+            }
+            MoveReg::MovXA => {
+                self.apu.spc700.x = self.apu.spc700.a;
+                self.set_nz(self.apu.spc700.x);
+            }
+            MoveReg::MovAY => {
+                self.apu.spc700.a = self.apu.spc700.y;
+                self.set_nz(self.apu.spc700.a);
+            }
+            MoveReg::MovYA => {
+                self.apu.spc700.y = self.apu.spc700.a;
+                self.set_nz(self.apu.spc700.y);
+            }
+            MoveReg::MovSpX => self.apu.spc700.sp = self.apu.spc700.x,
+            MoveReg::MovXSp => {
+                self.apu.spc700.x = self.apu.spc700.sp;
+                self.set_nz(self.apu.spc700.x);
+            }
+        }
+    }
+
+    fn move_mem(&mut self, op: MoveMem) {
+        match op {
+            MoveMem::MovDpImm { imm, dp } => {
+                let page = if self.apu.spc700.psw.direct_page() {
+                    0x100
+                } else {
+                    0
+                };
+                self.apu.write(page | dp as u16, imm);
+            }
+            other => todo!("MoveMem instruction not implemented: {other:?}"),
+        }
+    }
+
+    fn reg_step(&mut self, op: RegStep) {
+        match op {
+            RegStep::IncA => {
+                self.apu.spc700.a = self.apu.spc700.a.wrapping_add(1);
+                self.set_nz(self.apu.spc700.a);
+            }
+            RegStep::DecA => {
+                self.apu.spc700.a = self.apu.spc700.a.wrapping_sub(1);
+                self.set_nz(self.apu.spc700.a);
+            }
+            RegStep::IncX => {
+                self.apu.spc700.x = self.apu.spc700.x.wrapping_add(1);
+                self.set_nz(self.apu.spc700.x);
+            }
+            RegStep::DecX => {
+                self.apu.spc700.x = self.apu.spc700.x.wrapping_sub(1);
+                self.set_nz(self.apu.spc700.x);
+            }
+            RegStep::IncY => {
+                self.apu.spc700.y = self.apu.spc700.y.wrapping_add(1);
+                self.set_nz(self.apu.spc700.y);
+            }
+            RegStep::DecY => {
+                self.apu.spc700.y = self.apu.spc700.y.wrapping_sub(1);
+                self.set_nz(self.apu.spc700.y);
+            }
+        }
+    }
+
+    fn branches(&mut self, op: Branches) {
+        match op {
+            Branches::BneRel { disp } => {
+                if !self.apu.spc700.psw.zero() {
+                    self.next_pc = self.next_pc.wrapping_add(disp as u16);
+                }
+            }
+            other => todo!("Branch instruction not implemented: {other:?}"),
         }
     }
 }
