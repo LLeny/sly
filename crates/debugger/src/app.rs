@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,10 +14,11 @@ use cirsium::widgets::{
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::CpuView;
+use frontend_model::DockLocation;
 use gpui::prelude::*;
 use gpui::{
-    App, ClickEvent, ClipboardItem, Context, Entity, MouseDownEvent, Pixels, Point, SharedString,
-    Task, Window, div, px,
+    AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, MouseDownEvent, Pixels, Point,
+    SharedString, Task, Window, div, px,
 };
 
 use crate::breakpoints::Breakpoints;
@@ -612,8 +613,9 @@ impl Render for Debugger {
                     let this = this.clone();
                     move |id, _, cx| this.update(cx, |d, cx| d.bp_toggle(id, cx))
                 });
-        let mut cpu_widgets = Vec::with_capacity(self.panes.len());
-        let mut disasm_widgets = Vec::with_capacity(self.panes.len());
+
+        let mut cpu_panels: Vec<(String, AnyElement)> = Vec::with_capacity(self.panes.len());
+        let mut disasm_panels: Vec<(String, AnyElement)> = Vec::with_capacity(self.panes.len());
         let mut disasm_menus = Vec::new();
 
         for (pane_ix, pane) in self.panes.iter().enumerate() {
@@ -626,7 +628,10 @@ impl Render for Debugger {
                     let id = cpu_id.clone();
                     cx.listener(move |this, _, _, cx| this.toggle(id.clone(), cx))
                 });
-            cpu_widgets.push(div().flex_none().child(cpu_widget));
+            cpu_panels.push((
+                pane.id.as_str().to_string(),
+                div().flex_none().child(cpu_widget).into_any_element(),
+            ));
 
             let disasm_id = SharedString::from(format!("{}-disasm", pane.id.as_str()));
             let disasm_title = SharedString::from(format!("{} Disassembly", pane.title));
@@ -649,7 +654,10 @@ impl Render for Debugger {
                             this.update(cx, |d, cx| d.disasm_open_menu(pane_ix, ix, pos, cx))
                         }
                     });
-            disasm_widgets.push(disassembly);
+            disasm_panels.push((
+                format!("{}.disasm", pane.id.as_str()),
+                disassembly.into_any_element(),
+            ));
 
             if let Some(menu) = pane.disasm.menu.as_ref() {
                 let addr = menu.addr;
@@ -931,6 +939,33 @@ impl Render for Debugger {
             )
         });
 
+        let manifest = self.target.manifest();
+        let mut panels: HashMap<String, AnyElement> = HashMap::new();
+        panels.insert(
+            "controls".into(),
+            div().flex_none().child(controls).into_any_element(),
+        );
+        panels.insert("breakpoints".into(), breakpoints.into_any_element());
+        panels.insert(
+            "cartridge".into(),
+            div().flex_none().child(cartridge).into_any_element(),
+        );
+        panels.insert("memory".into(), memory_widget.into_any_element());
+        panels.insert("log".into(), log_region.into_any_element());
+        panels.extend(cpu_panels);
+        panels.extend(disasm_panels);
+
+        let mut take = |location: DockLocation| -> Vec<AnyElement> {
+            manifest
+                .in_location(location)
+                .filter_map(|panel| panels.remove(panel.id.as_ref()))
+                .collect()
+        };
+        let left_panels = take(DockLocation::Left);
+        let center_panels = take(DockLocation::Center);
+        let right_panels = take(DockLocation::Right);
+        let bottom_panels = take(DockLocation::Bottom);
+
         div()
             .flex()
             .flex_col()
@@ -963,9 +998,7 @@ impl Render for Debugger {
                                     .min_h(px(0.))
                                     .overflow_hidden()
                                     .gap_2()
-                                    .child(div().flex_none().child(controls))
-                                    .child(breakpoints)
-                                    .child(div().flex_none().child(cartridge)),
+                                    .children(left_panels),
                             )
                             .child(
                                 div()
@@ -975,8 +1008,7 @@ impl Render for Debugger {
                                     .min_w(px(0.))
                                     .min_h(px(0.))
                                     .gap_2()
-                                    .children(disasm_widgets)
-                                    .child(memory_widget),
+                                    .children(center_panels),
                             )
                             .child(
                                 div()
@@ -986,10 +1018,10 @@ impl Render for Debugger {
                                     .flex_none()
                                     .min_h(px(0.))
                                     .gap_2()
-                                    .children(cpu_widgets),
+                                    .children(right_panels),
                             ),
                     )
-                    .child(log_region),
+                    .children(bottom_panels),
             )
             .child(status_bar(t, &self.status))
             .children(disasm_menus)

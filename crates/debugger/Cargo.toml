@@ -7,7 +7,8 @@ edition = "2024"
 gpui = { git = "https://github.com/ioncodes/zed", rev = "f10625819af32278aaad3dfb38de2f267bedeb6d" }
 gpui_platform = { git = "https://github.com/ioncodes/zed", rev = "f10625819af32278aaad3dfb38de2f267bedeb6d", features = ["font-kit", "wayland", "x11"] }
 cirsium = { path = "../cirsium" }
-debugger-model = { path = "../debugger-model" }
+debugger-model = { path = "../models/debugger" }
+frontend-model = { path = "../models/frontend" }
 snes = { path = "../cores/snes", features = ["debug"] }
 reqwest_client = { git = "https://github.com/ioncodes/zed", rev = "f10625819af32278aaad3dfb38de2f267bedeb6d" }
 urlencoding = "2.1.3"

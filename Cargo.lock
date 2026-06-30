@@ -1478,6 +1478,7 @@ dependencies = [
  "cirsium",
  "crc32fast",
  "debugger-model",
+ "frontend-model",
  "gpui",
  "gpui_platform",
  "reqwest_client",
@@ -2005,6 +2006,10 @@ dependencies = [
  "libc",
  "pkg-config",
 ]
+
+[[package]]
+name = "frontend-model"
+version = "0.1.0"
 
 [[package]]
 name = "fs_extra"

@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 gpui = { git = "https://github.com/ioncodes/zed", rev = "f10625819af32278aaad3dfb38de2f267bedeb6d" }
 rust-embed = { version = "8.11.0", features = ["debug-embed"] }
-debugger-model = { path = "../debugger-model" }
+debugger-model = { path = "../models/debugger" }
