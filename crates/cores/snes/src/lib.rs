@@ -1,3 +1,4 @@
+pub mod apu;
 pub mod cartridge;
 pub mod cpu;
 pub mod error;
@@ -10,6 +11,7 @@ pub use cpu::Cpu;
 pub use error::SnesError;
 pub use mmio::Mmio;
 
+use crate::apu::Apu;
 use crate::cpu::disasm::Disasm;
 use crate::interrupt::Irq;
 use crate::mmio::Address;
@@ -25,6 +27,7 @@ pub struct Snes {
     pub mmu: Mmio,
     pub irq: Irq,
     pub dma: Dma,
+    pub apu: Apu,
 }
 
 impl Snes {
@@ -37,6 +40,7 @@ impl Snes {
             mmu: Mmio::new(cartridge),
             irq: Irq::default(),
             dma: Dma::default(),
+            apu: Apu::new(),
         };
         snes.cpu.pc = snes.read16(Address::new(BANK_ZERO, RESET_VECTOR_ADDR));
         snes

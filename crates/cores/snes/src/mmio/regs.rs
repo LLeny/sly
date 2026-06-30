@@ -1,6 +1,16 @@
 use crate::Snes;
-use crate::macros::{mmio_passthrough, register_mmio};
+use crate::macros::{mmio_passthrough, register_mmio, register_mmio_raw};
 use crate::mmio::MmioReg;
+
+pub const APU_IO_START: u16 = 0x2140;
+pub const APU_IO_END: u16 = APU_IO_START + 3;
+
+register_mmio_raw! {
+    0x2140 => "APUIO0",
+    0x2141 => "APUIO1",
+    0x2142 => "APUIO2",
+    0x2143 => "APUIO3",
+}
 
 register_mmio! {
     /// NMITIMEN

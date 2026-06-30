@@ -10,7 +10,9 @@ mod symbol;
 pub use access::{AccessTracker, MemoryAccess};
 
 use crate::cartridge::MapMode;
-use crate::mmio::regs::{DmaTransferStart, HdmaTransferEnable, NmiTimerEnable};
+use crate::mmio::regs::{
+    APU_IO_END, APU_IO_START, DmaTransferStart, HdmaTransferEnable, NmiTimerEnable,
+};
 use crate::{Cartridge, Snes};
 
 pub use addr::Address;
@@ -195,6 +197,10 @@ impl Snes {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::read(self),
             DmaTransferStart::ADDRESS => DmaTransferStart::read(self),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::read(self),
+            APU_IO_START..=APU_IO_END => {
+                tracing::warn!(reg = format!("{:04X}", reg), "APU I/O read not implemented");
+                self.apu.ports[(reg - APU_IO_START) as usize]
+            }
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),
@@ -210,6 +216,14 @@ impl Snes {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
             DmaTransferStart::ADDRESS => DmaTransferStart::write(self, value),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::write(self, value),
+            APU_IO_START..=APU_IO_END => {
+                tracing::warn!(
+                    reg = format!("{:04X}", reg),
+                    value = format!("{:02X}", value),
+                    "APU I/O write not implemented"
+                );
+                self.apu.ports[(reg - APU_IO_START) as usize] = value;
+            }
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),
@@ -225,6 +239,7 @@ impl Snes {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::peek(self),
             DmaTransferStart::ADDRESS => DmaTransferStart::peek(self),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::peek(self),
+            APU_IO_START..=APU_IO_END => self.apu.ports[(reg - APU_IO_START) as usize],
             _ => OPEN_BUS,
         }
     }

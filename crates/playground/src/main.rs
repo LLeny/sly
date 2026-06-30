@@ -23,6 +23,10 @@ fn main() {
     let mut snes = Snes::new(cart);
 
     for _ in 0..count {
+        if snes.cpu.program_bank == 0x00 && snes.cpu.pc == 0x8085 {
+            break;
+        }
+
         let disasm = snes.disassemble_next();
         println!(
             "{:02X}:{:04X}: {}",

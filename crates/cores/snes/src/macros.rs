@@ -33,6 +33,16 @@ macro_rules! register_mmio {
     };
 }
 
+macro_rules! register_mmio_raw {
+    ($($addr:literal => $name:literal),+ $(,)?) => {
+        $(
+            inventory::submit! {
+                $crate::mmio::MmioSymbol { addr: $addr, name: $name }
+            }
+        )+
+    };
+}
+
 macro_rules! mmio_passthrough {
     ($name:ident => $($field:ident).+) => {
         impl crate::mmio::MmioReg for $name {
@@ -53,3 +63,4 @@ macro_rules! mmio_passthrough {
 
 pub(crate) use mmio_passthrough;
 pub(crate) use register_mmio;
+pub(crate) use register_mmio_raw;
