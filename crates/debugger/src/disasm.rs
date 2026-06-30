@@ -2,6 +2,7 @@ use cirsium::widgets::DisassemblyView;
 use gpui::{Pixels, Point, ScrollStrategy, SharedString, UniformListScrollHandle};
 
 use crate::breakpoints::{BreakpointMark, mark_at};
+use crate::processor::CpuId;
 use crate::target::DebugTarget;
 
 const LEAD_BYTES: u32 = 48;
@@ -16,17 +17,11 @@ pub struct Menu {
     pub text: SharedString,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum DisasmSource {
-    Main,
-    Spc,
-}
-
 pub struct Disasm {
     pub view: DisassemblyView,
     pub scroll: UniformListScrollHandle,
     pub menu: Option<Menu>,
-    source: DisasmSource,
+    cpu: CpuId,
     follow_pc: bool,
     show_bytes: bool,
     base: u32,
@@ -35,16 +30,12 @@ pub struct Disasm {
 }
 
 impl Disasm {
-    pub fn new() -> Self {
-        Self::for_source(DisasmSource::Main)
-    }
-
-    pub fn for_source(source: DisasmSource) -> Self {
+    pub fn new(cpu: CpuId) -> Self {
         Self {
             view: DisassemblyView::default(),
             scroll: UniformListScrollHandle::new(),
             menu: None,
-            source,
+            cpu,
             follow_pc: true,
             show_bytes: false,
             base: 0,
@@ -61,33 +52,19 @@ impl Disasm {
         self.show_bytes
     }
 
-    fn pc(&self, target: &dyn DebugTarget) -> u32 {
-        match self.source {
-            DisasmSource::Main => target.pc(),
-            DisasmSource::Spc => target.spc_pc(),
-        }
-    }
-
-    fn disassemble(&self, target: &dyn DebugTarget, base: u32, count: usize) -> DisassemblyView {
-        match self.source {
-            DisasmSource::Main => target.disassemble(base, count),
-            DisasmSource::Spc => target.spc_disassemble(base, count),
-        }
-    }
-
     pub fn recompute(&mut self, target: &dyn DebugTarget) {
-        let pc = self.pc(target);
+        let pc = target.pc(&self.cpu);
         let (view, base) = if self.follow_pc {
             let base = pc.saturating_sub(LEAD_BYTES);
-            let view = self.disassemble(target, base, COUNT);
+            let view = target.disassemble(&self.cpu, base, COUNT);
 
             if view.lines.iter().any(|l| l.current) {
                 (view, base)
             } else {
-                (self.disassemble(target, pc, COUNT), pc)
+                (target.disassemble(&self.cpu, pc, COUNT), pc)
             }
         } else {
-            (self.disassemble(target, self.base, COUNT), self.base)
+            (target.disassemble(&self.cpu, self.base, COUNT), self.base)
         };
 
         self.base = base;
@@ -115,8 +92,12 @@ impl Disasm {
         }
     }
 
-    pub fn set_breakpoints(&mut self, breakpoints: Vec<BreakpointMark>) {
-        self.breakpoints = breakpoints;
+    pub fn set_breakpoints(&mut self, breakpoints: &[BreakpointMark]) {
+        self.breakpoints = breakpoints
+            .iter()
+            .filter(|m| m.cpu == self.cpu)
+            .cloned()
+            .collect();
         self.apply_breakpoints();
     }
 

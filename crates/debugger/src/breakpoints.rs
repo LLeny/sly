@@ -2,6 +2,7 @@ use cirsium::components::ComboOption;
 use cirsium::widgets::{BreakpointEntry, BreakpointKind, BreakpointsView};
 use gpui::{Pixels, Point, SharedString};
 
+use crate::processor::CpuId;
 use crate::target::DebugTarget;
 
 #[derive(Clone)]
@@ -9,6 +10,7 @@ pub struct BreakpointMark {
     pub start: u32,
     pub end: u32,
     pub kind: BreakpointKind,
+    pub cpu: CpuId,
     pub region: SharedString,
 }
 
@@ -25,6 +27,7 @@ struct Breakpoint {
     start: u32,
     end: u32,
     kind: BreakpointKind,
+    cpu: CpuId,
     region: SharedString,
     enabled: bool,
     label: SharedString,
@@ -68,8 +71,8 @@ impl Breakpoints {
             .collect()
     }
 
-    pub fn add(&mut self, addr: u32, target: &dyn DebugTarget) {
-        self.add_kind(addr, addr, self.draft_kind, target);
+    pub fn add(&mut self, addr: u32, cpu: CpuId, region: SharedString, target: &dyn DebugTarget) {
+        self.add_kind(addr, addr, self.draft_kind, cpu, region, target);
     }
 
     pub fn add_kind(
@@ -77,40 +80,45 @@ impl Breakpoints {
         start: u32,
         end: u32,
         kind: BreakpointKind,
+        cpu: CpuId,
+        region: SharedString,
         target: &dyn DebugTarget,
     ) {
-        let label = format!("${}", target.format_address("bus", start)).into();
+        let label = format!("${}", target.format_address(&region, start)).into();
         let note = target.annotate(start);
-        self.add_labeled(start, end, kind, "bus".into(), label, note);
+        self.add_labeled(start, end, kind, cpu, region, label, note);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_labeled(
         &mut self,
         start: u32,
         end: u32,
         kind: BreakpointKind,
+        cpu: CpuId,
         region: SharedString,
         label: SharedString,
         note: SharedString,
     ) {
         let (start, end) = (start.min(end), start.max(end));
-        if self
-            .entries
-            .iter()
-            .any(|b| b.start == start && b.end == end && b.kind == kind && b.region == region)
-        {
+        if self.entries.iter().any(|b| {
+            b.start == start && b.end == end && b.kind == kind && b.cpu == cpu && b.region == region
+        }) {
             return;
         }
+
         self.entries.push(Breakpoint {
             id: self.next_id,
             start,
             end,
             kind,
+            cpu,
             region,
             enabled: true,
             label,
             note,
         });
+
         self.next_id += 1;
         self.rebuild_marks();
     }
@@ -148,6 +156,7 @@ impl Breakpoints {
                 start: b.start,
                 end: b.end,
                 kind: b.kind,
+                cpu: b.cpu.clone(),
                 region: b.region.clone(),
             })
             .collect();

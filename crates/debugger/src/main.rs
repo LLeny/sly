@@ -6,6 +6,7 @@ mod db;
 mod disasm;
 mod logging;
 mod memory;
+mod processor;
 mod target;
 
 use std::sync::Arc;

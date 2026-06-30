@@ -14,6 +14,7 @@ use snes::{Cartridge, Cpu, Snes};
 use crate::art::{AssetProvider, GameRef, System};
 use crate::breakpoints::BreakpointMark;
 use crate::cores::disasm::{SyntaxSpec, strip_symbol_sigils, tokenize};
+use crate::processor::{CpuDescriptor, CpuId};
 use crate::target::{DebugTarget, RunOutcome};
 
 const WRAM_SIZE: u32 = 0x2_0000;
@@ -23,6 +24,9 @@ const CPU_BASE: u32 = 0x4200;
 const CPU_SIZE: u32 = 0x0200;
 const BUS_SIZE: u32 = 0x100_0000;
 
+const CPU_MAIN: &str = "cpu.65c816";
+const CPU_SPC: &str = "apu.spc700";
+
 pub struct SnesTarget {
     core: Snes,
     cartridge: CartridgeView,
@@ -30,6 +34,7 @@ pub struct SnesTarget {
     label: SharedString,
     segments: Vec<SharedString>,
     last_access: MemoryAccess,
+    fault: Option<&'static str>,
 }
 
 impl SnesTarget {
@@ -70,6 +75,7 @@ impl SnesTarget {
             label: file_name.into(),
             segments,
             last_access: MemoryAccess::default(),
+            fault: None,
         })
     }
 
@@ -85,6 +91,7 @@ impl SnesTarget {
                 .copied()
                 .unwrap_or(0),
             "bus" => self.core.peek8(Address::from_24bit(addr & 0x00FF_FFFF)),
+            "spc" => self.core.apu.peek(addr as u16),
             _ => self.core.peek8(Address::new(0x00, addr as u16)),
         }
     }
@@ -94,6 +101,8 @@ impl SnesTarget {
             "wram" => Some((MemKind::Wram, addr)),
             "rom" => Some((MemKind::Rom, addr)),
             "bus" => self.core.classify(Address::from_24bit(addr & 0x00FF_FFFF)),
+            // TODO: MemKind
+            "spc" => None,
             _ => Some((MemKind::Io, addr)),
         }
     }
@@ -102,25 +111,37 @@ impl SnesTarget {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut self.core))).is_ok()
     }
 
-    fn guarded(&mut self, f: impl FnOnce(&mut Snes)) -> bool {
-        let _silenced = SilencedPanics::new();
-        self.catch(f)
-    }
+    fn step_machine(&mut self) -> (MemoryAccess, Option<&'static str>) {
+        let mut access = None;
 
-    fn execute_traced(&mut self, body: impl FnOnce(&mut Snes)) -> bool {
-        let mut report = None;
-        let ok = self.guarded(|core| report = Some(core.trace(body)));
-        if let Some(report) = report {
-            self.last_access = report;
+        let ok = self.catch(|core| access = Some(core.trace(snes::cpu::step)));
+        let access = access.unwrap_or_default();
+
+        if !ok {
+            return (access, Some(CPU_MAIN));
         }
-        ok
+
+        if !self.catch(|core| spc700::step(&mut core.apu)) {
+            return (access, Some(CPU_SPC));
+        }
+
+        (access, None)
     }
 
     fn execute_hit(&self, breakpoints: &[BreakpointMark]) -> bool {
-        let pc = self.core.cpu.pc as u32;
-        breakpoints.iter().any(|m| {
-            m.kind == BreakpointKind::Execute && (m.start & 0xFFFF..=m.end & 0xFFFF).contains(&pc)
-        })
+        let pcs = [
+            (CPU_MAIN, self.core.cpu.pc as u32),
+            (CPU_SPC, self.core.apu.spc700.pc as u32),
+        ];
+
+        breakpoints
+            .iter()
+            .filter(|m| m.kind == BreakpointKind::Execute)
+            .any(|m| {
+                pcs.iter().any(|(id, pc)| {
+                    m.cpu.as_str() == *id && (m.start & 0xFFFF..=m.end & 0xFFFF).contains(pc)
+                })
+            })
     }
 
     fn watch_hit(&self, breakpoints: &[BreakpointMark], access: &MemoryAccess) -> bool {
@@ -173,85 +194,85 @@ fn merge_access(total: &mut MemoryAccess, step: &MemoryAccess) {
 }
 
 impl DebugTarget for SnesTarget {
-    fn pc(&self) -> u32 {
-        self.core.cpu.pc as u32
+    fn cpus(&self) -> Vec<CpuDescriptor> {
+        vec![
+            CpuDescriptor::new(CPU_MAIN, "65C816", "bus"),
+            CpuDescriptor::new(CPU_SPC, "SPC700", "spc"),
+        ]
     }
 
-    fn set_pc(&mut self, addr: u32) {
-        self.core.cpu.pc = addr as u16;
+    fn pc(&self, cpu: &CpuId) -> u32 {
+        match cpu.as_str() {
+            CPU_SPC => self.core.apu.spc700.pc as u32,
+            _ => self.core.cpu.pc as u32,
+        }
+    }
+
+    fn set_pc(&mut self, cpu: &CpuId, addr: u32) {
+        self.fault = None;
+        match cpu.as_str() {
+            CPU_SPC => self.core.apu.spc700.pc = addr as u16,
+            _ => self.core.cpu.pc = addr as u16,
+        }
     }
 
     fn step(&mut self) -> bool {
-        self.execute_traced(Snes::step)
+        let _silenced = SilencedPanics::new();
+        let (access, fault) = self.step_machine();
+        self.last_access = access;
+        self.fault = fault;
+        fault.is_none()
     }
 
     fn run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome {
-        if breakpoints.is_empty() {
-            return if self.execute_traced(Snes::run_frame) {
-                RunOutcome::Done
-            } else {
-                RunOutcome::Fault
-            };
-        }
-
         let watch = breakpoints
             .iter()
             .any(|m| matches!(m.kind, BreakpointKind::Read | BreakpointKind::Write));
 
         let _silenced = SilencedPanics::new();
         let mut access = MemoryAccess::default();
+
         for _ in 0..snes::INSTRUCTIONS_PER_FRAME {
-            let mut step = None;
-            let ok = self.catch(|core| step = Some(core.trace(Snes::step)));
-            let step = step.unwrap_or_default();
+            let (step, fault) = self.step_machine();
             merge_access(&mut access, &step);
 
-            if !ok {
+            if let Some(cpu) = fault {
                 self.last_access = access;
+                self.fault = Some(cpu);
                 return RunOutcome::Fault;
             }
 
-            if (watch && self.watch_hit(breakpoints, &step)) || self.execute_hit(breakpoints) {
+            if !breakpoints.is_empty()
+                && ((watch && self.watch_hit(breakpoints, &step)) || self.execute_hit(breakpoints))
+            {
                 self.last_access = access;
                 return RunOutcome::Breakpoint;
             }
         }
 
         self.last_access = access;
+        self.fault = None;
         RunOutcome::Done
     }
 
     fn reset(&mut self) {
         self.core.cpu = Cpu::new(self.core.read16(Address::new(0x00, 0xFFFC)));
         self.last_access = MemoryAccess::default();
+        self.fault = None;
     }
 
-    fn cpu_view(&self) -> CpuView {
-        cpu_view(&self.core.cpu)
+    fn cpu_view(&self, cpu: &CpuId) -> CpuView {
+        match cpu.as_str() {
+            CPU_SPC => spc_cpu_view(&self.core.apu.spc700),
+            _ => cpu_view(&self.core.cpu),
+        }
     }
 
-    fn disassemble(&self, base: u32, count: usize) -> DisassemblyView {
-        disasm_view(&self.core, base as u16, count)
-    }
-
-    fn has_spc(&self) -> bool {
-        true
-    }
-
-    fn spc_pc(&self) -> u32 {
-        self.core.apu.spc700.pc as u32
-    }
-
-    fn spc_set_pc(&mut self, addr: u32) {
-        self.core.apu.spc700.pc = addr as u16;
-    }
-
-    fn spc_cpu_view(&self) -> CpuView {
-        spc_cpu_view(&self.core.apu.spc700)
-    }
-
-    fn spc_disassemble(&self, base: u32, count: usize) -> DisassemblyView {
-        spc_disasm_view(&self.core.apu, base as u16, count)
+    fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> DisassemblyView {
+        match cpu.as_str() {
+            CPU_SPC => spc_disasm_view(&self.core.apu, base as u16, count),
+            _ => disasm_view(&self.core, base as u16, count),
+        }
     }
 
     fn cartridge(&self) -> &CartridgeView {
@@ -269,6 +290,9 @@ impl DebugTarget for SnesTarget {
     }
 
     fn caption(&self, label: &str) -> SharedString {
+        if self.fault == Some(CPU_SPC) {
+            return format!("{label} @ SPC700:{:04X}", self.core.apu.spc700.pc).into();
+        }
         caption(label, &self.core)
     }
 
@@ -279,6 +303,7 @@ impl DebugTarget for SnesTarget {
             MemoryRegion::new("ppu", "PPU/APU", PPU_BASE, PPU_SIZE),
             MemoryRegion::new("cpu", "CPU/DMA", CPU_BASE, CPU_SIZE),
             MemoryRegion::new("bus", "CPU Bus", 0, BUS_SIZE),
+            MemoryRegion::new("spc", "SPC RAM", 0, 0x1_0000),
         ]
     }
 
@@ -293,6 +318,7 @@ impl DebugTarget for SnesTarget {
             "wram" => format!("{:02X}:{:04X}", 0x7E + (addr >> 16), addr & 0xFFFF),
             "rom" => format!("{addr:06X}"),
             "bus" => format!("{:02X}:{:04X}", (addr >> 16) & 0xFF, addr & 0xFFFF),
+            "spc" => format!("{:04X}", addr & 0xFFFF),
             _ => format!("00:{:04X}", addr & 0xFFFF),
         }
         .into()

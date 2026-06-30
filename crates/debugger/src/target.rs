@@ -4,6 +4,7 @@ use cirsium::widgets::{CartridgeView, CpuView, DisassemblyView, MemoryRegion};
 use gpui::SharedString;
 
 use crate::breakpoints::BreakpointMark;
+use crate::processor::{CpuDescriptor, CpuId};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RunOutcome {
@@ -13,27 +14,15 @@ pub enum RunOutcome {
 }
 
 pub trait DebugTarget {
-    fn pc(&self) -> u32;
-    fn set_pc(&mut self, addr: u32);
+    fn cpus(&self) -> Vec<CpuDescriptor>;
+    fn pc(&self, cpu: &CpuId) -> u32;
+    fn set_pc(&mut self, cpu: &CpuId, addr: u32);
+    fn cpu_view(&self, cpu: &CpuId) -> CpuView;
+    fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> DisassemblyView;
+
     fn step(&mut self) -> bool;
     fn run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome;
     fn reset(&mut self);
-    fn cpu_view(&self) -> CpuView;
-    fn disassemble(&self, base: u32, count: usize) -> DisassemblyView;
-
-    fn has_spc(&self) -> bool {
-        false
-    }
-    fn spc_pc(&self) -> u32 {
-        0
-    }
-    fn spc_set_pc(&mut self, _addr: u32) {}
-    fn spc_cpu_view(&self) -> CpuView {
-        CpuView::default()
-    }
-    fn spc_disassemble(&self, _base: u32, _count: usize) -> DisassemblyView {
-        DisassemblyView::default()
-    }
 
     fn cartridge(&self) -> &CartridgeView;
     fn status(&self, label: &str) -> StatusView;
