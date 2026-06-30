@@ -10,6 +10,8 @@ pub use breakpoints::{BreakpointEntry, BreakpointKind, BreakpointsView, Breakpoi
 pub use cartridge::{CartridgeField, CartridgeView, CartridgeWidget};
 pub use controls::{ControlsView, ControlsWidget};
 pub use cpu::{CpuView, CpuWidget, FlagView, RegisterView};
-pub use disassembly::{DisasmLine, DisasmToken, DisassemblyView, DisassemblyWidget, TokenKind};
+pub use disassembly::{
+    DisasmLine, DisasmToken, DisassemblyView, DisassemblyWidget, TokenKind, ViewMode,
+};
 pub use log::{LogEntry, LogLevel, LogView, LogWidget, short_target};
 pub use memory::{MemoryCell, MemoryRegion, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};

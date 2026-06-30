@@ -1,7 +1,7 @@
 use super::decoder;
 use crate::Snes;
 use crate::cpu::CodeReader;
-use decoder::{Branches, Call, Instruction, Jump};
+use decoder::{Branches, Call, Halt, Instruction, Jump};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstructionClass {
@@ -13,12 +13,24 @@ pub enum InstructionClass {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FlowKind {
+    #[default]
+    None,
+    CondBranch,
+    Branch,
+    Jump,
+    Call,
+    Return,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Disasm {
     pub text: String,
     pub length: u8,
     pub target: Option<u32>,
     pub class: InstructionClass,
+    pub flow: FlowKind,
 }
 
 impl std::fmt::Display for Disasm {
@@ -37,12 +49,27 @@ pub fn disassemble_at(snes: &Snes, pc: u16) -> Disasm {
     let text = inst.render(addr, &reader);
     let target = control_target(&inst, pc, length, snes.cpu.program_bank);
     let class = instruction_class(&inst);
+    let flow = flow_kind(&inst);
 
     Disasm {
         text,
         length,
         target,
         class,
+        flow,
+    }
+}
+
+fn flow_kind(inst: &Instruction) -> FlowKind {
+    match inst {
+        Instruction::Branches(Branches::BraRel { .. }) => FlowKind::Branch,
+        Instruction::Branches(_) => FlowKind::CondBranch,
+        Instruction::BrlRell { .. } => FlowKind::Branch,
+        Instruction::Jump(_) => FlowKind::Jump,
+        Instruction::Call(_) => FlowKind::Call,
+        Instruction::Ret(_) => FlowKind::Return,
+        Instruction::Halt(Halt::Stp) => FlowKind::Return,
+        _ => FlowKind::None,
     }
 }
 

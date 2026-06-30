@@ -23,6 +23,16 @@ impl<'a> Interpreter<'a> {
         psw.set_zero(value == 0);
     }
 
+    fn dp_addr(&self, offset: u8) -> u16 {
+        let page = if self.apu.spc700.psw.direct_page() {
+            0x100
+        } else {
+            0
+        };
+
+        page | offset as u16
+    }
+
     pub(super) fn exec(&mut self, inst: Instruction) {
         match inst {
             Instruction::Load(op) => self.load(op),
@@ -53,12 +63,7 @@ impl<'a> Interpreter<'a> {
     fn store(&mut self, op: Store) {
         match op {
             Store::MovXindA => {
-                let page = if self.apu.spc700.psw.direct_page() {
-                    0x100
-                } else {
-                    0
-                };
-                let addr = page | self.apu.spc700.x as u16;
+                let addr = self.dp_addr(self.apu.spc700.x);
                 self.apu.write(addr, self.apu.spc700.a);
             }
             other => todo!("Store instruction not implemented: {other:?}"),
@@ -94,12 +99,7 @@ impl<'a> Interpreter<'a> {
     fn move_mem(&mut self, op: MoveMem) {
         match op {
             MoveMem::MovDpImm { imm, dp } => {
-                let page = if self.apu.spc700.psw.direct_page() {
-                    0x100
-                } else {
-                    0
-                };
-                self.apu.write(page | dp as u16, imm);
+                self.apu.write(self.dp_addr(dp), imm);
             }
             other => todo!("MoveMem instruction not implemented: {other:?}"),
         }
@@ -137,12 +137,7 @@ impl<'a> Interpreter<'a> {
     fn alu(&mut self, op: Alu) {
         match op {
             Alu::CmpDpImm { imm, dp } => {
-                let page = if self.apu.spc700.psw.direct_page() {
-                    0x100
-                } else {
-                    0
-                };
-                let value = self.apu.read(page | dp as u16);
+                let value = self.apu.read(self.dp_addr(dp));
                 let result = value.wrapping_sub(imm);
                 self.set_nz(result);
                 self.apu.spc700.psw.set_carry(value >= imm);

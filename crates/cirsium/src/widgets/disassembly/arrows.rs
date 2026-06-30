@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use gpui::{Bounds, Hsla, PathBuilder, Pixels, Window, hsla, point, px};
 
 use super::{DisasmLine, ROW_HEIGHT};
@@ -48,10 +46,7 @@ fn arrow_color(index: usize) -> Hsla {
 
 pub(super) fn arrow_gutters(lines: &[DisasmLine]) -> (Vec<GutterCell>, f32) {
     let n = lines.len();
-    let mut by_addr: HashMap<u32, usize> = HashMap::with_capacity(n);
-    for (i, line) in lines.iter().enumerate() {
-        by_addr.entry(line.addr).or_insert(i);
-    }
+    let by_addr = super::addr_index(lines);
 
     let mut arrows: Vec<(usize, usize)> = Vec::new();
     for (i, line) in lines.iter().enumerate() {

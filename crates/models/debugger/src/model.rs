@@ -26,6 +26,17 @@ pub enum TokenKind {
     Plain,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum FlowKind {
+    #[default]
+    None,
+    CondBranch,
+    Branch,
+    Jump,
+    Call,
+    Return,
+}
+
 #[derive(Clone)]
 pub struct DisasmToken {
     pub text: Arc<str>,
@@ -52,6 +63,7 @@ pub struct DisasmLine {
     pub note: Arc<str>,
     pub target: Option<u32>,
     pub current: bool,
+    pub flow: FlowKind,
 }
 
 impl DisasmLine {
@@ -72,11 +84,17 @@ impl DisasmLine {
             note: Arc::from(""),
             target: None,
             current,
+            flow: FlowKind::None,
         }
     }
 
     pub fn target(mut self, target: Option<u32>) -> Self {
         self.target = target;
+        self
+    }
+
+    pub fn flow(mut self, flow: FlowKind) -> Self {
+        self.flow = flow;
         self
     }
 

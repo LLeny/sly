@@ -21,6 +21,8 @@ pub mod icon {
     pub const CONTROLS: &str = "icons/circle-play.svg";
     pub const BREAKPOINT: &str = "icons/bug.svg";
     pub const LOG: &str = "icons/scroll-text.svg";
+    pub const LIST: &str = "icons/list.svg";
+    pub const GRAPH: &str = "icons/workflow.svg";
 
     pub const RUN: &str = "icons/play.svg";
     pub const PAUSE: &str = "icons/pause.svg";

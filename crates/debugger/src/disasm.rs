@@ -1,5 +1,5 @@
-use cirsium::widgets::DisassemblyView;
-use gpui::{Pixels, Point, ScrollStrategy, SharedString, UniformListScrollHandle};
+use cirsium::widgets::{DisassemblyView, ViewMode};
+use gpui::{Pixels, Point, ScrollStrategy, SharedString, Size, UniformListScrollHandle, size};
 
 use crate::breakpoints::{BreakpointMark, mark_at};
 use crate::processor::CpuId;
@@ -24,6 +24,10 @@ pub struct Disasm {
     cpu: CpuId,
     follow_pc: bool,
     show_bytes: bool,
+    view_mode: ViewMode,
+    graph_offset: Point<Pixels>,
+    graph_drag: Option<Point<Pixels>>,
+    graph_viewport: Size<f32>,
     base: u32,
     selected: Option<u32>,
     breakpoints: Vec<BreakpointMark>,
@@ -38,6 +42,10 @@ impl Disasm {
             cpu,
             follow_pc: true,
             show_bytes: false,
+            view_mode: ViewMode::Linear,
+            graph_offset: Point::default(),
+            graph_drag: None,
+            graph_viewport: size(600., 400.),
             base: 0,
             selected: None,
             breakpoints: Vec::new(),
@@ -53,15 +61,41 @@ impl Disasm {
     }
 
     pub fn recompute(&mut self, target: &dyn DebugTarget) {
-        let pc = target.pc(&self.cpu);
-        let (lines, base) = if self.follow_pc {
-            let base = pc.saturating_sub(LEAD_BYTES);
-            let lines = target.disassemble(&self.cpu, base, COUNT);
+        self.rebuild(target, false);
+    }
 
-            if lines.iter().any(|l| l.current) {
-                (lines, base)
+    fn rebuild(&mut self, target: &dyn DebugTarget, force_rebase: bool) {
+        let pc = target.pc(&self.cpu);
+
+        let lead = if self.view_mode == ViewMode::Graph {
+            0
+        } else {
+            LEAD_BYTES
+        };
+
+        let (lines, base) = if self.follow_pc {
+            let held = if force_rebase {
+                None
             } else {
-                (target.disassemble(&self.cpu, pc, COUNT), pc)
+                let held_lines = target.disassemble(&self.cpu, self.base, COUNT);
+                held_lines
+                    .iter()
+                    .any(|line| line.current)
+                    .then_some(held_lines)
+            };
+
+            match held {
+                Some(held_lines) => (held_lines, self.base),
+                None => {
+                    let base = pc.saturating_sub(lead);
+                    let lines = target.disassemble(&self.cpu, base, COUNT);
+
+                    if lines.iter().any(|line| line.current) {
+                        (lines, base)
+                    } else {
+                        (target.disassemble(&self.cpu, pc, COUNT), pc)
+                    }
+                }
             }
         } else {
             (target.disassemble(&self.cpu, self.base, COUNT), self.base)
@@ -75,7 +109,12 @@ impl Disasm {
         self.apply_selection();
         self.apply_breakpoints();
 
+        if self.follow_pc {
+            self.graph_offset = Point::default();
+        }
+
         if self.follow_pc
+            && self.view_mode == ViewMode::Linear
             && let Some(ix) = self.view.lines.iter().position(|l| l.current)
         {
             self.scroll.scroll_to_item_strict(ix, ScrollStrategy::Top);
@@ -141,5 +180,44 @@ impl Disasm {
     pub fn toggle_bytes(&mut self) {
         self.show_bytes = !self.show_bytes;
         self.view.show_bytes = self.show_bytes;
+    }
+
+    pub fn view_mode(&self) -> ViewMode {
+        self.view_mode
+    }
+
+    pub fn set_view_mode(&mut self, mode: ViewMode, target: &dyn DebugTarget) {
+        self.view_mode = mode;
+        self.rebuild(target, true);
+    }
+
+    pub fn graph_offset(&self) -> Point<Pixels> {
+        self.graph_offset
+    }
+
+    pub fn pan_begin(&mut self, pos: Point<Pixels>) {
+        self.graph_drag = Some(pos);
+    }
+
+    pub fn pan_drag(&mut self, pos: Point<Pixels>) {
+        if let Some(last) = self.graph_drag {
+            self.graph_offset += pos - last;
+            self.graph_drag = Some(pos);
+        }
+    }
+
+    pub fn graph_viewport(&self) -> Size<f32> {
+        self.graph_viewport
+    }
+
+    pub fn set_graph_viewport(&mut self, viewport: Size<f32>) -> bool {
+        let changed = (self.graph_viewport.width - viewport.width).abs() > 0.5
+            || (self.graph_viewport.height - viewport.height).abs() > 0.5;
+
+        if changed {
+            self.graph_viewport = viewport;
+        }
+
+        changed
     }
 }

@@ -2,13 +2,13 @@ use cirsium::Highlight;
 use cirsium::components::StatusView;
 use cirsium::widgets::{BreakpointKind, CartridgeField, CartridgeView, MemoryRegion};
 use debugger_model::{
-    CpuView, DisasmLine, DisasmToken, FlagView, RegisterView, SyntaxSpec, TokenKind,
+    CpuView, DisasmLine, DisasmToken, FlagView, FlowKind, RegisterView, SyntaxSpec, TokenKind,
     strip_symbol_sigils, tokenize,
 };
 use gpui::SharedString;
 use snes::apu::{Apu, spc700};
 use snes::cartridge::{MapMode, Speed};
-use snes::cpu::disasm::{Disasm, InstructionClass};
+use snes::cpu::disasm::{Disasm, FlowKind as CoreFlow, InstructionClass};
 use snes::mmio::{Address, MemKind, MemoryAccess};
 use snes::{Cartridge, Cpu, Snes};
 
@@ -420,6 +420,7 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
                 addr == pc,
             )
             .target(d.target)
+            .flow(map_flow(d.flow))
             .note(note),
         );
 
@@ -460,7 +461,7 @@ fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> Vec<DisasmLine> {
     let mut lines = Vec::with_capacity(count);
 
     for _ in 0..count {
-        let (text, len, target) = spc700::disassemble(apu, addr);
+        let (text, len, target, flow) = spc700::disassemble(apu, addr);
         let len = len.max(1);
         let tokens = tokenize(&text, spc_mnemonic_kind(&text), &SPC_SYNTAX);
         let note = target.map_or(String::new(), |t| format!("→ ${t:04X}"));
@@ -475,6 +476,7 @@ fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> Vec<DisasmLine> {
                 addr == pc,
             )
             .target(target.map(|t| t as u32))
+            .flow(map_flow(flow))
             .note(note),
         );
 
@@ -594,6 +596,17 @@ fn mnemonic_kind(class: InstructionClass) -> TokenKind {
         InstructionClass::Transfer => TokenKind::MnemonicTransfer,
         InstructionClass::System => TokenKind::MnemonicSystem,
         InstructionClass::Other => TokenKind::Mnemonic,
+    }
+}
+
+fn map_flow(flow: CoreFlow) -> FlowKind {
+    match flow {
+        CoreFlow::None => FlowKind::None,
+        CoreFlow::CondBranch => FlowKind::CondBranch,
+        CoreFlow::Branch => FlowKind::Branch,
+        CoreFlow::Jump => FlowKind::Jump,
+        CoreFlow::Call => FlowKind::Call,
+        CoreFlow::Return => FlowKind::Return,
     }
 }
 

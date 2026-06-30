@@ -6,6 +6,7 @@ mod interpreter;
 pub use regs::{Flags, Spc700};
 
 use crate::apu::Apu;
+use crate::cpu::disasm::FlowKind;
 use interpreter::Interpreter;
 
 struct Reader<'a> {
@@ -30,12 +31,29 @@ pub fn step(apu: &mut Apu) {
     apu.spc700.pc = view.next_pc();
 }
 
-pub fn disassemble(apu: &Apu, pc: u16) -> (String, u8, Option<u16>) {
+pub fn disassemble(apu: &Apu, pc: u16) -> (String, u8, Option<u16>, FlowKind) {
     let reader = Reader { apu };
     let (inst, len) = decoder::decode(pc as u64, &reader);
     let text = inst.render(pc as u64, &reader);
     let target = control_target(&inst, pc, len);
-    (text, len, target)
+    let flow = flow_kind(&inst);
+
+    (text, len, target, flow)
+}
+
+fn flow_kind(inst: &decoder::Instruction) -> FlowKind {
+    use decoder::{Branches, Halt, Instruction};
+
+    match inst {
+        Instruction::Branches(Branches::BraRel { .. }) => FlowKind::Branch,
+        Instruction::Branches(_) => FlowKind::CondBranch,
+        Instruction::BitBranch(_) => FlowKind::CondBranch,
+        Instruction::Jump(_) => FlowKind::Jump,
+        Instruction::Call(_) => FlowKind::Call,
+        Instruction::Returns(_) => FlowKind::Return,
+        Instruction::Halt(Halt::Stop) => FlowKind::Return,
+        _ => FlowKind::None,
+    }
 }
 
 fn control_target(inst: &decoder::Instruction, pc: u16, len: u8) -> Option<u16> {

@@ -10,7 +10,7 @@ use cirsium::components::{
 };
 use cirsium::widgets::{
     BreakpointKind, BreakpointsWidget, CartridgeView, CartridgeWidget, ControlsView,
-    ControlsWidget, CpuWidget, DisassemblyWidget, LogWidget, MemoryWidget, RowProvider,
+    ControlsWidget, CpuWidget, DisassemblyWidget, LogWidget, MemoryWidget, RowProvider, ViewMode,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::CpuView;
@@ -18,7 +18,7 @@ use frontend_model::DockLocation;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, MouseDownEvent, Pixels, Point,
-    SharedString, Task, Window, div, px,
+    SharedString, Size, Task, Window, div, px,
 };
 
 use crate::breakpoints::Breakpoints;
@@ -267,6 +267,28 @@ impl Debugger {
     ) {
         self.panes[pane].disasm.open_menu(ix, position);
         cx.notify();
+    }
+
+    fn disasm_set_view(&mut self, pane: usize, mode: ViewMode, cx: &mut Context<Self>) {
+        self.panes[pane]
+            .disasm
+            .set_view_mode(mode, self.target.as_ref());
+        cx.notify();
+    }
+
+    fn disasm_pan_begin(&mut self, pane: usize, pos: Point<Pixels>) {
+        self.panes[pane].disasm.pan_begin(pos);
+    }
+
+    fn disasm_pan_drag(&mut self, pane: usize, pos: Point<Pixels>, cx: &mut Context<Self>) {
+        self.panes[pane].disasm.pan_drag(pos);
+        cx.notify();
+    }
+
+    fn disasm_set_viewport(&mut self, pane: usize, viewport: Size<f32>, cx: &mut Context<Self>) {
+        if self.panes[pane].disasm.set_graph_viewport(viewport) {
+            cx.notify();
+        }
     }
 
     fn close_menu(&mut self, cx: &mut Context<Self>) {
@@ -652,6 +674,32 @@ impl Render for Debugger {
                         let this = this.clone();
                         move |ix, pos, _, cx| {
                             this.update(cx, |d, cx| d.disasm_open_menu(pane_ix, ix, pos, cx))
+                        }
+                    })
+                    .view_mode(pane.disasm.view_mode())
+                    .graph_offset(pane.disasm.graph_offset())
+                    .on_set_view({
+                        let this = this.clone();
+                        move |mode, _, cx| {
+                            this.update(cx, |d, cx| d.disasm_set_view(pane_ix, mode, cx))
+                        }
+                    })
+                    .on_pan_begin({
+                        let this = this.clone();
+                        move |pos, _, cx| this.update(cx, |d, _cx| d.disasm_pan_begin(pane_ix, pos))
+                    })
+                    .on_pan_drag({
+                        let this = this.clone();
+                        move |pos, _, cx| {
+                            this.update(cx, |d, cx| d.disasm_pan_drag(pane_ix, pos, cx))
+                        }
+                    })
+                    .follow(pane.disasm.follow_pc())
+                    .graph_viewport(pane.disasm.graph_viewport())
+                    .on_viewport({
+                        let this = this.clone();
+                        move |viewport, _, cx| {
+                            this.update(cx, |d, cx| d.disasm_set_viewport(pane_ix, viewport, cx))
                         }
                     });
             disasm_panels.push((

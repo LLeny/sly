@@ -22,6 +22,7 @@ pub struct Panel {
     collapsed: bool,
     sizing: Sizing,
     on_toggle: Option<ClickHandler>,
+    header_action: Option<gpui::AnyElement>,
     body: Option<gpui::AnyElement>,
 }
 
@@ -35,6 +36,7 @@ impl Panel {
             collapsed: false,
             sizing: Sizing::Fixed,
             on_toggle: None,
+            header_action: None,
             body: None,
         }
     }
@@ -81,6 +83,11 @@ impl Panel {
         self
     }
 
+    pub fn header_action(mut self, action: impl IntoElement) -> Self {
+        self.header_action = Some(action.into_any_element());
+        self
+    }
+
     pub fn child(mut self, body: impl IntoElement) -> Self {
         self.body = Some(body.into_any_element());
         self
@@ -112,6 +119,9 @@ impl RenderOnce for Panel {
         );
 
         let mut right = div().flex().items_center().gap_2();
+        if let Some(action) = self.header_action {
+            right = right.child(action);
+        }
         if let Some(meta) = self.meta.clone() {
             right = right.child(
                 div()
