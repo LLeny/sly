@@ -29,7 +29,7 @@ impl std::fmt::Display for Disasm {
 
 #[inline]
 pub fn disassemble_at(snes: &Snes, pc: u16) -> Disasm {
-    let reader = CodeReader { snes };
+    let reader = CodeReader { snes, peek: true };
     let addr = pc as u64;
     let modes = decoder::pack_modes(snes.cpu.flags.m() as u64, snes.cpu.flags.x() as u64);
 

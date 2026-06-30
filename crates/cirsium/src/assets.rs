@@ -20,6 +20,7 @@ pub mod icon {
     pub const TRASH: &str = "icons/trash-2.svg";
     pub const CONTROLS: &str = "icons/circle-play.svg";
     pub const BREAKPOINT: &str = "icons/bug.svg";
+    pub const LOG: &str = "icons/scroll-text.svg";
 
     pub const RUN: &str = "icons/play.svg";
     pub const PAUSE: &str = "icons/pause.svg";

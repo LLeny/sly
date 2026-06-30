@@ -202,14 +202,19 @@ impl RenderOnce for BreakpointsWidget {
             .flex_col()
             .when(scrollable, |d| d.flex_1().min_h(px(0.)).overflow_y_scroll());
         if count == 0 {
-            list = list.child(
-                div()
-                    .px_1()
-                    .py_1()
-                    .text_xs()
-                    .text_color(t.text_dim)
-                    .child("No breakpoints"),
-            );
+            list = list
+                .flex_1()
+                .min_h(px(0.))
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .px_1()
+                        .py_1()
+                        .text_xs()
+                        .text_color(t.text_dim)
+                        .child("No breakpoints"),
+                );
         } else {
             list =
                 list.children(self.view.entries.into_iter().map(|entry| {
@@ -227,7 +232,7 @@ impl RenderOnce for BreakpointsWidget {
 
         Panel::new(Self::ID, "Breakpoints")
             .glyph(icon::BREAKPOINT)
-            .scrollable(scrollable)
+            .grow(scrollable)
             .collapsed(self.collapsed)
             .meta(format!("{count}"))
             .on_toggle_opt(self.on_toggle)

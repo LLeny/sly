@@ -4,6 +4,7 @@ mod breakpoints;
 mod cores;
 mod db;
 mod disasm;
+mod logging;
 mod memory;
 mod target;
 
@@ -18,14 +19,25 @@ use gpui::{
 };
 use gpui_platform::application;
 use reqwest_client::ReqwestClient;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use app::Debugger;
 use art::LibretroThumbnails;
 use cores::SnesTarget;
+use logging::{LogBuffer, LogLayer};
 use target::DebugTarget;
 
 fn main() {
-    tracing_subscriber::fmt().without_time().init();
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,snes=trace"));
+    let logs = LogBuffer::new();
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().without_time())
+        .with(LogLayer::new(logs.clone()))
+        .init();
 
     let Some(path) = std::env::args().nth(1) else {
         eprintln!("usage: debugger <rom.sfc>");
@@ -53,7 +65,7 @@ fn main() {
 
         set_theme(cx, Theme::new(ThemeMode::Dark));
 
-        let bounds = Bounds::centered(None, size(px(1280.), px(760.)), cx);
+        let bounds = Bounds::centered(None, size(px(1600.), px(960.)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -65,7 +77,7 @@ fn main() {
                 window_decorations: Some(WindowDecorations::Client),
                 ..Default::default()
             },
-            |_window, cx| cx.new(|cx| Debugger::new(target, cx)),
+            |_window, cx| cx.new(|cx| Debugger::new(target, logs, cx)),
         )
         .unwrap();
         cx.activate(true);

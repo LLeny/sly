@@ -41,11 +41,17 @@ impl Cpu {
 
 pub(crate) struct CodeReader<'a> {
     pub snes: &'a Snes,
+    pub peek: bool,
 }
 
 impl decoder::DisasmCtx for CodeReader<'_> {
     fn read_u8(&self, addr: u64) -> u8 {
-        self.snes.read8(Address::from_24bit(addr as u32))
+        let addr = Address::from_24bit(addr as u32);
+        if self.peek {
+            self.snes.peek8(addr)
+        } else {
+            self.snes.read8(addr)
+        }
     }
 
     fn symbol(&self, addr: u64) -> Option<(String, u64)> {
@@ -65,7 +71,10 @@ pub fn step(snes: &mut Snes) {
 
     let cia = ((bank as u64) << 16) | pc as u64;
     let (instr, len) = {
-        let reader = CodeReader { snes: &*snes };
+        let reader = CodeReader {
+            snes: &*snes,
+            peek: false,
+        };
         decoder::decode(modes, cia, &reader)
     };
 

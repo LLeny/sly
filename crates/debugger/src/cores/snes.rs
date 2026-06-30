@@ -385,12 +385,14 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> DisassemblyView {
 
 fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
     use std::fmt::Write;
+
     let mut out = String::with_capacity(len as usize * 3);
     for i in 0..len {
         if i != 0 {
             out.push(' ');
         }
-        let byte = snes.read8(Address::new(bank, addr.wrapping_add(i as u16)));
+
+        let byte = snes.peek8(Address::new(bank, addr.wrapping_add(i as u16)));
         let _ = write!(out, "{byte:02X}");
     }
     out

@@ -93,11 +93,11 @@ pub fn checkbox(
         });
 
     if checked {
-        box_ = box_.bg(theme.accent_soft).child(
+        box_ = box_.bg(theme.accent).child(
             svg()
                 .path(icon::CHECK)
                 .size(px(check_px))
-                .text_color(theme.accent),
+                .text_color(theme.on_accent),
         );
     }
 

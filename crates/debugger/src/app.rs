@@ -9,7 +9,7 @@ use cirsium::components::{
 };
 use cirsium::widgets::{
     BreakpointKind, BreakpointsWidget, CartridgeView, CartridgeWidget, ControlsView,
-    ControlsWidget, CpuView, CpuWidget, DisassemblyWidget, MemoryWidget, RowProvider,
+    ControlsWidget, CpuView, CpuWidget, DisassemblyWidget, LogWidget, MemoryWidget, RowProvider,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use gpui::prelude::*;
@@ -20,6 +20,7 @@ use gpui::{
 
 use crate::breakpoints::Breakpoints;
 use crate::disasm::Disasm;
+use crate::logging::{LogBuffer, Logs};
 use crate::memory::{self, Memory};
 use crate::target::{DebugTarget, RunOutcome};
 
@@ -31,8 +32,10 @@ pub(crate) struct Debugger {
     disasm: Disasm,
     memory: Memory,
     breakpoints: Breakpoints,
+    logs: Logs,
     jump_input: Entity<TextInput>,
     bp_input: Entity<TextInput>,
+    log_filter_input: Entity<TextInput>,
     collapsed: HashSet<&'static str>,
     settings: Option<Point<Pixels>>,
     running: bool,
@@ -47,7 +50,11 @@ enum CpuRefresh {
 }
 
 impl Debugger {
-    pub(crate) fn new(target: Box<dyn DebugTarget>, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        target: Box<dyn DebugTarget>,
+        log_buffer: LogBuffer,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut disasm = Disasm::new();
         disasm.recompute(target.as_ref());
 
@@ -57,14 +64,20 @@ impl Debugger {
         let bp_input = cx.new(|cx| TextInput::new(cx, "address...").hex_only(true).max_len(6));
         cx.subscribe(&bp_input, Self::on_bp_event).detach();
 
+        let log_filter_input = cx.new(|cx| TextInput::new(cx, "filter messages..."));
+        cx.subscribe(&log_filter_input, Self::on_log_filter_event)
+            .detach();
+
         let mut debugger = Self {
             cartridge: target.cartridge().clone(),
             cpu: target.cpu_view(),
             status: target.status("paused"),
             memory: Memory::new(target.as_ref()),
             breakpoints: Breakpoints::default(),
+            logs: Logs::new(log_buffer),
             jump_input,
             bp_input,
+            log_filter_input,
             target,
             disasm,
             collapsed: HashSet::new(),
@@ -390,6 +403,54 @@ impl Debugger {
             cx.notify();
         }
     }
+
+    fn clear_logs(&mut self, cx: &mut Context<Self>) {
+        self.logs.clear();
+        cx.notify();
+    }
+
+    fn on_log_filter_event(
+        &mut self,
+        input: Entity<TextInput>,
+        _event: &TextInputEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let text = input.read(cx).content().to_string();
+        self.logs.set_message(text);
+        cx.notify();
+    }
+
+    fn log_open_target(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.logs.open_target_combo(position);
+        cx.notify();
+    }
+
+    fn log_close_target(&mut self, cx: &mut Context<Self>) {
+        if self.logs.close_target_combo() {
+            cx.notify();
+        }
+    }
+
+    fn log_set_target(&mut self, id: SharedString, cx: &mut Context<Self>) {
+        self.logs.set_target(&id);
+        cx.notify();
+    }
+
+    fn log_open_level(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.logs.open_level_combo(position);
+        cx.notify();
+    }
+
+    fn log_close_level(&mut self, cx: &mut Context<Self>) {
+        if self.logs.close_level_combo() {
+            cx.notify();
+        }
+    }
+
+    fn log_set_level(&mut self, id: SharedString, cx: &mut Context<Self>) {
+        self.logs.set_level(&id);
+        cx.notify();
+    }
 }
 
 fn clipboard_listener(
@@ -407,6 +468,8 @@ impl Render for Debugger {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
+
+        self.logs.follow_tail();
 
         let settings_button = icon_button(
             t,
@@ -709,6 +772,58 @@ impl Render for Debugger {
             )
         });
 
+        let log_collapsed = self.is_collapsed(LogWidget::ID);
+        let log = LogWidget::new(self.logs.view(), self.logs.scroll.clone())
+            .collapsed(log_collapsed)
+            .target_label(self.logs.target_label())
+            .level_label(self.logs.level_label())
+            .message_input(self.log_filter_input.clone())
+            .on_toggle(cx.listener(|this, _, _, cx| this.toggle(LogWidget::ID, cx)))
+            .on_target_open(
+                cx.listener(|this, ev: &ClickEvent, _, cx| this.log_open_target(ev.position(), cx)),
+            )
+            .on_level_open(
+                cx.listener(|this, ev: &ClickEvent, _, cx| this.log_open_level(ev.position(), cx)),
+            )
+            .on_clear(cx.listener(|this, _, _, cx| this.clear_logs(cx)));
+        let log_region = div()
+            .flex()
+            .flex_col()
+            .when(!log_collapsed, |d| d.h(px(180.)).min_h(px(0.)))
+            .child(log);
+
+        let log_target_combo = self.logs.target_combo.map(|pos| {
+            let options = self.logs.target_options();
+            let selected = self.logs.target_id();
+            combobox_menu(
+                t,
+                pos,
+                &options,
+                &selected,
+                {
+                    let this = this.clone();
+                    move |id, _, cx| this.update(cx, |d, cx| d.log_set_target(id, cx))
+                },
+                cx.listener(|this, _: &MouseDownEvent, _, cx| this.log_close_target(cx)),
+            )
+        });
+
+        let log_level_combo = self.logs.level_combo.map(|pos| {
+            let options = self.logs.level_options();
+            let selected = self.logs.level_id();
+            combobox_menu(
+                t,
+                pos,
+                &options,
+                &selected,
+                {
+                    let this = this.clone();
+                    move |id, _, cx| this.update(cx, |d, cx| d.log_set_level(id, cx))
+                },
+                cx.listener(|this, _: &MouseDownEvent, _, cx| this.log_close_level(cx)),
+            )
+        });
+
         div()
             .flex()
             .flex_col()
@@ -721,6 +836,7 @@ impl Render for Debugger {
             .child(
                 div()
                     .flex()
+                    .flex_col()
                     .flex_1()
                     .min_h(px(0.))
                     .gap_2()
@@ -728,28 +844,36 @@ impl Render for Debugger {
                     .child(
                         div()
                             .flex()
-                            .flex_col()
-                            .w(px(360.))
-                            .flex_none()
-                            .min_h(px(0.))
-                            .overflow_hidden()
-                            .gap_2()
-                            .child(div().flex_none().child(controls))
-                            .child(breakpoints)
-                            .child(div().flex_none().child(cpu))
-                            .child(div().flex_none().child(cartridge)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
                             .flex_1()
-                            .min_w(px(0.))
                             .min_h(px(0.))
                             .gap_2()
-                            .child(disassembly)
-                            .child(memory_widget),
-                    ),
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .w(px(360.))
+                                    .flex_none()
+                                    .min_h(px(0.))
+                                    .overflow_hidden()
+                                    .gap_2()
+                                    .child(div().flex_none().child(controls))
+                                    .child(breakpoints)
+                                    .child(div().flex_none().child(cpu))
+                                    .child(div().flex_none().child(cartridge)),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .min_h(px(0.))
+                                    .gap_2()
+                                    .child(disassembly)
+                                    .child(memory_widget),
+                            ),
+                    )
+                    .child(log_region),
             )
             .child(status_bar(t, &self.status))
             .children(disasm_menu)
@@ -757,5 +881,7 @@ impl Render for Debugger {
             .children(bp_combo)
             .children(memory_combo)
             .children(memory_menu)
+            .children(log_target_combo)
+            .children(log_level_combo)
     }
 }

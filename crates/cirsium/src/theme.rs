@@ -42,6 +42,7 @@ pub struct Theme {
     pub accent: Hsla,
     pub accent_soft: Hsla,
     pub accent_hover: Hsla,
+    pub on_accent: Hsla,
     pub selection: Hsla,
     pub selection_border: Hsla,
 
@@ -109,6 +110,7 @@ impl Theme {
             accent: rgb(0xa55cff).into(),
             accent_soft: rgba(0xa55cff3a).into(),
             accent_hover: rgb(0xb985ff).into(),
+            on_accent: rgb(0xffffff).into(),
             selection: rgb(0x4a2f7a).into(),
             selection_border: rgb(0x7d5bb8).into(),
 
@@ -165,6 +167,7 @@ impl Theme {
             accent: rgb(0x7c3aed).into(),
             accent_soft: rgba(0x7c3aed26).into(),
             accent_hover: rgb(0x6a28d9).into(),
+            on_accent: rgb(0xffffff).into(),
             selection: rgb(0xcdb4f5).into(),
             selection_border: rgb(0x9d7fd0).into(),
 
