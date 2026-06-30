@@ -136,14 +136,31 @@ impl InterpreterView<'_> {
     }
 
     fn reg_step(&mut self, op: RegStep) {
-        let cpu = &mut self.snes.cpu;
         match op {
-            RegStep::Inx => cpu.index_x = cpu.index_x.wrapping_add(1),
-            RegStep::Dex => cpu.index_x = cpu.index_x.wrapping_sub(1),
-            RegStep::Iny => cpu.index_y = cpu.index_y.wrapping_add(1),
-            RegStep::Dey => cpu.index_y = cpu.index_y.wrapping_sub(1),
-            RegStep::IncA => cpu.acc = cpu.acc.wrapping_add(1),
-            RegStep::DecA => cpu.acc = cpu.acc.wrapping_sub(1),
+            RegStep::Inx => {
+                self.snes.cpu.index_x = self.snes.cpu.index_x.wrapping_add(1);
+                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
+            }
+            RegStep::Dex => {
+                self.snes.cpu.index_x = self.snes.cpu.index_x.wrapping_sub(1);
+                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
+            }
+            RegStep::Iny => {
+                self.snes.cpu.index_y = self.snes.cpu.index_y.wrapping_add(1);
+                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
+            }
+            RegStep::Dey => {
+                self.snes.cpu.index_y = self.snes.cpu.index_y.wrapping_sub(1);
+                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
+            }
+            RegStep::IncA => {
+                self.snes.cpu.acc = self.snes.cpu.acc.wrapping_add(1);
+                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
+            }
+            RegStep::DecA => {
+                self.snes.cpu.acc = self.snes.cpu.acc.wrapping_sub(1);
+                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
+            }
         }
     }
 
@@ -219,20 +236,49 @@ impl InterpreterView<'_> {
     }
 
     fn transfer(&mut self, op: Transfer) {
-        let cpu = &mut self.snes.cpu;
         match op {
-            Transfer::Tax => cpu.index_x = cpu.acc,
-            Transfer::Tay => cpu.index_y = cpu.acc,
-            Transfer::Tcd => cpu.direct_page = cpu.acc,
-            Transfer::Tcs => cpu.stack_pointer = cpu.acc,
-            Transfer::Tdc => cpu.acc = cpu.direct_page,
-            Transfer::Tsc => cpu.acc = cpu.stack_pointer,
-            Transfer::Tsx => cpu.index_x = cpu.stack_pointer,
-            Transfer::Txa => cpu.acc = cpu.index_x,
-            Transfer::Txs => cpu.stack_pointer = cpu.index_x,
-            Transfer::Txy => cpu.index_y = cpu.index_x,
-            Transfer::Tya => cpu.acc = cpu.index_y,
-            Transfer::Tyx => cpu.index_x = cpu.index_y,
+            Transfer::Tax => {
+                self.snes.cpu.index_x = self.snes.cpu.acc;
+                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
+            }
+            Transfer::Tay => {
+                self.snes.cpu.index_y = self.snes.cpu.acc;
+                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
+            }
+            Transfer::Tcd => {
+                self.snes.cpu.direct_page = self.snes.cpu.acc;
+                self.set_nz(self.snes.cpu.direct_page, true);
+            }
+            Transfer::Tcs => self.snes.cpu.stack_pointer = self.snes.cpu.acc,
+            Transfer::Tdc => {
+                self.snes.cpu.acc = self.snes.cpu.direct_page;
+                self.set_nz(self.snes.cpu.acc, true);
+            }
+            Transfer::Tsc => {
+                self.snes.cpu.acc = self.snes.cpu.stack_pointer;
+                self.set_nz(self.snes.cpu.acc, true);
+            }
+            Transfer::Tsx => {
+                self.snes.cpu.index_x = self.snes.cpu.stack_pointer;
+                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
+            }
+            Transfer::Txa => {
+                self.snes.cpu.acc = self.snes.cpu.index_x;
+                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
+            }
+            Transfer::Txs => self.snes.cpu.stack_pointer = self.snes.cpu.index_x,
+            Transfer::Txy => {
+                self.snes.cpu.index_y = self.snes.cpu.index_x;
+                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
+            }
+            Transfer::Tya => {
+                self.snes.cpu.acc = self.snes.cpu.index_y;
+                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
+            }
+            Transfer::Tyx => {
+                self.snes.cpu.index_x = self.snes.cpu.index_y;
+                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
+            }
         }
     }
 
@@ -263,12 +309,30 @@ impl InterpreterView<'_> {
 
     fn load(&mut self, op: Load) {
         match op {
-            Load::LdaImmM8 { imm } => self.snes.cpu.acc = imm as u16,
-            Load::LdaImmM16 { imm } => self.snes.cpu.acc = imm,
-            Load::LdxImmX8 { imm } => self.snes.cpu.index_x = imm as u16,
-            Load::LdxImmX16 { imm } => self.snes.cpu.index_x = imm,
-            Load::LdyImmX8 { imm } => self.snes.cpu.index_y = imm as u16,
-            Load::LdyImmX16 { imm } => self.snes.cpu.index_y = imm,
+            Load::LdaImmM8 { imm } => {
+                self.snes.cpu.acc = imm as u16;
+                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
+            }
+            Load::LdaImmM16 { imm } => {
+                self.snes.cpu.acc = imm;
+                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
+            }
+            Load::LdxImmX8 { imm } => {
+                self.snes.cpu.index_x = imm as u16;
+                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
+            }
+            Load::LdxImmX16 { imm } => {
+                self.snes.cpu.index_x = imm;
+                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
+            }
+            Load::LdyImmX8 { imm } => {
+                self.snes.cpu.index_y = imm as u16;
+                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
+            }
+            Load::LdyImmX16 { imm } => {
+                self.snes.cpu.index_y = imm;
+                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
+            }
             other => todo!("Implement load instruction {other:?}"),
         }
     }
@@ -357,5 +421,16 @@ impl InterpreterView<'_> {
         if cpu.emulation {
             tracing::error!("Entering emulation mode, weird?");
         }
+    }
+
+    fn set_nz(&mut self, value: u16, wide: bool) {
+        let (mask, sign) = if wide {
+            (0xffff, 0x8000)
+        } else {
+            (0x00ff, 0x0080)
+        };
+        let flags = &mut self.snes.cpu.flags;
+        flags.set_zero(value & mask == 0);
+        flags.set_negative(value & sign != 0);
     }
 }
