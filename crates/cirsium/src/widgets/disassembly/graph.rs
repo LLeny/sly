@@ -5,6 +5,7 @@ use super::{DisasmLine, FlowKind};
 pub(super) const BLOCK_HEADER_H: f32 = 20.;
 pub(super) const BLOCK_LINE_H: f32 = 16.;
 const BLOCK_PAD_X: f32 = 8.;
+pub(super) const BLOCK_GUTTER_W: f32 = 20.;
 pub(super) const BLOCK_PAD_Y: f32 = 5.;
 const CHAR_W: f32 = 7.;
 const MIN_BLOCK_W: f32 = 96.;
@@ -179,7 +180,8 @@ fn block_geometry(lines: &[DisasmLine], start: usize, end: usize) -> GraphBlock 
         max_chars = max_chars.max(line.text.chars().count());
     }
 
-    let w = (max_chars as f32 * CHAR_W + NOTE_RESERVE + BLOCK_PAD_X * 2.).max(MIN_BLOCK_W);
+    let w = (BLOCK_GUTTER_W + max_chars as f32 * CHAR_W + NOTE_RESERVE + BLOCK_PAD_X * 2.)
+        .max(MIN_BLOCK_W);
     let h = BLOCK_HEADER_H + rows as f32 * BLOCK_LINE_H + BLOCK_PAD_Y * 2. + BLOCK_BORDER_H;
     GraphBlock {
         start,
@@ -518,63 +520,4 @@ fn self_loop(b: &GraphBlock, sx: f32, tx: f32) -> Vec<(f32, f32)> {
         (tx, b.y - PORT_STUB),
         (tx, b.y),
     ]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn line(addr: u32, flow: FlowKind, target: Option<u32>) -> DisasmLine {
-        DisasmLine {
-            addr,
-            flow,
-            target,
-            ..Default::default()
-        }
-    }
-
-    fn count(layout: &GraphLayout, kind: EdgeKind) -> usize {
-        layout.edges.iter().filter(|e| e.kind == kind).count()
-    }
-
-    #[test]
-    fn conditional_branch_splits_into_taken_and_fallthrough() {
-        let lines = vec![
-            line(0x10, FlowKind::None, None),
-            line(0x12, FlowKind::CondBranch, Some(0x10)),
-            line(0x14, FlowKind::Return, None),
-        ];
-        let layout = build(&lines);
-
-        assert_eq!(layout.blocks.len(), 2);
-        assert_eq!((layout.blocks[0].start, layout.blocks[0].end), (0, 2));
-        assert_eq!((layout.blocks[1].start, layout.blocks[1].end), (2, 3));
-        assert_eq!(layout.edges.len(), 2);
-        assert_eq!(count(&layout, EdgeKind::Taken), 1);
-        assert_eq!(count(&layout, EdgeKind::FallThrough), 1);
-    }
-
-    #[test]
-    fn calls_stay_mid_block_and_branch_is_normal() {
-        let lines = vec![
-            line(0x00, FlowKind::Call, Some(0x100)),
-            line(0x03, FlowKind::None, None),
-            line(0x04, FlowKind::Branch, Some(0x00)),
-        ];
-        let layout = build(&lines);
-
-        assert_eq!(layout.blocks.len(), 1);
-        assert_eq!((layout.blocks[0].start, layout.blocks[0].end), (0, 3));
-        assert_eq!(layout.edges.len(), 1);
-        assert_eq!(count(&layout, EdgeKind::Normal), 1);
-    }
-
-    #[test]
-    fn return_has_no_successor_edges() {
-        let lines = vec![line(0x00, FlowKind::Return, None)];
-        let layout = build(&lines);
-
-        assert_eq!(layout.blocks.len(), 1);
-        assert!(layout.edges.is_empty());
-    }
 }

@@ -366,6 +366,7 @@ impl RenderOnce for DisassemblyWidget {
                     follow,
                     graph_viewport,
                     on_select,
+                    on_context,
                     on_pan_begin,
                     on_pan_drag,
                     on_viewport,
@@ -553,6 +554,7 @@ fn render_graph(
     follow: bool,
     viewport: Size<f32>,
     on_select: Option<SelectCallback>,
+    on_context: Option<ContextCallback>,
     on_pan_begin: Option<PanCallback>,
     on_pan_drag: Option<PanCallback>,
     on_viewport: Option<ViewportCallback>,
@@ -672,21 +674,47 @@ fn render_graph(
         let mut body = div().flex().flex_col().flex_1().justify_center();
         for (k, line) in lines.iter().enumerate() {
             let ix = block.start + k;
+
+            let mut gutter = div()
+                .w(px(graph::BLOCK_GUTTER_W))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center();
+            if let Some(kind) = line.breakpoint {
+                gutter = gutter.child(div().size(px(7.)).rounded_full().bg(kind.color(theme)));
+            } else if line.current {
+                gutter = gutter.child(
+                    svg()
+                        .path(icon::CHEVRON_RIGHT)
+                        .size(px(10.))
+                        .text_color(theme.accent),
+                );
+            }
+
             let mut row = div()
                 .id(("graph-line", ix))
                 .flex()
                 .items_center()
-                .px_2()
+                .pr_3()
                 .h(px(graph::BLOCK_LINE_H))
                 .flex_none()
                 .when(line.current, |d| d.bg(theme.accent_soft))
-                .when(line.selected && !line.current, |d| d.bg(theme.bg_panel_alt))
+                .when_some(line.breakpoint.filter(|_| !line.current), |d, kind| {
+                    d.bg(kind.color(theme).opacity(0.20))
+                })
+                .when(
+                    line.selected && !line.current && line.breakpoint.is_none(),
+                    |d| d.bg(theme.bg_panel_alt),
+                )
+                .child(gutter)
                 .child(instruction_text(theme, &line.tokens, GRAPH_MNEMONIC_W));
 
             if !line.note.is_empty() {
                 row = row.child(
                     div()
-                        .ml_2()
+                        .ml_auto()
+                        .pl_4()
                         .font_family(theme.mono_font)
                         .text_xs()
                         .text_color(theme.code_comment)
@@ -698,6 +726,11 @@ fn render_graph(
                 row = row
                     .cursor_pointer()
                     .on_click(move |_, window, cx| select(ix, window, cx));
+            }
+            if let Some(context) = on_context.clone() {
+                row = row.on_mouse_down(MouseButton::Right, move |e, window, cx| {
+                    context(ix, e.position, window, cx)
+                });
             }
 
             body = body.child(row);
