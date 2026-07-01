@@ -1,6 +1,8 @@
 use super::decoder::{Instruction, Load};
 use crate::apu::Apu;
-use crate::apu::spc700::decoder::{Alu, Branches, MoveMem, MoveReg, RegStep, Store, Word};
+use crate::apu::spc700::decoder::{
+    Alu, Branches, FlagOps, Jump, MemStep, MoveMem, MoveReg, RegStep, Store, Word,
+};
 
 pub(super) struct Interpreter<'a> {
     apu: &'a mut Apu,
@@ -62,7 +64,10 @@ impl<'a> Interpreter<'a> {
             Instruction::RegStep(op) => self.reg_step(op),
             Instruction::Alu(op) => self.alu(op),
             Instruction::Branches(op) => self.branches(op),
+            Instruction::Jump(op) => self.jump(op),
             Instruction::Word(op) => self.word(op),
+            Instruction::MemStep(op) => self.mem_step(op),
+            Instruction::FlagOps(op) => self.flag_ops(op),
             other => todo!("Instruction not implemented: {other:?}"),
         }
     }
@@ -219,6 +224,52 @@ impl<'a> Interpreter<'a> {
 
         if taken {
             self.next_pc = self.next_pc.wrapping_add(disp as u16);
+        }
+    }
+
+    fn jump(&mut self, op: Jump) {
+        match op {
+            Jump::JmpAbs { addr } => {
+                self.next_pc = addr;
+            }
+            Jump::JmpIax { addr } => {
+                let ptr = addr.wrapping_add(self.apu.spc700.x as u16);
+                let target =
+                    self.apu.read(ptr) as u16 | ((self.apu.read(ptr.wrapping_add(1)) as u16) << 8);
+                self.next_pc = target;
+            }
+        }
+    }
+
+    fn mem_step(&mut self, op: MemStep) {
+        let (addr, delta) = match op {
+            MemStep::IncDp { dp } => (self.dp_addr(dp), 1),
+            MemStep::IncDpx { dp } => (self.dp_addr(dp.wrapping_add(self.apu.spc700.x)), 1),
+            MemStep::IncAbs { addr } => (addr, 1),
+            MemStep::DecDp { dp } => (self.dp_addr(dp), -1),
+            MemStep::DecDpx { dp } => (self.dp_addr(dp.wrapping_add(self.apu.spc700.x)), -1),
+            MemStep::DecAbs { addr } => (addr, -1),
+        };
+
+        let value = self.apu.read(addr).wrapping_add_signed(delta);
+        self.apu.write(addr, value);
+        self.set_nz8(value);
+    }
+
+    fn flag_ops(&mut self, op: FlagOps) {
+        let psw = &mut self.apu.spc700.psw;
+        match op {
+            FlagOps::Clrc => psw.set_carry(false),
+            FlagOps::Clrv => {
+                psw.set_overflow(false);
+                psw.set_half_carry(false);
+            }
+            FlagOps::Clrp => psw.set_direct_page(false),
+            FlagOps::Setc => psw.set_carry(true),
+            FlagOps::Setp => psw.set_direct_page(true),
+            FlagOps::Notc => psw.set_carry(!psw.carry()),
+            FlagOps::Di => psw.set_irq_enable(false),
+            FlagOps::Ei => psw.set_irq_enable(true),
         }
     }
 }
