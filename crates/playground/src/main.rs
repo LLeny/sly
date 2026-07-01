@@ -6,10 +6,9 @@ fn main() {
     let path = std::env::args()
         .nth(1)
         .expect("Usage: playground <path-to-rom>");
-    let count = std::env::args()
+    let addr = std::env::args()
         .nth(2)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(100);
+        .and_then(|s| u16::from_str_radix(&s, 16).ok());
 
     let buffer = std::fs::read(&path).expect("Failed to read ROM");
 
@@ -22,7 +21,13 @@ fn main() {
 
     let mut snes = Snes::new(cart);
 
-    for _ in 0..count {
+    loop {
+        if let Some(addr) = addr
+            && snes.cpu.pc == addr
+        {
+            break;
+        }
+
         let disasm = snes.disassemble_next();
         println!(
             "{:02X}:{:04X}: {}",
