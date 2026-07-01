@@ -79,11 +79,36 @@ impl<'a> InterpreterView<'a> {
         self.push8(value as u8);
     }
 
+    /// Push a register value, honoring its current 8/16bit width.
+    fn push_reg(&mut self, value: u16, wide: bool) {
+        if wide {
+            self.push16(value);
+        } else {
+            self.push8(value as u8);
+        }
+    }
+
     /// Pop a byte from the stack.
     fn pop8(&mut self) -> u8 {
         let sp = self.snes.cpu.stack_pointer.wrapping_add(1);
         self.snes.cpu.stack_pointer = sp;
         self.snes.read8(Address::new(0, sp))
+    }
+
+    /// Pop a word from the stack.
+    fn pop16(&mut self) -> u16 {
+        let lo = self.pop8() as u16;
+        let hi = self.pop8() as u16;
+        lo | (hi << 8)
+    }
+
+    /// Pop a register value, honoring its current 8/16bit width.
+    fn pop_reg(&mut self, wide: bool) -> u16 {
+        if wide {
+            self.pop16()
+        } else {
+            self.pop8() as u16
+        }
     }
 
     /// Shared interrupt entry sequence.
@@ -372,15 +397,59 @@ impl InterpreterView<'_> {
 
     fn push(&mut self, op: Push) {
         match op {
+            Push::Pha => self.push_reg(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits()),
+            Push::Phx => {
+                self.push_reg(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits())
+            }
+            Push::Phy => {
+                self.push_reg(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits())
+            }
+            Push::Phb => self.push8(self.snes.cpu.data_bank),
+            Push::Phd => self.push16(self.snes.cpu.direct_page),
+            Push::Phk => self.push8(self.snes.cpu.program_bank),
             Push::Php => self.push8(self.snes.cpu.flags.raw()),
-            other => todo!("Implement push instruction {other:?}"),
+            Push::PeaAbs { addr } => self.push16(addr),
+            Push::PeiIdp { dp } => {
+                let ea = addressing::resolve(self.snes, AddrMode::Idp(dp));
+                self.push16(ea.address());
+            }
+            Push::PerRell { disp } => {
+                let target = self.next_pc.wrapping_add(disp as u16);
+                self.push16(target);
+            }
         }
     }
 
     fn pop(&mut self, op: Pop) {
         match op {
+            Pop::Pla => {
+                let wide = self.snes.cpu.flags.is_acc_16bits();
+                self.snes.cpu.acc = if wide {
+                    self.pop16()
+                } else {
+                    (self.snes.cpu.acc & 0xff00) | self.pop8() as u16
+                };
+                self.set_nz(self.snes.cpu.acc, wide);
+            }
+            Pop::Plx => {
+                let wide = self.snes.cpu.flags.is_index_16bits();
+                self.snes.cpu.index_x = self.pop_reg(wide);
+                self.set_nz(self.snes.cpu.index_x, wide);
+            }
+            Pop::Ply => {
+                let wide = self.snes.cpu.flags.is_index_16bits();
+                self.snes.cpu.index_y = self.pop_reg(wide);
+                self.set_nz(self.snes.cpu.index_y, wide);
+            }
+            Pop::Plb => {
+                self.snes.cpu.data_bank = self.pop8();
+                self.set_nz(self.snes.cpu.data_bank as u16, false);
+            }
+            Pop::Pld => {
+                self.snes.cpu.direct_page = self.pop16();
+                self.set_nz(self.snes.cpu.direct_page, true);
+            }
             Pop::Plp => self.snes.cpu.flags = Flags::from_raw(self.pop8()),
-            other => todo!("Implement pop instruction {other:?}"),
         }
     }
 
