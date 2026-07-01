@@ -1,8 +1,8 @@
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, FontWeight, SharedString, Window, div};
+use gpui::{App, ClickEvent, SharedString, Window, div};
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Copyable, Panel, label_text};
+use crate::components::{ClickHandler, Copyable, Panel, bool_chip, hex, label_text};
 use crate::diff::{Highlight, highlight_color};
 use crate::theme::Theme;
 
@@ -25,8 +25,7 @@ impl RegisterView {
     }
 
     fn hex(&self) -> String {
-        let width = (self.bits as usize).div_ceil(4);
-        format!("${:0width$X}", self.value, width = width)
+        hex(self.value, self.bits)
     }
 }
 
@@ -152,7 +151,12 @@ impl RenderOnce for CpuWidget {
             .pt_2()
             .border_t_1()
             .border_color(t.border_subtle)
-            .children(self.view.flags.iter().map(|f| flag_chip(t, f)));
+            .children(
+                self.view
+                    .flags
+                    .iter()
+                    .map(|f| bool_chip(t, f.name.clone(), f.set)),
+            );
 
         let body = div()
             .flex()
@@ -188,17 +192,4 @@ fn reg_cell(theme: &Theme, id: &str, r: &RegisterView) -> Copyable {
     Copyable::new(format!("{id}-reg-{}", r.name), hex)
         .cell()
         .child(inner)
-}
-
-fn flag_chip(theme: &Theme, f: &FlagView) -> Div {
-    div()
-        .px_1()
-        .font_family(theme.mono_font)
-        .text_xs()
-        .font_weight(FontWeight::MEDIUM)
-        .when(f.set, |d| d.bg(theme.accent_soft).text_color(theme.accent))
-        .when(!f.set, |d| {
-            d.bg(theme.bg_panel_alt).text_color(theme.text_muted)
-        })
-        .child(f.name.clone())
 }

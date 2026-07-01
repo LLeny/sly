@@ -9,9 +9,16 @@ pub(crate) trait MmioReg {
 pub struct MmioSymbol {
     pub addr: u16,
     pub name: &'static str,
+    pub bits: u8,
+    pub fields: &'static [chapa::FieldInfo],
 }
 
 inventory::collect!(MmioSymbol);
+
+/// Iterates every registered MMIO symbol.
+pub fn symbols() -> impl Iterator<Item = &'static MmioSymbol> {
+    inventory::iter::<MmioSymbol>().into_iter()
+}
 
 /// Look up a symbol name for a given MMIO address.
 pub fn symbol(addr: u16) -> Option<&'static str> {

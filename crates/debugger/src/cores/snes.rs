@@ -1,6 +1,9 @@
 use cirsium::Highlight;
 use cirsium::components::StatusView;
-use cirsium::widgets::{BreakpointKind, CartridgeField, CartridgeView, MemoryRegion};
+use cirsium::widgets::{
+    BreakpointKind, CartridgeField, CartridgeView, MemoryRegion, MmioFieldView, MmioGroup,
+    MmioRegisterView, MmioView,
+};
 use debugger_model::{
     CpuView, DisasmLine, DisasmToken, FlagView, FlowKind, RegisterView, SyntaxSpec, TokenKind,
     strip_symbol_sigils, tokenize,
@@ -277,6 +280,10 @@ impl DebugTarget for SnesTarget {
 
     fn cartridge(&self) -> &CartridgeView {
         &self.cartridge
+    }
+
+    fn mmio_view(&self) -> MmioView {
+        mmio_view(&self.core)
     }
 
     fn status(&self, label: &str) -> StatusView {
@@ -614,6 +621,115 @@ const SNES_SYNTAX: SyntaxSpec = SyntaxSpec {
     registers: &["A", "X", "Y", "S"],
     symbols: snes::mmio::is_symbol,
 };
+
+fn mmio_component(addr: u16) -> (u8, &'static str) {
+    match addr {
+        0x2100..=0x213F => (0, "PPU"),
+        0x2140..=0x2143 => (1, "APU"),
+        0x420B..=0x420C | 0x4300..=0x43FF => (2, "DMA"),
+        0x4200..=0x42FF => (3, "CPU"),
+        _ => (9, "Other"),
+    }
+}
+
+fn read_mmio(core: &Snes, addr: u16, bits: u8) -> u32 {
+    let lo = core.peek_mmio(addr) as u32;
+    if bits > 8 {
+        lo | (core.peek_mmio(addr.wrapping_add(1)) as u32) << 8
+    } else {
+        lo
+    }
+}
+
+fn mmio_field_views(fields: &[snes::mmio::FieldInfo], parent: u32) -> Vec<MmioFieldView> {
+    let mut ordered: Vec<_> = fields.iter().collect();
+    ordered.sort_by_key(|f| f.offset);
+    ordered
+        .into_iter()
+        .map(|f| mmio_field_view(f, parent))
+        .collect()
+}
+
+fn mmio_field_view(field: &snes::mmio::FieldInfo, parent: u32) -> MmioFieldView {
+    use snes::mmio::FieldKind;
+
+    let mask = if field.width >= 32 {
+        u32::MAX
+    } else {
+        (1u32 << field.width) - 1
+    };
+    let value = (parent >> field.offset) & mask;
+
+    let bit_label = if field.width == 1 {
+        format!("[{}]", field.offset)
+    } else {
+        format!("[{}:{}]", field.offset, field.offset + field.width - 1)
+    };
+
+    let (display, is_bool, children) = match field.kind {
+        FieldKind::Bool => (
+            if value != 0 { "on" } else { "off" }.to_string(),
+            true,
+            Vec::new(),
+        ),
+        FieldKind::Uint => (format!("${value:X}"), false, Vec::new()),
+        FieldKind::Enum(info) => {
+            let display = info
+                .variants
+                .iter()
+                .find(|(disc, _)| *disc == value as u128)
+                .map(|(_, name)| format!("{name} ({value})"))
+                .unwrap_or_else(|| format!("${value:X}"));
+            (display, false, Vec::new())
+        }
+        FieldKind::Struct(fields) => (
+            format!("${value:X}"),
+            false,
+            mmio_field_views(fields, value),
+        ),
+    };
+
+    MmioFieldView {
+        name: field.name.into(),
+        bit_label: bit_label.into(),
+        value,
+        display: display.into(),
+        is_bool,
+        children,
+    }
+}
+
+fn mmio_view(core: &Snes) -> MmioView {
+    let mut symbols: Vec<_> = snes::mmio::symbols().collect();
+    symbols.sort_by_key(|s| (mmio_component(s.addr).0, s.addr));
+
+    let mut groups: Vec<MmioGroup> = Vec::new();
+    for sym in symbols {
+        let (_, component) = mmio_component(sym.addr);
+        let value = read_mmio(core, sym.addr, sym.bits);
+        let fields = mmio_field_views(sym.fields, value);
+
+        let reg = MmioRegisterView {
+            id: format!("mmio-{:04X}", sym.addr).into(),
+            name: sym.name.into(),
+            addr: format!("${:04X}", sym.addr).into(),
+            value,
+            bits: sym.bits,
+            highlight: Highlight::None,
+            fields,
+        };
+
+        match groups.last_mut() {
+            Some(group) if group.name == component => group.registers.push(reg),
+            _ => groups.push(MmioGroup {
+                name: component.into(),
+                registers: vec![reg],
+            }),
+        }
+    }
+
+    MmioView { groups }
+}
 
 fn cartridge_view(cart: &Cartridge) -> CartridgeView {
     let speed = match cart.memory_map() {

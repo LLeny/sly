@@ -28,7 +28,12 @@ macro_rules! register_mmio {
         }
 
         inventory::submit! {
-            $crate::mmio::MmioSymbol { addr: $name::ADDRESS, name: $name::NAME }
+            $crate::mmio::MmioSymbol {
+                addr: $name::ADDRESS,
+                name: $name::NAME,
+                bits: (::core::mem::size_of::<$repr>() * 8) as u8,
+                fields: $name::FIELDS,
+            }
         }
     };
 }
@@ -37,7 +42,7 @@ macro_rules! register_mmio_raw {
     ($($addr:literal => $name:literal),+ $(,)?) => {
         $(
             inventory::submit! {
-                $crate::mmio::MmioSymbol { addr: $addr, name: $name }
+                $crate::mmio::MmioSymbol { addr: $addr, name: $name, bits: 8, fields: &[] }
             }
         )+
     };

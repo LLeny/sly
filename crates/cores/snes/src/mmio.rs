@@ -16,8 +16,9 @@ use crate::mmio::regs::{
 use crate::{Cartridge, Snes};
 
 pub use addr::Address;
+pub use chapa::{EnumInfo, FieldInfo, FieldKind};
 pub(crate) use symbol::MmioReg;
-pub use symbol::{MmioSymbol, address_of, is_symbol, symbol};
+pub use symbol::{MmioSymbol, address_of, is_symbol, symbol, symbols};
 
 const WRAM_SIZE: usize = 0x2_0000;
 pub(crate) const OPEN_BUS: u8 = 0xFF;
@@ -232,6 +233,11 @@ impl Snes {
                 );
             }
         }
+    }
+
+    /// Guaranteed to be side effect free.
+    pub fn peek_mmio(&self, reg: u16) -> u8 {
+        self.peek_io(reg)
     }
 
     fn peek_io(&self, reg: u16) -> u8 {

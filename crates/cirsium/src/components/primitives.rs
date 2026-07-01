@@ -1,5 +1,5 @@
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, Hsla, SharedString, Stateful, Window, div, px, svg};
+use gpui::{App, ClickEvent, Div, FontWeight, Hsla, SharedString, Stateful, Window, div, px, svg};
 
 use crate::assets::icon;
 use crate::theme::{MONO_FONT, Theme, with_alpha};
@@ -13,6 +13,27 @@ pub fn badge(text: impl Into<SharedString>, color: Hsla) -> Div {
         .bg(with_alpha(color, 0.15))
         .text_color(color)
         .child(text.into())
+}
+
+/// A monospace on/off chip, accented when set (CPU flags, MMIO bit fields).
+pub fn bool_chip(theme: &Theme, text: impl Into<SharedString>, on: bool) -> Div {
+    div()
+        .px_1()
+        .font_family(theme.mono_font)
+        .text_xs()
+        .font_weight(FontWeight::MEDIUM)
+        .when(on, |d| d.bg(theme.accent_soft).text_color(theme.accent))
+        .when(!on, |d| {
+            d.bg(theme.bg_panel_alt).text_color(theme.text_muted)
+        })
+        .child(text.into())
+}
+
+/// Formats `value` as a `$`-prefixed hex string padded to `bits` (rounded up
+/// to whole nibbles).
+pub fn hex(value: u32, bits: u8) -> String {
+    let width = (bits as usize).div_ceil(4);
+    format!("${value:0width$X}")
 }
 
 /// A thin vertical divider for statusbar segments.

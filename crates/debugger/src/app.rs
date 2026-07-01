@@ -10,7 +10,8 @@ use cirsium::components::{
 };
 use cirsium::widgets::{
     BreakpointKind, BreakpointsWidget, CartridgeView, CartridgeWidget, ControlsView,
-    ControlsWidget, CpuWidget, DisassemblyWidget, LogWidget, MemoryWidget, RowProvider, ViewMode,
+    ControlsWidget, CpuWidget, DisassemblyWidget, LogWidget, MemoryWidget, MmioView, MmioWidget,
+    RowProvider, ViewMode,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::CpuView;
@@ -40,6 +41,8 @@ struct ProcessorPane {
 pub(crate) struct Debugger {
     target: Box<dyn DebugTarget>,
     cartridge: CartridgeView,
+    mmio_view: MmioView,
+    mmio_expanded: HashSet<SharedString>,
     status: StatusView,
     panes: Vec<ProcessorPane>,
     memory: Memory,
@@ -99,6 +102,8 @@ impl Debugger {
 
         Self {
             cartridge: target.cartridge().clone(),
+            mmio_view: target.mmio_view(),
+            mmio_expanded: HashSet::new(),
             status: target.status("paused"),
             memory: Memory::new(target.as_ref()),
             breakpoints: Breakpoints::default(),
@@ -124,6 +129,7 @@ impl Debugger {
         for pane in &mut self.panes {
             Self::refresh_pane_view(self.target.as_ref(), pane, mode);
         }
+        self.mmio_view = self.target.mmio_view();
     }
 
     fn track_changes(
@@ -154,6 +160,13 @@ impl Debugger {
         let id = id.into();
         if !self.collapsed.remove(&id) {
             self.collapsed.insert(id);
+        }
+        cx.notify();
+    }
+
+    fn toggle_mmio(&mut self, id: SharedString, cx: &mut Context<Self>) {
+        if !self.mmio_expanded.remove(&id) {
+            self.mmio_expanded.insert(id);
         }
         cx.notify();
     }
@@ -615,6 +628,15 @@ impl Render for Debugger {
 
         let this = cx.entity();
 
+        let mmio = MmioWidget::new(self.mmio_view.clone())
+            .expanded(self.mmio_expanded.clone())
+            .collapsed(self.is_collapsed(MmioWidget::ID))
+            .on_toggle(cx.listener(|this, _, _, cx| this.toggle(MmioWidget::ID, cx)))
+            .on_toggle_register({
+                let this = this.clone();
+                move |id, _, cx| this.update(cx, |d, cx| d.toggle_mmio(id, cx))
+            });
+
         let breakpoints =
             BreakpointsWidget::new(self.breakpoints.view(), self.breakpoints.draft_kind())
                 .collapsed(self.is_collapsed(BreakpointsWidget::ID))
@@ -998,6 +1020,7 @@ impl Render for Debugger {
             "cartridge".into(),
             div().flex_none().child(cartridge).into_any_element(),
         );
+        panels.insert("mmio".into(), mmio.into_any_element());
         panels.insert("memory".into(), memory_widget.into_any_element());
         panels.insert("log".into(), log_region.into_any_element());
         panels.extend(cpu_panels);

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use cirsium::Highlight;
 use cirsium::components::StatusView;
-use cirsium::widgets::{CartridgeView, MemoryRegion};
+use cirsium::widgets::{CartridgeView, MemoryRegion, MmioView};
 use debugger_model::{CpuView, DisasmLine};
 use frontend_model::{ComponentManifest, DockLocation, PanelDescriptor, PanelKind, RefreshPolicy};
 use gpui::SharedString;
@@ -33,6 +33,7 @@ pub trait DebugTarget {
     fn reset(&mut self);
 
     fn cartridge(&self) -> &CartridgeView;
+    fn mmio_view(&self) -> MmioView;
     fn status(&self, label: &str) -> StatusView;
     fn caption(&self, label: &str) -> SharedString;
     fn memory_regions(&self) -> Vec<MemoryRegion>;
@@ -95,6 +96,14 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
             OnPause,
         ));
     }
+
+    panels.push(PanelDescriptor::new(
+        "mmio",
+        "MMIO",
+        PanelKind::Mmio,
+        Right,
+        OnPause,
+    ));
 
     panels.push(PanelDescriptor::new(
         "log",

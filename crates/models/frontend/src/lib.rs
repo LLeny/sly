@@ -22,6 +22,7 @@ pub enum PanelKind {
     Registers { cpu: Arc<str> },
     Disassembly { cpu: Arc<str> },
     Memory,
+    Mmio,
     Log,
 }
 

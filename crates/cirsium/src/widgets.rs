@@ -5,6 +5,7 @@ pub mod cpu;
 pub mod disassembly;
 pub mod log;
 pub mod memory;
+pub mod mmio;
 
 pub use breakpoints::{BreakpointEntry, BreakpointKind, BreakpointsView, BreakpointsWidget};
 pub use cartridge::{CartridgeField, CartridgeView, CartridgeWidget};
@@ -15,3 +16,4 @@ pub use disassembly::{
 };
 pub use log::{LogEntry, LogLevel, LogView, LogWidget, short_target};
 pub use memory::{MemoryCell, MemoryRegion, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};
+pub use mmio::{MmioFieldView, MmioGroup, MmioRegisterView, MmioView, MmioWidget};
