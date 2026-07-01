@@ -543,9 +543,8 @@ impl InterpreterView<'_> {
     }
 
     fn xba(&mut self) {
-        let swapped = self.snes.cpu.acc.rotate_left(8);
-        self.snes.cpu.acc = swapped;
-        self.set_nz(swapped, false);
+        self.snes.cpu.acc = self.snes.cpu.acc.rotate_left(8);
+        self.set_nz(self.snes.cpu.acc, false);
     }
 
     fn set_nz(&mut self, value: u16, wide: bool) {

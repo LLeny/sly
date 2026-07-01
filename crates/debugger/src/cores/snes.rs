@@ -468,8 +468,9 @@ fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> Vec<DisasmLine> {
     let mut lines = Vec::with_capacity(count);
 
     for _ in 0..count {
-        let (text, len, target, flow) = spc700::disassemble(apu, addr);
+        let (raw, len, target, flow) = spc700::disassemble(apu, addr);
         let len = len.max(1);
+        let text = strip_symbol_sigils(&raw, &SPC_SYNTAX);
         let tokens = tokenize(&text, spc_mnemonic_kind(&text), &SPC_SYNTAX);
         let note = target.map_or(String::new(), |t| format!("→ ${t:04X}"));
 
@@ -514,7 +515,7 @@ fn spc_mnemonic_kind(text: &str) -> TokenKind {
 
 const SPC_SYNTAX: SyntaxSpec = SyntaxSpec {
     registers: &["A", "X", "Y", "SP", "YA", "PSW", "C"],
-    symbols: |_| false,
+    symbols: snes::apu::is_symbol,
 };
 
 fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {

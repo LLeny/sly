@@ -2,6 +2,9 @@ use crate::apu::regs::Control;
 
 mod regs;
 pub mod spc700;
+mod symbol;
+
+pub use symbol::{is_symbol, symbol};
 
 const IPL_ROM: &[u8] = include_bytes!("../assets/spc700.rom");
 

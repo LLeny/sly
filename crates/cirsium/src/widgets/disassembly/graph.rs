@@ -262,6 +262,15 @@ fn route_edges(
         block.x + block.w * (idx as f32 + 1.) / (total as f32 + 1.)
     };
 
+    let max_layer = layer.iter().copied().max().unwrap_or(0).max(0) as usize;
+    let mut rank_top = vec![f32::MAX; max_layer + 1];
+    let mut rank_bot = vec![f32::MIN; max_layer + 1];
+    for (i, b) in blocks.iter().enumerate() {
+        let l = layer[i].max(0) as usize;
+        rank_top[l] = rank_top[l].min(b.y);
+        rank_bot[l] = rank_bot[l].max(b.y + b.h);
+    }
+
     let ends: Vec<EdgeEnds> = edges
         .iter()
         .enumerate()
@@ -281,14 +290,19 @@ fn route_edges(
         .enumerate()
         .map(|(ei, &(f, t, kind))| {
             let e = &ends[ei];
+            let lf = layer[f].max(0) as usize;
+            let lt = layer[t].max(0) as usize;
             let points = if f == t {
                 self_loop(&blocks[f], e.sx, e.tx)
             } else if is_forward(f, t) {
-                forward_route(e.sx, e.sy, e.tx, e.ty, (e.sy + e.ty) / 2.)
+                let channel = (rank_bot[lf] + rank_top[lt]) / 2.;
+                forward_route(e.sx, e.sy, e.tx, e.ty, channel)
             } else {
                 let lane = max_width + BACK_LANE_GAP * (1 + back_lane) as f32;
                 back_lane += 1;
-                back_route(e.sx, e.sy, e.tx, e.ty, lane)
+                let out_y = rank_bot[lf] + PORT_STUB;
+                let in_y = rank_top[lt] - PORT_STUB;
+                back_route(e.sx, e.sy, e.tx, e.ty, lane, out_y, in_y)
             };
             GraphEdge { kind, points }
         })
@@ -362,9 +376,15 @@ fn forward_route(sx: f32, sy: f32, tx: f32, ty: f32, channel: f32) -> Vec<(f32, 
     vec![(sx, sy), (sx, channel), (tx, channel), (tx, ty)]
 }
 
-fn back_route(sx: f32, sy: f32, tx: f32, ty: f32, lane: f32) -> Vec<(f32, f32)> {
-    let out_y = sy + PORT_STUB;
-    let in_y = ty - PORT_STUB;
+fn back_route(
+    sx: f32,
+    sy: f32,
+    tx: f32,
+    ty: f32,
+    lane: f32,
+    out_y: f32,
+    in_y: f32,
+) -> Vec<(f32, f32)> {
     vec![
         (sx, sy),
         (sx, out_y),

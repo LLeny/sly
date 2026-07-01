@@ -804,6 +804,7 @@ fn instruction_text(theme: &Theme, tokens: &[DisasmToken], mnemonic_min: f32) ->
         text = text.child(
             div()
                 .min_w(px(mnemonic_min))
+                .pr_2()
                 .flex_none()
                 .text_color(token_color(theme, mnemonic.kind))
                 .child(mnemonic.text.clone()),

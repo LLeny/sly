@@ -17,6 +17,10 @@ impl decoder::DisasmCtx for Reader<'_> {
     fn read_u8(&self, addr: u64) -> u8 {
         self.apu.peek(addr as u16)
     }
+
+    fn symbol(&self, addr: u64) -> Option<(String, u64)> {
+        crate::apu::symbol(addr as u16).map(|name| (name.to_string(), 0))
+    }
 }
 
 pub fn step(apu: &mut Apu) {
