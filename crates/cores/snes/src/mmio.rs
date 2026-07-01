@@ -66,6 +66,15 @@ impl Mmio {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.wram.fill(0);
+
+        #[cfg(feature = "debug")]
+        {
+            self.access = AccessTracker::default();
+        }
+    }
+
     /// Translate a CPU address to an address space (WRAM, ROM, I/O or unmapped).
     pub(crate) fn map(&self, addr: Address) -> AddressSpace {
         let bank = addr.bank();

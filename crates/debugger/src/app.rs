@@ -304,6 +304,23 @@ impl Debugger {
         }
     }
 
+    fn disasm_hover_edge(&mut self, pane: usize, edge: Option<usize>, cx: &mut Context<Self>) {
+        if self.panes[pane].disasm.set_hovered_edge(edge) {
+            cx.notify();
+        }
+    }
+
+    fn disasm_jump(
+        &mut self,
+        pane: usize,
+        from: Point<Pixels>,
+        to: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.panes[pane].disasm.jump(from, to);
+        cx.notify();
+    }
+
     fn close_menu(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
         for pane in &mut self.panes {
@@ -580,11 +597,19 @@ fn clipboard_listener(
 }
 
 impl Render for Debugger {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
 
         self.logs.follow_tail();
+
+        let mut graph_animating = false;
+        for pane in &mut self.panes {
+            graph_animating |= pane.disasm.graph_animating();
+        }
+        if graph_animating {
+            window.request_animation_frame();
+        }
 
         let settings_button = icon_button(
             t,
@@ -722,6 +747,19 @@ impl Render for Debugger {
                         let this = this.clone();
                         move |viewport, _, cx| {
                             this.update(cx, |d, cx| d.disasm_set_viewport(pane_ix, viewport, cx))
+                        }
+                    })
+                    .hovered_edge(pane.disasm.hovered_edge())
+                    .on_edge_hover({
+                        let this = this.clone();
+                        move |edge, _, cx| {
+                            this.update(cx, |d, cx| d.disasm_hover_edge(pane_ix, edge, cx))
+                        }
+                    })
+                    .on_jump({
+                        let this = this.clone();
+                        move |from, to, _, cx| {
+                            this.update(cx, |d, cx| d.disasm_jump(pane_ix, from, to, cx))
                         }
                     });
             disasm_panels.push((

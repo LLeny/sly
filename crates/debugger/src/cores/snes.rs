@@ -13,7 +13,7 @@ use snes::apu::{Apu, spc700};
 use snes::cartridge::{MapMode, Speed};
 use snes::cpu::disasm::{Disasm, FlowKind as CoreFlow, InstructionClass};
 use snes::mmio::{Address, MemKind, MemoryAccess};
-use snes::{Cartridge, Cpu, Snes};
+use snes::{Cartridge, Snes};
 
 use crate::art::{AssetProvider, GameRef, System};
 use crate::breakpoints::BreakpointMark;
@@ -262,7 +262,7 @@ impl DebugTarget for SnesTarget {
     }
 
     fn reset(&mut self) {
-        self.core.cpu = Cpu::new(self.core.read16(Address::new(0x00, 0xFFFC)));
+        self.core.reset();
         self.last_access = MemoryAccess::default();
         self.fault = None;
     }

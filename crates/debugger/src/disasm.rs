@@ -1,5 +1,18 @@
+use std::time::{Duration, Instant};
+
 use cirsium::widgets::{DisassemblyView, ViewMode};
-use gpui::{Pixels, Point, ScrollStrategy, SharedString, Size, UniformListScrollHandle, size};
+use gpui::{
+    Pixels, Point, ScrollStrategy, SharedString, Size, UniformListScrollHandle, ease_out_quint,
+    size,
+};
+
+const JUMP_DURATION: Duration = Duration::from_millis(260);
+
+struct GraphAnim {
+    from: Point<Pixels>,
+    to: Point<Pixels>,
+    start: Instant,
+}
 
 use crate::breakpoints::{BreakpointMark, mark_at};
 use crate::processor::CpuId;
@@ -28,6 +41,8 @@ pub struct Disasm {
     graph_offset: Point<Pixels>,
     graph_drag: Option<Point<Pixels>>,
     graph_viewport: Size<f32>,
+    graph_anim: Option<GraphAnim>,
+    hovered_edge: Option<usize>,
     base: u32,
     selected: Option<u32>,
     breakpoints: Vec<BreakpointMark>,
@@ -46,6 +61,8 @@ impl Disasm {
             graph_offset: Point::default(),
             graph_drag: None,
             graph_viewport: size(600., 400.),
+            graph_anim: None,
+            hovered_edge: None,
             base: 0,
             selected: None,
             breakpoints: Vec::new(),
@@ -111,6 +128,7 @@ impl Disasm {
 
         if self.follow_pc {
             self.graph_offset = Point::default();
+            self.graph_anim = None;
         }
 
         if self.follow_pc
@@ -192,10 +210,50 @@ impl Disasm {
     }
 
     pub fn graph_offset(&self) -> Point<Pixels> {
-        self.graph_offset
+        match &self.graph_anim {
+            Some(anim) => {
+                let t = (anim.start.elapsed().as_secs_f32() / JUMP_DURATION.as_secs_f32())
+                    .clamp(0., 1.);
+                anim.from + (anim.to - anim.from) * ease_out_quint()(t)
+            }
+            None => self.graph_offset,
+        }
+    }
+
+    pub fn graph_animating(&mut self) -> bool {
+        match &self.graph_anim {
+            Some(anim) if anim.start.elapsed() >= JUMP_DURATION => {
+                self.graph_offset = anim.to;
+                self.graph_anim = None;
+                false
+            }
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    pub fn jump(&mut self, from: Point<Pixels>, to: Point<Pixels>) {
+        self.follow_pc = false;
+        self.graph_anim = Some(GraphAnim {
+            from,
+            to,
+            start: Instant::now(),
+        });
+    }
+
+    pub fn hovered_edge(&self) -> Option<usize> {
+        self.hovered_edge
+    }
+
+    pub fn set_hovered_edge(&mut self, edge: Option<usize>) -> bool {
+        let changed = self.hovered_edge != edge;
+        self.hovered_edge = edge;
+        changed
     }
 
     pub fn pan_begin(&mut self, pos: Point<Pixels>) {
+        self.graph_offset = self.graph_offset();
+        self.graph_anim = None;
         self.graph_drag = Some(pos);
     }
 

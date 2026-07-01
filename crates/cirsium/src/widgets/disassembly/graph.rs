@@ -39,12 +39,42 @@ pub(super) struct GraphBlock {
 
 pub(super) struct GraphEdge {
     pub kind: EdgeKind,
+    pub to: usize,
     pub points: Vec<(f32, f32)>,
 }
 
 pub(super) struct GraphLayout {
     pub blocks: Vec<GraphBlock>,
     pub edges: Vec<GraphEdge>,
+}
+
+const EDGE_HIT_DIST: f32 = 6.;
+
+pub(super) fn edge_at(edges: &[GraphEdge], x: f32, y: f32) -> Option<usize> {
+    let hit_sq = EDGE_HIT_DIST * EDGE_HIT_DIST;
+    let mut best: Option<(usize, f32)> = None;
+    for (ei, edge) in edges.iter().enumerate() {
+        for seg in edge.points.windows(2) {
+            let d = point_segment_dist_sq(x, y, seg[0], seg[1]);
+            if d <= hit_sq && best.is_none_or(|(_, bd)| d < bd) {
+                best = Some((ei, d));
+            }
+        }
+    }
+    best.map(|(ei, _)| ei)
+}
+
+fn point_segment_dist_sq(px: f32, py: f32, a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (abx, aby) = (b.0 - a.0, b.1 - a.1);
+    let (apx, apy) = (px - a.0, py - a.1);
+    let len_sq = abx * abx + aby * aby;
+    let t = if len_sq <= f32::EPSILON {
+        0.
+    } else {
+        ((apx * abx + apy * aby) / len_sq).clamp(0., 1.)
+    };
+    let (cx, cy) = (a.0 + abx * t, a.1 + aby * t);
+    (px - cx).powi(2) + (py - cy).powi(2)
 }
 
 pub(super) fn build(lines: &[DisasmLine]) -> GraphLayout {
@@ -304,7 +334,11 @@ fn route_edges(
                 let in_y = rank_top[lt] - PORT_STUB;
                 back_route(e.sx, e.sy, e.tx, e.ty, lane, out_y, in_y)
             };
-            GraphEdge { kind, points }
+            GraphEdge {
+                kind,
+                to: t,
+                points,
+            }
         })
         .collect();
 

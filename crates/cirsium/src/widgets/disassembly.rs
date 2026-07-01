@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -31,6 +32,8 @@ type ContextCallback = Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App) + 
 type ViewCallback = Rc<dyn Fn(ViewMode, &mut Window, &mut App) + 'static>;
 type PanCallback = Rc<dyn Fn(Point<Pixels>, &mut Window, &mut App) + 'static>;
 type ViewportCallback = Rc<dyn Fn(Size<f32>, &mut Window, &mut App) + 'static>;
+type EdgeHoverCallback = Rc<dyn Fn(Option<usize>, &mut Window, &mut App) + 'static>;
+type JumpCallback = Rc<dyn Fn(Point<Pixels>, Point<Pixels>, &mut Window, &mut App) + 'static>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum ViewMode {
@@ -200,6 +203,9 @@ pub struct DisassemblyWidget {
     follow: bool,
     graph_viewport: Size<f32>,
     on_viewport: Option<ViewportCallback>,
+    hovered_edge: Option<usize>,
+    on_edge_hover: Option<EdgeHoverCallback>,
+    on_jump: Option<JumpCallback>,
 }
 
 impl DisassemblyWidget {
@@ -223,6 +229,9 @@ impl DisassemblyWidget {
             follow: false,
             graph_viewport: size(0., 0.),
             on_viewport: None,
+            hovered_edge: None,
+            on_edge_hover: None,
+            on_jump: None,
         }
     }
 
@@ -313,6 +322,27 @@ impl DisassemblyWidget {
         self.on_viewport = Some(Rc::new(handler));
         self
     }
+
+    pub fn hovered_edge(mut self, edge: Option<usize>) -> Self {
+        self.hovered_edge = edge;
+        self
+    }
+
+    pub fn on_edge_hover(
+        mut self,
+        handler: impl Fn(Option<usize>, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_edge_hover = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn on_jump(
+        mut self,
+        handler: impl Fn(Point<Pixels>, Point<Pixels>, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_jump = Some(Rc::new(handler));
+        self
+    }
 }
 
 impl RenderOnce for DisassemblyWidget {
@@ -334,6 +364,9 @@ impl RenderOnce for DisassemblyWidget {
             follow,
             graph_viewport,
             on_viewport,
+            hovered_edge,
+            on_edge_hover,
+            on_jump,
         } = self;
 
         let current_addr = view
@@ -365,11 +398,14 @@ impl RenderOnce for DisassemblyWidget {
                     graph_offset,
                     follow,
                     graph_viewport,
+                    hovered_edge,
                     on_select,
                     on_context,
                     on_pan_begin,
                     on_pan_drag,
                     on_viewport,
+                    on_edge_hover,
+                    on_jump,
                 )
                 .into_any_element()
             }
@@ -553,13 +589,18 @@ fn render_graph(
     manual_offset: Point<Pixels>,
     follow: bool,
     viewport: Size<f32>,
+    hovered_edge: Option<usize>,
     on_select: Option<SelectCallback>,
     on_context: Option<ContextCallback>,
     on_pan_begin: Option<PanCallback>,
     on_pan_drag: Option<PanCallback>,
     on_viewport: Option<ViewportCallback>,
+    on_edge_hover: Option<EdgeHoverCallback>,
+    on_jump: Option<JumpCallback>,
 ) -> impl IntoElement {
     let GraphLayout { blocks, edges } = graph::build(&view.lines);
+    let blocks = Rc::new(blocks);
+    let edges = Rc::new(edges);
 
     let base = if follow {
         blocks
@@ -594,8 +635,13 @@ fn render_graph(
 
     let offset = base + manual_offset;
 
+    let origin = Rc::new(Cell::new(point(px(0.), px(0.))));
+
+    let paint_data = edges.clone();
+    let origin_paint = origin.clone();
     let canvas_el = canvas(
         move |bounds, window, cx| {
+            origin_paint.set(bounds.origin);
             if let Some(cb) = &on_viewport {
                 cb(
                     size(f32::from(bounds.size.width), f32::from(bounds.size.height)),
@@ -606,7 +652,14 @@ fn render_graph(
         },
         move |bounds, _, window, cx| {
             let theme_now = Theme::global(cx);
-            paint_edges(window, bounds, offset, &edges, &theme_now);
+            paint_edges(
+                window,
+                bounds,
+                offset,
+                &paint_data,
+                hovered_edge,
+                &theme_now,
+            );
         },
     )
     .absolute()
@@ -618,6 +671,7 @@ fn render_graph(
         .flex_1()
         .min_h(px(MIN_LIST_HEIGHT))
         .overflow_hidden()
+        .when(hovered_edge.is_some(), |d| d.cursor_pointer())
         .child(canvas_el);
 
     if let Some(begin) = on_pan_begin {
@@ -625,15 +679,42 @@ fn render_graph(
             begin(e.position, window, cx)
         });
     }
-    if let Some(drag) = on_pan_drag {
-        container = container.on_mouse_move(move |e: &MouseMoveEvent, window, cx| {
-            if e.dragging() {
+
+    let move_edges = edges.clone();
+    let move_origin = origin.clone();
+    container = container.on_mouse_move(move |e: &MouseMoveEvent, window, cx| {
+        if e.dragging() {
+            if let Some(drag) = &on_pan_drag {
                 drag(e.position, window, cx);
             }
+            return;
+        }
+        if let Some(hover) = &on_edge_hover {
+            let hit = edge_at(&move_edges, e.position, move_origin.get(), offset);
+            hover(hit, window, cx);
+        }
+    });
+
+    if let Some(jump) = on_jump {
+        let jump_edges = edges.clone();
+        let jump_blocks = blocks.clone();
+        let jump_origin = origin.clone();
+        container = container.on_click(move |e, window, cx| {
+            let Some(ei) = edge_at(&jump_edges, e.position(), jump_origin.get(), offset) else {
+                return;
+            };
+            let Some(block) = jump_blocks.get(jump_edges[ei].to) else {
+                return;
+            };
+            let to = point(
+                px(viewport.width / 2. - (block.x + block.w / 2.)),
+                px(viewport.height / 2. - (block.y + block.h / 2.)),
+            );
+            jump(offset, to, window, cx);
         });
     }
 
-    for block in &blocks {
+    for block in blocks.iter() {
         let lines = &view.lines[block.start..block.end];
         let has_current = lines.iter().any(|l| l.current);
         let border = if has_current {
@@ -748,24 +829,30 @@ fn paint_edges(
     bounds: Bounds<Pixels>,
     offset: Point<Pixels>,
     edges: &[GraphEdge],
+    hovered: Option<usize>,
     theme: &Theme,
 ) {
     let ox = bounds.origin.x + offset.x;
     let oy = bounds.origin.y + offset.y;
     let at = |p: (f32, f32)| point(ox + px(p.0), oy + px(p.1));
 
-    for edge in edges {
+    for (ei, edge) in edges.iter().enumerate() {
         if edge.points.len() < 2 {
             continue;
         }
 
-        let color = match edge.kind {
+        let base = match edge.kind {
             EdgeKind::Taken => theme.success,
             EdgeKind::FallThrough => theme.danger,
             EdgeKind::Normal => theme.accent,
         };
+        let (color, width, head_len, head_w) = if hovered == Some(ei) {
+            (brighten(base), 2.75, 10., 5.)
+        } else {
+            (base, 1.5, 8., 4.)
+        };
 
-        let mut line = PathBuilder::stroke(px(1.5));
+        let mut line = PathBuilder::stroke(px(width));
         line.move_to(at(edge.points[0]));
         for &p in &edge.points[1..] {
             line.line_to(at(p));
@@ -781,17 +868,37 @@ fn paint_edges(
         let len = (dx * dx + dy * dy).sqrt().max(0.001);
         let (ux, uy) = (dx / len, dy / len);
         let (nx, ny) = (-uy, ux);
-        let (bx, by) = (x1 - ux * 8., y1 - uy * 8.);
+        let (bx, by) = (x1 - ux * head_len, y1 - uy * head_len);
 
         let mut head = PathBuilder::fill();
         head.move_to(at((x1, y1)));
-        head.line_to(at((bx + nx * 4., by + ny * 4.)));
-        head.line_to(at((bx - nx * 4., by - ny * 4.)));
+        head.line_to(at((bx + nx * head_w, by + ny * head_w)));
+        head.line_to(at((bx - nx * head_w, by - ny * head_w)));
         head.line_to(at((x1, y1)));
         if let Ok(path) = head.build() {
             window.paint_path(path, color);
         }
     }
+}
+
+fn brighten(c: Hsla) -> Hsla {
+    Hsla {
+        l: (c.l + 0.18).min(1.),
+        ..c
+    }
+}
+
+fn edge_at(
+    edges: &[GraphEdge],
+    pos: Point<Pixels>,
+    origin: Point<Pixels>,
+    offset: Point<Pixels>,
+) -> Option<usize> {
+    graph::edge_at(
+        edges,
+        f32::from(pos.x - origin.x - offset.x),
+        f32::from(pos.y - origin.y - offset.y),
+    )
 }
 
 fn instruction_text(theme: &Theme, tokens: &[DisasmToken], mnemonic_min: f32) -> Div {
