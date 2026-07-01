@@ -135,9 +135,14 @@ fn ctrl_button(
     let icon_color = if !enabled {
         theme.text_dim
     } else if active {
-        theme.accent
+        theme.on_accent
     } else {
         theme.text_secondary
+    };
+    let bg = if active {
+        theme.accent
+    } else {
+        theme.bg_panel_alt
     };
     let border = if active {
         theme.accent
@@ -154,15 +159,15 @@ fn ctrl_button(
         .rounded_md()
         .border_1()
         .border_color(border)
-        .when(active, |d| d.bg(theme.accent_soft))
+        .bg(bg)
         .child(svg().path(icon_path).size(px(14.)).text_color(icon_color));
 
+    if enabled && !active {
+        let hover_bg = theme.bg_header;
+        button = button.hover(move |s| s.bg(hover_bg));
+    }
     if let Some(handler) = handler {
-        let hover_bg = theme.bg_panel_alt;
-        button = button
-            .cursor_pointer()
-            .hover(move |s| s.bg(hover_bg))
-            .on_click(handler);
+        button = button.cursor_pointer().on_click(handler);
     }
     button
 }

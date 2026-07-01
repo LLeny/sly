@@ -105,7 +105,6 @@ impl RenderOnce for Panel {
         };
 
         let mut left = div().flex().items_center().gap_2();
-        left = left.child(div().w(px(3.)).h(px(11.)).bg(t.accent));
         if let Some(glyph) = self.glyph.clone() {
             left = left.child(svg().path(glyph).size(px(12.)).text_color(t.text_muted));
         }
