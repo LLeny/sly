@@ -104,8 +104,7 @@ impl SnesTarget {
             "wram" => Some((MemKind::Wram, addr)),
             "rom" => Some((MemKind::Rom, addr)),
             "bus" => self.core.classify(Address::from_24bit(addr & 0x00FF_FFFF)),
-            // TODO: MemKind
-            "spc" => None,
+            "spc" => Some((MemKind::Spc, addr)),
             _ => Some((MemKind::Io, addr)),
         }
     }
@@ -118,14 +117,18 @@ impl SnesTarget {
         let mut access = None;
 
         let ok = self.catch(|core| access = Some(core.trace(snes::cpu::step)));
-        let access = access.unwrap_or_default();
+        let mut access = access.unwrap_or_default();
 
         if !ok {
             return (access, Some(CPU_MAIN));
         }
 
-        if !self.catch(|core| spc700::step(&mut core.apu)) {
+        let mut spc = None;
+        if !self.catch(|core| spc = Some(core.apu.trace(spc700::step))) {
             return (access, Some(CPU_SPC));
+        }
+        if let Some(spc) = spc {
+            merge_access(&mut access, &spc);
         }
 
         (access, None)
@@ -355,6 +358,7 @@ impl DebugTarget for SnesTarget {
             MemKind::Io if (PPU_BASE..PPU_BASE + PPU_SIZE).contains(&offset) => "ppu",
             MemKind::Io if (CPU_BASE..CPU_BASE + CPU_SIZE).contains(&offset) => "cpu",
             MemKind::Io => "bus",
+            MemKind::Spc => "spc",
         };
         Some((region.into(), offset))
     }
@@ -667,27 +671,25 @@ fn mmio_field_view(field: &snes::mmio::FieldInfo, parent: u32) -> MmioFieldView 
         format!("[{}:{}]", field.offset, field.offset + field.width - 1)
     };
 
+    let fmt_hex = || cirsium::components::hex(value, field.width as u8);
+
     let (display, is_bool, children) = match field.kind {
         FieldKind::Bool => (
             if value != 0 { "on" } else { "off" }.to_string(),
             true,
             Vec::new(),
         ),
-        FieldKind::Uint => (format!("${value:X}"), false, Vec::new()),
+        FieldKind::Uint => (fmt_hex(), false, Vec::new()),
         FieldKind::Enum(info) => {
             let display = info
                 .variants
                 .iter()
                 .find(|(disc, _)| *disc == value as u128)
                 .map(|(_, name)| format!("{name} ({value})"))
-                .unwrap_or_else(|| format!("${value:X}"));
+                .unwrap_or_else(fmt_hex);
             (display, false, Vec::new())
         }
-        FieldKind::Struct(fields) => (
-            format!("${value:X}"),
-            false,
-            mmio_field_views(fields, value),
-        ),
+        FieldKind::Struct(fields) => (fmt_hex(), false, mmio_field_views(fields, value)),
     };
 
     MmioFieldView {

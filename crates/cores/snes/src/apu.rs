@@ -1,4 +1,6 @@
 use crate::apu::regs::Control;
+#[cfg(feature = "debug")]
+use crate::mmio::{AccessTracker, MemKind, MemoryAccess};
 
 mod regs;
 pub mod spc700;
@@ -14,7 +16,8 @@ pub struct Apu {
     control: Control,        // $F1 (W)
     dsp_addr: u8,            // $F2
     dsp_data: u8,            // $F3
-    pub ports: [u8; 4],      // $F4-$F7
+    cpu_to_apu: [u8; 4],     // written by main CPU $2140-$2143, read by SPC $F4-$F7
+    apu_to_cpu: [u8; 4],     // written by SPC $F4-$F7, read by main CPU $2140-$2143
     timer_settings: [u8; 3], // $FA-$FC on write
     timer_counters: [u8; 3], // $FD-$FF on read
 
@@ -23,6 +26,9 @@ pub struct Apu {
 
     // SPC-700 core registers
     pub spc700: spc700::Spc700,
+
+    #[cfg(feature = "debug")]
+    pub access: AccessTracker,
 }
 
 impl Apu {
@@ -34,58 +40,104 @@ impl Apu {
             control: Control::default(),
             dsp_addr: 0,
             dsp_data: 0,
-            ports: [0; 4],
+            cpu_to_apu: [0; 4],
+            apu_to_cpu: [0; 4],
             timer_settings: [0; 3],
             timer_counters: [0; 3],
             ram: [0; 0x10000],
             spc700: spc700::Spc700::new(reset_vector),
+
+            #[cfg(feature = "debug")]
+            access: AccessTracker::default(),
         }
     }
 
     pub fn read(&mut self, addr: u16) -> u8 {
-        self.peek(addr)
+        #[cfg(feature = "debug")]
+        self.access.record((MemKind::Spc, addr as u32), false);
+
+        match addr {
+            0x00F0..=0x00F7 | 0x00FA..=0x00FF => self.read_io(addr as u8),
+            _ => self.peek(addr),
+        }
+    }
+
+    #[cfg(feature = "debug")]
+    pub fn trace(&mut self, body: impl FnOnce(&mut Self)) -> MemoryAccess {
+        self.access.start();
+        self.access.resume();
+        body(self);
+        self.access.stop();
+        self.access.snapshot()
+    }
+
+    pub fn cpu_read_port(&self, index: usize) -> u8 {
+        self.apu_to_cpu[index]
+    }
+
+    pub fn cpu_write_port(&mut self, index: usize, value: u8) {
+        self.cpu_to_apu[index] = value;
     }
 
     pub fn peek(&self, addr: u16) -> u8 {
         match addr {
-            0x00F0..=0x00F7 | 0x00FA..=0x00FF => self.read_io(addr as u8),
+            0x00F0..=0x00F7 | 0x00FA..=0x00FF => self.peek_io(addr as u8),
             0xFFC0..=0xFFFF if self.control.ipl_rom_enable() => IPL_ROM[(addr - 0xFFC0) as usize],
             _ => self.ram[addr as usize],
         }
     }
 
     pub fn write(&mut self, addr: u16, value: u8) {
+        #[cfg(feature = "debug")]
+        self.access.record((MemKind::Spc, addr as u32), true);
         match addr {
             0x00F0..=0x00F7 | 0x00FA..=0x00FF => self.write_io(addr as u8, value),
             _ => self.ram[addr as usize] = value,
         }
     }
 
-    fn read_io(&self, reg: u8) -> u8 {
+    fn peek_io(&self, reg: u8) -> u8 {
         match reg {
             0xF0 => self.unknown,
             0xF1 => self.control.raw(),
             0xF2 => self.dsp_addr,
             0xF3 => self.dsp_data,
-            0xF4..=0xF7 => self.ports[(reg - 0xF4) as usize],
+            0xF4..=0xF7 => self.cpu_to_apu[(reg - 0xF4) as usize],
             0xFD..=0xFF => self.timer_counters[(reg - 0xFD) as usize],
-            _ => {
+            _ => 0,
+        }
+    }
+
+    fn read_io(&mut self, reg: u8) -> u8 {
+        match reg {
+            0xFA..=0xFC => {
                 tracing::error!(
                     reg = format!("{:02X}", reg),
-                    "APU read from write-only/unmapped I/O register"
+                    "APU read from write-only I/O register"
                 );
                 0
             }
+            _ => self.peek_io(reg),
         }
     }
 
     fn write_io(&mut self, reg: u8, value: u8) {
         match reg {
             0xF0 => self.unknown = value,
-            0xF1 => self.control = Control::from_raw(value),
+            0xF1 => {
+                self.control = Control::from_raw(value);
+                if self.control.clear_cpuio0() {
+                    self.cpu_to_apu[0] = 0;
+                    self.cpu_to_apu[1] = 0;
+                }
+                if self.control.clear_cpuio1() {
+                    self.cpu_to_apu[2] = 0;
+                    self.cpu_to_apu[3] = 0;
+                }
+            }
             0xF2 => self.dsp_addr = value,
             0xF3 => self.dsp_data = value,
-            0xF4..=0xF7 => self.ports[(reg - 0xF4) as usize] = value,
+            0xF4..=0xF7 => self.apu_to_cpu[(reg - 0xF4) as usize] = value,
             0xFA..=0xFC => self.timer_settings[(reg - 0xFA) as usize] = value,
             _ => {
                 tracing::error!(

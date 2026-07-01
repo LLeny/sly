@@ -144,15 +144,9 @@ impl Memory {
     }
 
     pub fn follow_to(&mut self, region: &str, addr: u32) {
-        if self.current.id.as_ref() != region
-            && let Some(r) = self.regions.iter().find(|r| r.id.as_ref() == region)
-        {
-            self.current = r.clone();
-            self.selection = None;
-            self.drag_anchor = None;
+        if self.current.id.as_ref() == region {
+            self.scroll_to_addr(addr);
         }
-
-        self.scroll_to_addr(addr);
     }
 
     pub fn set_region(&mut self, id: &str) {

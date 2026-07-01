@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{Div, FontWeight, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, div, px};
 
-use crate::diff::{Highlight, highlight_color};
+use crate::diff::Highlight;
 use crate::theme::Theme;
 use crate::widgets::BreakpointKind;
 
@@ -20,6 +20,8 @@ const HEX_ASCII_GAP: f32 = 14.;
 pub(super) fn mem_row(
     theme: &Theme,
     row: &MemoryRow,
+    above: Option<&MemoryRow>,
+    below: Option<&MemoryRow>,
     bytes_per_row: usize,
     selection: Option<(u32, u32)>,
     breakpoints: &[(u32, u32, BreakpointKind)],
@@ -62,7 +64,7 @@ pub(super) fn mem_row(
         let dashed = matches!(fills[i], Fill::Breakpoint(_));
         let text = match colors {
             Some((_, border)) if dashed => border,
-            _ => highlight_color(theme, cell.highlight),
+            _ => theme.text_primary,
         };
 
         let hex_left = i == 0 || i == half || fills[i - 1] != fills[i];
@@ -79,7 +81,13 @@ pub(super) fn mem_row(
                 breakpoint_at(addr.wrapping_sub(stride)) != Some(kind),
                 breakpoint_at(addr.wrapping_add(stride)) != Some(kind),
             ),
-            _ => (true, true),
+            Fill::Read | Fill::Write => {
+                let same = |r: Option<&MemoryRow>| {
+                    r.and_then(|r| r.cells.get(i)).map(|c| cell_fill(c, false)) == Some(fills[i])
+                };
+                (!same(above), !same(below))
+            }
+            Fill::None => (true, true),
         };
 
         if i == half {

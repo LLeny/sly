@@ -47,6 +47,18 @@ impl AccessTracker {
         self.capturing.get()
     }
 
+    pub(crate) fn record(&self, key: (MemKind, u32), write: bool) {
+        if !self.capturing.get() {
+            return;
+        }
+
+        if write {
+            self.record_write(key);
+        } else {
+            self.record_read(key);
+        }
+    }
+
     pub(super) fn record_read(&self, key: (MemKind, u32)) {
         self.reads.borrow_mut().insert(key);
         self.last.set(Some(key));

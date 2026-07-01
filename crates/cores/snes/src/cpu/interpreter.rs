@@ -75,6 +75,12 @@ impl<'a> InterpreterView<'a> {
         };
     }
 
+    /// Load a value into the accumulator and update N/Z, honoring its width.
+    fn load_acc(&mut self, value: u16, wide: bool) {
+        self.set_acc(value, wide);
+        self.set_nz(value, wide);
+    }
+
     /// Push a byte onto the stack.
     fn push8(&mut self, value: u8) {
         let sp = self.snes.cpu.stack_pointer;
@@ -345,18 +351,13 @@ impl InterpreterView<'_> {
 
     fn load(&mut self, op: Load) {
         match op {
-            Load::LdaImmM8 { imm } => {
-                self.snes.cpu.acc = imm as u16;
-                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
-            }
-            Load::LdaImmM16 { imm } => {
-                self.snes.cpu.acc = imm;
-                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
-            }
+            Load::LdaImmM8 { imm } => self.load_acc(imm as u16, false),
+            Load::LdaImmM16 { imm } => self.load_acc(imm, true),
             Load::LdaIdly { dp } => {
                 let ea = addressing::resolve(self.snes, AddrMode::Idly(dp));
-                self.snes.cpu.acc = self.read(ea);
-                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
+                let wide = self.snes.cpu.flags.is_acc_16bits();
+                let value = self.read(ea);
+                self.load_acc(value, wide);
             }
             Load::LdxImmX8 { imm } => {
                 self.snes.cpu.index_x = imm as u16;
@@ -456,8 +457,7 @@ impl InterpreterView<'_> {
             Pop::Pla => {
                 let wide = self.snes.cpu.flags.is_acc_16bits();
                 let value = self.pop_reg(wide);
-                self.set_acc(value, wide);
-                self.set_nz(self.snes.cpu.acc, wide);
+                self.load_acc(value, wide);
             }
             Pop::Plx => {
                 let wide = self.snes.cpu.flags.is_index_16bits();

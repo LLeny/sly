@@ -197,10 +197,13 @@ impl RenderOnce for MemoryWidget {
             let theme = Theme::global(cx);
             let t = &*theme;
             rows.iter()
-                .map(|row| {
+                .enumerate()
+                .map(|(i, row)| {
                     row::mem_row(
                         t,
                         row,
+                        i.checked_sub(1).and_then(|j| rows.get(j)),
+                        rows.get(i + 1),
                         self.bytes_per_row,
                         selection,
                         &breakpoints,
