@@ -2,7 +2,7 @@ use super::decoder;
 use crate::Snes;
 use crate::cpu::Flags;
 use crate::cpu::addressing::{self, AddrMode};
-use crate::cpu::decoder::{Alu, Call, Compare, Pop, Push, Transfer};
+use crate::cpu::decoder::{Alu, Call, Compare, Pop, Push, Shift, Transfer};
 use crate::mmio::Address;
 use decoder::{Branches, FlagMask, FlagOps, Instruction, Jump, Load, RegStep, Store, SwTrap};
 
@@ -64,6 +64,15 @@ impl<'a> InterpreterView<'a> {
         } else {
             self.snes.read8(ea) as u16
         }
+    }
+
+    /// Write a result into the accumulator honoring its width.
+    fn set_acc(&mut self, value: u16, wide: bool) {
+        self.snes.cpu.acc = if wide {
+            value
+        } else {
+            (self.snes.cpu.acc & 0xff00) | (value & 0x00ff)
+        };
     }
 
     /// Push a byte onto the stack.
@@ -152,6 +161,7 @@ impl InterpreterView<'_> {
             Instruction::Push(op) => self.push(op),
             Instruction::Pop(op) => self.pop(op),
             Instruction::Compare(op) => self.compare(op),
+            Instruction::Shift(op) => self.shift(op),
 
             Instruction::BrlRell { disp } => self.branch(disp),
             Instruction::Xce => self.xce(),
@@ -342,6 +352,11 @@ impl InterpreterView<'_> {
                 self.snes.cpu.acc = imm;
                 self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
             }
+            Load::LdaIdly { dp } => {
+                let ea = addressing::resolve(self.snes, AddrMode::Idly(dp));
+                self.snes.cpu.acc = self.read(ea);
+                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
+            }
             Load::LdxImmX8 { imm } => {
                 self.snes.cpu.index_x = imm as u16;
                 self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
@@ -380,6 +395,21 @@ impl InterpreterView<'_> {
                 cpu.flags.set_negative(result & 0x8000 != 0);
 
                 cpu.acc = result;
+            }
+            Alu::AdcImmM8 { imm } => {
+                let a = self.snes.cpu.acc & 0x00ff;
+                let imm = imm as u16;
+                let carry = self.snes.cpu.flags.carry() as u16;
+                let sum = a + imm + carry;
+                let result = sum & 0x00ff;
+
+                let flags = &mut self.snes.cpu.flags;
+                flags.set_carry(sum & 0x100 != 0);
+                flags.set_overflow((!(a ^ imm) & (a ^ result) & 0x80) != 0);
+                flags.set_zero(result == 0);
+                flags.set_negative(result & 0x80 != 0);
+
+                self.set_acc(result, false);
             }
             other => todo!("Implement ALU instruction {other:?}"),
         }
@@ -424,11 +454,8 @@ impl InterpreterView<'_> {
         match op {
             Pop::Pla => {
                 let wide = self.snes.cpu.flags.is_acc_16bits();
-                self.snes.cpu.acc = if wide {
-                    self.pop16()
-                } else {
-                    (self.snes.cpu.acc & 0xff00) | self.pop8() as u16
-                };
+                let value = self.pop_reg(wide);
+                self.set_acc(value, wide);
                 self.set_nz(self.snes.cpu.acc, wide);
             }
             Pop::Plx => {
@@ -461,7 +488,29 @@ impl InterpreterView<'_> {
                 let wide = self.snes.cpu.flags.is_acc_16bits();
                 self.compare_values(self.snes.cpu.acc, value, wide);
             }
+            Compare::CpxImmX16 { imm } => {
+                let wide = self.snes.cpu.flags.is_index_16bits();
+                self.compare_values(self.snes.cpu.index_x, imm, wide);
+            }
             other => todo!("Implement compare instruction {other:?}"),
+        }
+    }
+
+    fn shift(&mut self, op: Shift) {
+        match op {
+            Shift::RolA => {
+                let wide = self.snes.cpu.flags.is_acc_16bits();
+                let result = self.rol(self.snes.cpu.acc, wide);
+                self.set_acc(result, wide);
+            }
+            Shift::RolAbs { addr } => {
+                let ea = addressing::resolve(self.snes, AddrMode::Abs(addr));
+                let wide = self.snes.cpu.flags.is_acc_16bits();
+                let value = self.read(ea);
+                let result = self.rol(value, wide);
+                self.write(ea, result);
+            }
+            other => todo!("Implement shift instruction {other:?}"),
         }
     }
 
@@ -498,8 +547,25 @@ impl InterpreterView<'_> {
         } else {
             (0x00ff, 0x0080)
         };
+
         let flags = &mut self.snes.cpu.flags;
         flags.set_zero(value & mask == 0);
         flags.set_negative(value & sign != 0);
+    }
+
+    fn rol(&mut self, value: u16, wide: bool) -> u16 {
+        let (msb, mask) = if wide {
+            (0x8000, 0xffff)
+        } else {
+            (0x80, 0x00ff)
+        };
+        let value = value & mask;
+        let carry_in = self.snes.cpu.flags.carry() as u16;
+        let result = ((value << 1) | carry_in) & mask;
+
+        self.snes.cpu.flags.set_carry(value & msb != 0);
+        self.set_nz(result, wide);
+
+        result
     }
 }

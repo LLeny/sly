@@ -147,13 +147,21 @@ impl<'a> Interpreter<'a> {
     }
 
     fn branches(&mut self, op: Branches) {
-        match op {
-            Branches::BneRel { disp } => {
-                if !self.apu.spc700.psw.zero() {
-                    self.next_pc = self.next_pc.wrapping_add(disp as u16);
-                }
-            }
-            other => todo!("Branch instruction not implemented: {other:?}"),
+        let flags = self.apu.spc700.psw;
+        let (taken, disp) = match op {
+            Branches::BraRel { disp } => (true, disp),
+            Branches::BeqRel { disp } => (flags.zero(), disp),
+            Branches::BneRel { disp } => (!flags.zero(), disp),
+            Branches::BcsRel { disp } => (flags.carry(), disp),
+            Branches::BccRel { disp } => (!flags.carry(), disp),
+            Branches::BmiRel { disp } => (flags.negative(), disp),
+            Branches::BplRel { disp } => (!flags.negative(), disp),
+            Branches::BvsRel { disp } => (flags.overflow(), disp),
+            Branches::BvcRel { disp } => (!flags.overflow(), disp),
+        };
+
+        if taken {
+            self.next_pc = self.next_pc.wrapping_add(disp as u16);
         }
     }
 }
