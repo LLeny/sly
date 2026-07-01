@@ -1,6 +1,6 @@
 use super::decoder::{Instruction, Load};
 use crate::apu::Apu;
-use crate::apu::spc700::decoder::{Alu, Branches, MoveMem, MoveReg, RegStep, Store};
+use crate::apu::spc700::decoder::{Alu, Branches, MoveMem, MoveReg, RegStep, Store, Word};
 
 pub(super) struct Interpreter<'a> {
     apu: &'a mut Apu,
@@ -17,9 +17,15 @@ impl<'a> Interpreter<'a> {
         self.next_pc
     }
 
-    fn set_nz(&mut self, value: u8) {
+    fn set_nz8(&mut self, value: u8) {
         let psw = &mut self.apu.spc700.psw;
         psw.set_negative(value & 0x80 != 0);
+        psw.set_zero(value == 0);
+    }
+
+    fn set_nz16(&mut self, value: u16) {
+        let psw = &mut self.apu.spc700.psw;
+        psw.set_negative(value & 0x8000 != 0);
         psw.set_zero(value == 0);
     }
 
@@ -33,6 +39,20 @@ impl<'a> Interpreter<'a> {
         page | offset as u16
     }
 
+    /// Read a 16bit word from the direct page, wrapping the high byte within the page.
+    fn read_dp_word(&mut self, dp: u8) -> u16 {
+        let lo = self.apu.read(self.dp_addr(dp)) as u16;
+        let hi = self.apu.read(self.dp_addr(dp.wrapping_add(1))) as u16;
+        lo | (hi << 8)
+    }
+
+    /// Write a 16bit word to the direct page, wrapping the high byte within the page.
+    fn write_dp_word(&mut self, dp: u8, value: u16) {
+        self.apu.write(self.dp_addr(dp), value as u8);
+        self.apu
+            .write(self.dp_addr(dp.wrapping_add(1)), (value >> 8) as u8);
+    }
+
     pub(super) fn exec(&mut self, inst: Instruction) {
         match inst {
             Instruction::Load(op) => self.load(op),
@@ -42,6 +62,7 @@ impl<'a> Interpreter<'a> {
             Instruction::RegStep(op) => self.reg_step(op),
             Instruction::Alu(op) => self.alu(op),
             Instruction::Branches(op) => self.branches(op),
+            Instruction::Word(op) => self.word(op),
             other => todo!("Instruction not implemented: {other:?}"),
         }
     }
@@ -50,11 +71,21 @@ impl<'a> Interpreter<'a> {
         match op {
             Load::MovXImm { imm } => {
                 self.apu.spc700.x = imm;
-                self.set_nz(imm);
+                self.set_nz8(imm);
             }
             Load::MovAImm { imm } => {
                 self.apu.spc700.a = imm;
-                self.set_nz(imm);
+                self.set_nz8(imm);
+            }
+            Load::MovYDp { dp } => {
+                let value = self.apu.read(self.dp_addr(dp));
+                self.apu.spc700.y = value;
+                self.set_nz8(value);
+            }
+            Load::MovADp { dp } => {
+                let value = self.apu.read(self.dp_addr(dp));
+                self.apu.spc700.a = value;
+                self.set_nz8(value);
             }
             other => todo!("Load instruction not implemented: {other:?}"),
         }
@@ -66,6 +97,12 @@ impl<'a> Interpreter<'a> {
                 let addr = self.dp_addr(self.apu.spc700.x);
                 self.apu.write(addr, self.apu.spc700.a);
             }
+            Store::MovDpA { dp } => self.apu.write(self.dp_addr(dp), self.apu.spc700.a),
+            Store::MovDpY { dp } => self.apu.write(self.dp_addr(dp), self.apu.spc700.y),
+            Store::MovIdyA { dp } => {
+                let addr = self.read_dp_word(dp).wrapping_add(self.apu.spc700.y as u16);
+                self.apu.write(addr, self.apu.spc700.a);
+            }
             other => todo!("Store instruction not implemented: {other:?}"),
         }
     }
@@ -74,24 +111,24 @@ impl<'a> Interpreter<'a> {
         match op {
             MoveReg::MovAX => {
                 self.apu.spc700.a = self.apu.spc700.x;
-                self.set_nz(self.apu.spc700.a);
+                self.set_nz8(self.apu.spc700.a);
             }
             MoveReg::MovXA => {
                 self.apu.spc700.x = self.apu.spc700.a;
-                self.set_nz(self.apu.spc700.x);
+                self.set_nz8(self.apu.spc700.x);
             }
             MoveReg::MovAY => {
                 self.apu.spc700.a = self.apu.spc700.y;
-                self.set_nz(self.apu.spc700.a);
+                self.set_nz8(self.apu.spc700.a);
             }
             MoveReg::MovYA => {
                 self.apu.spc700.y = self.apu.spc700.a;
-                self.set_nz(self.apu.spc700.y);
+                self.set_nz8(self.apu.spc700.y);
             }
             MoveReg::MovSpX => self.apu.spc700.sp = self.apu.spc700.x,
             MoveReg::MovXSp => {
                 self.apu.spc700.x = self.apu.spc700.sp;
-                self.set_nz(self.apu.spc700.x);
+                self.set_nz8(self.apu.spc700.x);
             }
         }
     }
@@ -109,27 +146,27 @@ impl<'a> Interpreter<'a> {
         match op {
             RegStep::IncA => {
                 self.apu.spc700.a = self.apu.spc700.a.wrapping_add(1);
-                self.set_nz(self.apu.spc700.a);
+                self.set_nz8(self.apu.spc700.a);
             }
             RegStep::DecA => {
                 self.apu.spc700.a = self.apu.spc700.a.wrapping_sub(1);
-                self.set_nz(self.apu.spc700.a);
+                self.set_nz8(self.apu.spc700.a);
             }
             RegStep::IncX => {
                 self.apu.spc700.x = self.apu.spc700.x.wrapping_add(1);
-                self.set_nz(self.apu.spc700.x);
+                self.set_nz8(self.apu.spc700.x);
             }
             RegStep::DecX => {
                 self.apu.spc700.x = self.apu.spc700.x.wrapping_sub(1);
-                self.set_nz(self.apu.spc700.x);
+                self.set_nz8(self.apu.spc700.x);
             }
             RegStep::IncY => {
                 self.apu.spc700.y = self.apu.spc700.y.wrapping_add(1);
-                self.set_nz(self.apu.spc700.y);
+                self.set_nz8(self.apu.spc700.y);
             }
             RegStep::DecY => {
                 self.apu.spc700.y = self.apu.spc700.y.wrapping_sub(1);
-                self.set_nz(self.apu.spc700.y);
+                self.set_nz8(self.apu.spc700.y);
             }
         }
     }
@@ -139,10 +176,30 @@ impl<'a> Interpreter<'a> {
             Alu::CmpDpImm { imm, dp } => {
                 let value = self.apu.read(self.dp_addr(dp));
                 let result = value.wrapping_sub(imm);
-                self.set_nz(result);
+                self.set_nz8(result);
                 self.apu.spc700.psw.set_carry(value >= imm);
             }
+            Alu::CmpYDp { dp } => {
+                let value = self.apu.read(self.dp_addr(dp));
+                let y = self.apu.spc700.y;
+                self.set_nz8(y.wrapping_sub(value));
+                self.apu.spc700.psw.set_carry(y >= value);
+            }
             other => todo!("ALU instruction not implemented: {other:?}"),
+        }
+    }
+
+    fn word(&mut self, op: Word) {
+        match op {
+            Word::MovwYaDp { dp } => {
+                let value = self.read_dp_word(dp);
+                self.apu.spc700.set_ya(value);
+                self.set_nz16(value);
+            }
+            Word::MovwDpYa { dp } => {
+                self.write_dp_word(dp, self.apu.spc700.ya());
+            }
+            other => todo!("Word instruction not implemented: {other:?}"),
         }
     }
 

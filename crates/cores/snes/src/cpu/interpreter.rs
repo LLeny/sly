@@ -165,6 +165,7 @@ impl InterpreterView<'_> {
 
             Instruction::BrlRell { disp } => self.branch(disp),
             Instruction::Xce => self.xce(),
+            Instruction::Xba => self.xba(),
 
             other => todo!("Implement instruction {other:?}"),
         }
@@ -539,6 +540,12 @@ impl InterpreterView<'_> {
         if cpu.emulation {
             tracing::error!("Entering emulation mode, weird?");
         }
+    }
+
+    fn xba(&mut self) {
+        let swapped = self.snes.cpu.acc.rotate_left(8);
+        self.snes.cpu.acc = swapped;
+        self.set_nz(swapped, false);
     }
 
     fn set_nz(&mut self, value: u16, wide: bool) {
