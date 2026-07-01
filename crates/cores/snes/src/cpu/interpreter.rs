@@ -2,7 +2,7 @@ use super::decoder;
 use crate::Snes;
 use crate::cpu::Flags;
 use crate::cpu::addressing::{self, AddrMode};
-use crate::cpu::decoder::{Alu, Call, Compare, Pop, Push, Shift, Transfer};
+use crate::cpu::decoder::{Alu, Call, Compare, Pop, Push, Ret, Shift, Transfer};
 use crate::mmio::Address;
 use decoder::{Branches, FlagMask, FlagOps, Instruction, Jump, Load, RegStep, Store, SwTrap};
 
@@ -39,6 +39,18 @@ impl<'a> InterpreterView<'a> {
     fn set_pc_long(&mut self, bank: u8, pc: u16) {
         self.next_bank = bank;
         self.next_pc = pc;
+    }
+
+    /// Redirect execution to a 24bit address.
+    fn set_pc_addr(&mut self, target: Address) {
+        self.set_pc_long(target.bank(), target.address());
+    }
+
+    /// Resolve the (abs,x) indirect target.
+    fn indexed_indirect(&self, addr: u16) -> u16 {
+        let bank = self.snes.cpu.program_bank;
+        let ptr = addr.wrapping_add(self.snes.cpu.index_x);
+        self.snes.read16(Address::new(bank, ptr))
     }
 
     /// Take a relative branch.
@@ -164,12 +176,12 @@ impl InterpreterView<'_> {
             Instruction::Transfer(op) => self.transfer(op),
             Instruction::Alu(op) => self.alu(op),
             Instruction::Call(op) => self.call(op),
+            Instruction::Ret(op) => self.ret(op),
             Instruction::Push(op) => self.push(op),
             Instruction::Pop(op) => self.pop(op),
             Instruction::Compare(op) => self.compare(op),
             Instruction::Shift(op) => self.shift(op),
 
-            Instruction::BrlRell { disp } => self.branch(disp),
             Instruction::Xce => self.xce(),
             Instruction::Xba => self.xba(),
 
@@ -236,43 +248,38 @@ impl InterpreterView<'_> {
     fn branches(&mut self, op: Branches) {
         let flags = self.snes.cpu.flags;
         let (taken, disp) = match op {
-            Branches::BraRel { disp } => (true, disp),
-            Branches::BeqRel { disp } => (flags.zero(), disp),
-            Branches::BneRel { disp } => (!flags.zero(), disp),
-            Branches::BcsRel { disp } => (flags.carry(), disp),
-            Branches::BccRel { disp } => (!flags.carry(), disp),
-            Branches::BmiRel { disp } => (flags.negative(), disp),
-            Branches::BplRel { disp } => (!flags.negative(), disp),
-            Branches::BvsRel { disp } => (flags.overflow(), disp),
-            Branches::BvcRel { disp } => (!flags.overflow(), disp),
+            Branches::BraRel { disp } => (true, disp as i16),
+            Branches::BeqRel { disp } => (flags.zero(), disp as i16),
+            Branches::BneRel { disp } => (!flags.zero(), disp as i16),
+            Branches::BcsRel { disp } => (flags.carry(), disp as i16),
+            Branches::BccRel { disp } => (!flags.carry(), disp as i16),
+            Branches::BmiRel { disp } => (flags.negative(), disp as i16),
+            Branches::BplRel { disp } => (!flags.negative(), disp as i16),
+            Branches::BvsRel { disp } => (flags.overflow(), disp as i16),
+            Branches::BvcRel { disp } => (!flags.overflow(), disp as i16),
+            Branches::BrlRell { disp } => (true, disp),
         };
 
         if taken {
-            self.branch(disp as i16);
+            self.branch(disp);
         }
     }
 
     fn jump(&mut self, op: Jump) {
         match op {
             Jump::JmpAbs { addr } => self.set_pc(addr),
-            Jump::JmpAbl { addr } => {
-                let target = Address::from_24bit(addr);
-                self.set_pc_long(target.bank(), target.address());
-            }
+            Jump::JmpAbl { addr } => self.set_pc_addr(Address::from_24bit(addr)),
             Jump::JmpInd { addr } => {
                 let target = self.snes.read16(Address::new(0, addr));
                 self.set_pc(target);
             }
             Jump::JmpIax { addr } => {
-                let bank = self.snes.cpu.program_bank;
-                let ptr = addr.wrapping_add(self.snes.cpu.index_x);
-                let target = self.snes.read16(Address::new(bank, ptr));
+                let target = self.indexed_indirect(addr);
                 self.set_pc(target);
             }
             Jump::JmlIal { addr } => {
-                let target =
-                    Address::from_24bit(addressing::read24(self.snes, Address::new(0, addr)));
-                self.set_pc_long(target.bank(), target.address());
+                let target = addressing::read24(self.snes, Address::new(0, addr));
+                self.set_pc_addr(Address::from_24bit(target));
             }
         }
     }
@@ -423,7 +430,41 @@ impl InterpreterView<'_> {
                 self.push16(self.next_pc);
                 self.set_pc(addr);
             }
-            other => todo!("Implement call instruction {other:?}"),
+            decoder::Call::JsrIax { addr } => {
+                self.push16(self.next_pc);
+                let target = self.indexed_indirect(addr);
+                self.set_pc(target);
+            }
+            decoder::Call::JslAbl { addr } => {
+                self.push8(self.next_bank);
+                self.push16(self.next_pc);
+                self.set_pc_addr(Address::from_24bit(addr));
+            }
+        }
+    }
+
+    fn ret(&mut self, op: Ret) {
+        match op {
+            Ret::Rts => {
+                let return_pc = self.pop16();
+                self.set_pc(return_pc);
+            }
+            Ret::Rti => {
+                let flags = self.pop8();
+                self.snes.cpu.flags = Flags::from_raw(flags);
+                let return_pc = self.pop16();
+                if self.snes.cpu.emulation {
+                    self.set_pc(return_pc);
+                } else {
+                    let bank = self.pop8();
+                    self.set_pc_long(bank, return_pc);
+                }
+            }
+            Ret::Rtl => {
+                let return_pc = self.pop16();
+                let bank = self.pop8();
+                self.set_pc_long(bank, return_pc);
+            }
         }
     }
 

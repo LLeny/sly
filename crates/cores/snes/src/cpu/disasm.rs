@@ -62,9 +62,10 @@ pub fn disassemble_at(snes: &Snes, pc: u16) -> Disasm {
 
 fn flow_kind(inst: &Instruction) -> FlowKind {
     match inst {
-        Instruction::Branches(Branches::BraRel { .. }) => FlowKind::Branch,
+        Instruction::Branches(Branches::BraRel { .. } | Branches::BrlRell { .. }) => {
+            FlowKind::Branch
+        }
         Instruction::Branches(_) => FlowKind::CondBranch,
-        Instruction::BrlRell { .. } => FlowKind::Branch,
         Instruction::Jump(_) => FlowKind::Jump,
         Instruction::Call(_) => FlowKind::Call,
         Instruction::Ret(_) => FlowKind::Return,
@@ -77,7 +78,6 @@ fn instruction_class(inst: &Instruction) -> InstructionClass {
     use InstructionClass::*;
     match inst {
         Instruction::Branches(_)
-        | Instruction::BrlRell { .. }
         | Instruction::Jump(_)
         | Instruction::Call(_)
         | Instruction::Ret(_) => ControlFlow,
@@ -121,11 +121,11 @@ fn control_target(inst: &Instruction, pc: u16, length: u8, bank: u8) -> Option<u
                 | Branches::BmiRel { disp }
                 | Branches::BplRel { disp }
                 | Branches::BvsRel { disp }
-                | Branches::BvcRel { disp } => *disp,
+                | Branches::BvcRel { disp } => *disp as i16,
+                Branches::BrlRell { disp } => *disp,
             };
-            Some(next.wrapping_add(disp as i16 as u16) as u32)
+            Some(next.wrapping_add(disp as u16) as u32)
         }
-        Instruction::BrlRell { disp } => Some(next.wrapping_add(*disp as u16) as u32),
         Instruction::Jump(j) => match j {
             Jump::JmpAbs { addr } => Some(*addr as u32),
             Jump::JmpAbl { addr } => same_bank(*addr),
