@@ -6,7 +6,7 @@ members = [
     "crates/debugger",
     "crates/models/debugger",
     "crates/models/frontend",
-    "crates/playground",
+    "crates/playground", "crates/testrunner",
 ]
 
 [patch.crates-io]
