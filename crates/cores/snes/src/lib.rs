@@ -6,6 +6,7 @@ pub mod error;
 pub mod interrupt;
 mod macros;
 pub mod mmio;
+pub mod scheduler;
 
 pub use cartridge::Cartridge;
 pub use cpu::Cpu;
@@ -19,9 +20,9 @@ use crate::mmio::Address;
 #[cfg(feature = "debug")]
 use crate::mmio::MemoryAccess;
 use crate::mmio::dma::Dma;
+use crate::scheduler::Scheduler;
 
-// TODO: lol
-pub const INSTRUCTIONS_PER_FRAME: usize = 10_000;
+pub const CYCLES_PER_STEP: u64 = 30; // TODO: CYCLE ACCURACY
 
 pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub cpu: Cpu,
@@ -29,6 +30,7 @@ pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub irq: Irq,
     pub dma: Dma,
     pub apu: Apu,
+    pub scheduler: Scheduler<M>,
 }
 
 impl Snes {
@@ -37,14 +39,16 @@ impl Snes {
     }
 }
 
-impl<M: MemoryMap> Snes<M> {
+impl<M: MemoryMap + 'static> Snes<M> {
     pub fn with_mmu(mmu: Mmio<M>) -> Self {
+        let tv_system = mmu.cartridge.region().tv_system();
         let mut snes = Self {
             cpu: Cpu::new(0),
             mmu,
             irq: Irq::default(),
             dma: Dma::default(),
             apu: Apu::new(),
+            scheduler: Scheduler::new(tv_system),
         };
         snes.reset();
         snes
@@ -54,10 +58,15 @@ impl<M: MemoryMap> Snes<M> {
         const RESET_VECTOR_ADDR: u16 = 0xFFFC;
         const BANK_ZERO: u8 = 0x00;
 
+        let tv_system = self.mmu.cartridge.region().tv_system();
+
         self.cpu = Cpu::new(0);
         self.irq = Irq::default();
         self.dma = Dma::default();
         self.apu = Apu::new();
+        self.scheduler = Scheduler::new(tv_system);
+        self.scheduler
+            .schedule_event(apu::spc700::MASTER_CLOCK_DIVIDER, scheduler::spc700_tick);
         self.mmu.reset();
         self.cpu.pc = self.read16(Address::new(BANK_ZERO, RESET_VECTOR_ADDR));
     }
@@ -72,12 +81,10 @@ impl<M: MemoryMap> Snes<M> {
 
     pub fn step(&mut self) {
         cpu::step(self);
-        apu::spc700::step(&mut self.apu);
-    }
 
-    pub fn run_frame(&mut self) {
-        for _ in 0..INSTRUCTIONS_PER_FRAME {
-            self.step();
+        self.scheduler.advance_by(CYCLES_PER_STEP);
+        while let Some((deadline, mut callback)) = self.scheduler.pop_current_event() {
+            callback(self, deadline);
         }
     }
 

@@ -131,6 +131,8 @@ impl SnesTarget {
             self::merge_access(&mut access, &spc);
         }
 
+        self.core.scheduler.advance_by(snes::CYCLES_PER_STEP);
+
         (access, None)
     }
 
@@ -238,7 +240,9 @@ impl DebugTarget for SnesTarget {
         let _silenced = SilencedPanics::new();
         let mut access = MemoryAccess::default();
 
-        for _ in 0..snes::INSTRUCTIONS_PER_FRAME {
+        let frame_cycles = self.core.scheduler.cycles_per_frame();
+        let frame_end = self.core.scheduler.cycles() + frame_cycles;
+        while self.core.scheduler.cycles() < frame_end {
             let (step, fault) = self.step_machine();
             self::merge_access(&mut access, &step);
 
