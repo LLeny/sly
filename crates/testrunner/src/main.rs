@@ -30,7 +30,7 @@ fn main() -> ExitCode {
     std::panic::set_hook(Box::new(|_| {}));
 
     let args = Args::parse();
-    match run(&args) {
+    match self::run(&args) {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(e) => {
@@ -56,12 +56,12 @@ fn run(args: &Args) -> Result<bool> {
     let opcodes = args
         .opcodes
         .as_ref()
-        .map(|list| parse_opcodes(list))
+        .map(|list| self::parse_opcodes(list))
         .transpose()?;
 
     let mut all_clean = true;
     for target in targets {
-        all_clean &= run_target(target, args, opcodes.as_deref())?;
+        all_clean &= self::run_target(target, args, opcodes.as_deref())?;
     }
     Ok(all_clean)
 }
@@ -78,7 +78,7 @@ fn run_target(target: &Target, args: &Args, opcodes: Option<&[u8]>) -> Result<bo
         );
     }
 
-    let opcodes = discover_opcodes(&tests_dir, opcodes)
+    let opcodes = self::discover_opcodes(&tests_dir, target.suffix, opcodes)
         .with_context(|| format!("scanning {}", tests_dir.display()))?;
     if opcodes.is_empty() {
         bail!("no matching opcode test files in {}", tests_dir.display());
@@ -95,10 +95,10 @@ fn run_target(target: &Target, args: &Args, opcodes: Option<&[u8]>) -> Result<bo
     let mut tally = Tally::default();
 
     for opcode in opcodes {
-        let path = tests_dir.join(format!("{opcode:02x}.json"));
+        let path = tests_dir.join(format!("{opcode:02x}{}.json", target.suffix));
         let report = harness::run_file(core.as_mut(), &path, args.limit)?;
         tally.add(&report);
-        print_op(opcode, &report);
+        self::print_op(opcode, &report);
     }
 
     tally.print_summary();
@@ -160,11 +160,11 @@ fn print_op(opcode: u8, report: &OpReport) {
 
             let bad: Vec<_> = fields.iter().filter(|f| !f.matched()).collect();
             let name_w = bad.iter().map(|f| f.name.len()).max().unwrap_or(0);
-            
+
             for field in bad {
                 let width = field.bytes as usize * 2 + 2;
                 let got = format!("{:#0width$X}", field.got);
-            
+
                 println!(
                     "        {:<name_w$}  {} {} {}",
                     field.name,
@@ -177,26 +177,27 @@ fn print_op(opcode: u8, report: &OpReport) {
     }
 }
 
-fn discover_opcodes(dir: &Path, requested: Option<&[u8]>) -> Result<Vec<u8>> {
+fn discover_opcodes(dir: &Path, suffix: &str, requested: Option<&[u8]>) -> Result<Vec<u8>> {
     if let Some(requested) = requested {
         let mut opcodes: Vec<u8> = requested
             .iter()
             .copied()
-            .filter(|op| dir.join(format!("{op:02x}.json")).is_file())
+            .filter(|op| dir.join(format!("{op:02x}{suffix}.json")).is_file())
             .collect();
         opcodes.sort_unstable();
         opcodes.dedup();
         return Ok(opcodes);
     }
 
+    let want = format!("{suffix}.json");
     let mut opcodes = Vec::new();
     for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
-        }
+        };
 
-        if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        if let Some(stem) = name.strip_suffix(&want)
             && let Ok(op) = u8::from_str_radix(stem, 16)
         {
             opcodes.push(op);

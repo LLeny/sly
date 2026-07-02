@@ -1,7 +1,8 @@
-use super::decoder;
+use super::decoder::{self, DisasmCtx, Form, Instruction, Mnemonic};
+use super::operand::{Arg, fetch_arg};
 use crate::Snes;
 use crate::cpu::CodeReader;
-use decoder::{Branches, Call, Halt, Instruction, Jump};
+use crate::mmio::map::MemoryMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstructionClass {
@@ -40,16 +41,26 @@ impl std::fmt::Display for Disasm {
 }
 
 #[inline]
-pub fn disassemble_at(snes: &Snes, pc: u16) -> Disasm {
-    let reader = CodeReader { snes, peek: true };
+pub fn disassemble_at<M: MemoryMap>(snes: &Snes<M>, pc: u16) -> Disasm {
+    let reader = CodeReader {
+        snes,
+        bank: snes.cpu.program_bank,
+        peek: true,
+    };
     let addr = pc as u64;
-    let modes = decoder::pack_modes(snes.cpu.flags.m() as u64, snes.cpu.flags.x() as u64);
+    let combo = super::mode_selectors(&snes.cpu);
 
-    let (inst, length) = decoder::decode(modes, addr, &reader);
-    let text = inst.render(addr, &reader);
-    let target = control_target(&inst, pc, length, snes.cpu.program_bank);
-    let class = instruction_class(&inst);
-    let flow = flow_kind(&inst);
+    let (text, length) = decoder::disasm_ctx(addr, &reader);
+    let super::Decoded {
+        inst,
+        id,
+        mnemonic,
+        form,
+    } = super::decode(reader.read_u8(addr), combo);
+
+    let flow = self::flow_kind(mnemonic);
+    let class = self::instruction_class(id, flow, mnemonic);
+    let target = self::control_target(inst, mnemonic, form, pc, length, &reader);
 
     Disasm {
         text,
@@ -60,82 +71,74 @@ pub fn disassemble_at(snes: &Snes, pc: u16) -> Disasm {
     }
 }
 
-fn flow_kind(inst: &Instruction) -> FlowKind {
-    match inst {
-        Instruction::Branches(Branches::BraRel { .. } | Branches::BrlRell { .. }) => {
-            FlowKind::Branch
+fn flow_kind(m: Mnemonic) -> FlowKind {
+    use Mnemonic as M;
+
+    match m {
+        M::Bra | M::Brl => FlowKind::Branch,
+        M::Beq | M::Bne | M::Bcc | M::Bcs | M::Bmi | M::Bpl | M::Bvc | M::Bvs => {
+            FlowKind::CondBranch
         }
-        Instruction::Branches(_) => FlowKind::CondBranch,
-        Instruction::Jump(_) => FlowKind::Jump,
-        Instruction::Call(_) => FlowKind::Call,
-        Instruction::Ret(_) => FlowKind::Return,
-        Instruction::Halt(Halt::Stp) => FlowKind::Return,
+        M::Jmp | M::Jml => FlowKind::Jump,
+        M::Jsr | M::Jsl => FlowKind::Call,
+        M::Rts | M::Rtl | M::Rti | M::Stp => FlowKind::Return,
         _ => FlowKind::None,
     }
 }
 
-fn instruction_class(inst: &Instruction) -> InstructionClass {
+fn instruction_class(id: usize, flow: FlowKind, m: Mnemonic) -> InstructionClass {
     use InstructionClass::*;
-    match inst {
-        Instruction::Branches(_)
-        | Instruction::Jump(_)
-        | Instruction::Call(_)
-        | Instruction::Ret(_) => ControlFlow,
-        Instruction::Load(_)
-        | Instruction::Store(_)
-        | Instruction::Push(_)
-        | Instruction::Pop(_)
-        | Instruction::BlockMove(_) => Memory,
-        Instruction::Alu(_)
-        | Instruction::Compare(_)
-        | Instruction::BitTest(_)
-        | Instruction::Shift(_)
-        | Instruction::MemStep(_)
-        | Instruction::BitModify(_)
-        | Instruction::RegStep(_) => Arithmetic,
-        Instruction::Transfer(_) | Instruction::Xba => Transfer,
-        Instruction::FlagOps(_)
-        | Instruction::FlagMask(_)
-        | Instruction::SwTrap(_)
-        | Instruction::Halt(_)
-        | Instruction::Nop
-        | Instruction::WdmImm { .. }
-        | Instruction::Xce => System,
-        Instruction::Invalid { .. } => Other,
+
+    if flow != FlowKind::None && m != Mnemonic::Stp {
+        return ControlFlow;
+    }
+
+    if m == Mnemonic::Invalid {
+        return Other;
+    }
+
+    for tag in decoder::OPCODE_TAGS[id] {
+        let class = match *tag {
+            "load" | "store" | "push" | "pop" | "block_move" => Memory,
+            "alu" | "compare" | "shift" | "mem_step" | "bit_modify" | "reg_step" => Arithmetic,
+            "transfer" => Transfer,
+            "branches" | "jump" | "call" | "ret" => ControlFlow,
+            _ => continue,
+        };
+
+        return class;
+    }
+
+    match m {
+        Mnemonic::Bit => Arithmetic,
+        Mnemonic::Xba => Transfer,
+        _ => System,
     }
 }
 
-fn control_target(inst: &Instruction, pc: u16, length: u8, bank: u8) -> Option<u32> {
+fn control_target<M: MemoryMap>(
+    inst: Instruction,
+    m: Mnemonic,
+    form: Form,
+    pc: u16,
+    length: u8,
+    reader: &CodeReader<M>,
+) -> Option<u32> {
+    use Mnemonic as M;
+
     let next = pc.wrapping_add(length as u16);
+    let bank = reader.bank;
 
     let same_bank = |full: u32| ((full >> 16) as u8 == bank).then_some(full & 0xFFFF);
 
-    match inst {
-        Instruction::Branches(b) => {
-            let disp = match b {
-                Branches::BraRel { disp }
-                | Branches::BeqRel { disp }
-                | Branches::BneRel { disp }
-                | Branches::BcsRel { disp }
-                | Branches::BccRel { disp }
-                | Branches::BmiRel { disp }
-                | Branches::BplRel { disp }
-                | Branches::BvsRel { disp }
-                | Branches::BvcRel { disp } => *disp as i16,
-                Branches::BrlRell { disp } => *disp,
-            };
-            Some(next.wrapping_add(disp as u16) as u32)
-        }
-        Instruction::Jump(j) => match j {
-            Jump::JmpAbs { addr } => Some(*addr as u32),
-            Jump::JmpAbl { addr } => same_bank(*addr),
-            Jump::JmpInd { .. } | Jump::JmpIax { .. } | Jump::JmlIal { .. } => None,
-        },
-        Instruction::Call(c) => match c {
-            Call::JsrAbs { addr } => Some(*addr as u32),
-            Call::JslAbl { addr } => same_bank(*addr),
-            Call::JsrIax { .. } => None,
-        },
+    match (m, form, fetch_arg(inst, m, form, pc as u64, reader)) {
+        (
+            M::Bra | M::Brl | M::Beq | M::Bne | M::Bcc | M::Bcs | M::Bmi | M::Bpl | M::Bvc | M::Bvs,
+            _,
+            Arg::Rel(disp),
+        ) => Some(next.wrapping_add(disp as u16) as u32),
+        (M::Jmp | M::Jsr, Form::Abs, Arg::Abs(a)) => Some(a as u32),
+        (M::Jmp | M::Jsl, Form::Abl, Arg::Long(a)) => same_bank(a),
         _ => None,
     }
 }

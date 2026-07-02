@@ -79,7 +79,7 @@ impl AssetProvider for LibretroThumbnails {
         }
 
         let system = urlencoding::encode(game.system.info().libretro_name);
-        let sanitized = sanitize(name);
+        let sanitized = self::sanitize(name);
         let file = urlencoding::encode(&sanitized);
         Some(format!("{}/{}/Named_Boxarts/{}.png", self.base_url, system, file).into())
     }

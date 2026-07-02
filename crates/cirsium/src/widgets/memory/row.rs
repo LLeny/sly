@@ -51,7 +51,7 @@ pub(super) fn mem_row(
         .cells
         .iter()
         .enumerate()
-        .map(|(i, cell)| cell_fill(cell, in_selection(row.addr + i as u32)))
+        .map(|(i, cell)| self::cell_fill(cell, in_selection(row.addr + i as u32)))
         .collect();
 
     let mut hex = div().flex().items_center().flex_none();
@@ -60,7 +60,7 @@ pub(super) fn mem_row(
     let stride = bytes_per_row as u32;
     for (i, cell) in row.cells.iter().enumerate() {
         let addr = row.addr + i as u32;
-        let colors = fill_colors(theme, fills[i]);
+        let colors = self::fill_colors(theme, fills[i]);
         let dashed = matches!(fills[i], Fill::Breakpoint(_));
         let text = match colors {
             Some((_, border)) if dashed => border,
@@ -83,7 +83,9 @@ pub(super) fn mem_row(
             ),
             Fill::Read | Fill::Write => {
                 let same = |r: Option<&MemoryRow>| {
-                    r.and_then(|r| r.cells.get(i)).map(|c| cell_fill(c, false)) == Some(fills[i])
+                    r.and_then(|r| r.cells.get(i))
+                        .map(|c| self::cell_fill(c, false))
+                        == Some(fills[i])
                 };
                 (!same(above), !same(below))
             }
@@ -94,10 +96,10 @@ pub(super) fn mem_row(
             hex = hex.child(div().w(px(GROUP_GAP)).flex_none());
         }
 
-        let hex_cell = byte_cell(
-            fill_cell(
+        let hex_cell = self::byte_cell(
+            self::fill_cell(
                 theme,
-                cell_box(HEX_CELL_WIDTH),
+                self::cell_box(HEX_CELL_WIDTH),
                 text,
                 colors,
                 hex_left,
@@ -114,10 +116,10 @@ pub(super) fn mem_row(
         );
         hex = hex.child(hex_cell);
 
-        let ascii_cell = byte_cell(
-            fill_cell(
+        let ascii_cell = self::byte_cell(
+            self::fill_cell(
                 theme,
-                cell_box(ASCII_CELL_WIDTH),
+                self::cell_box(ASCII_CELL_WIDTH),
                 text,
                 colors,
                 ascii_left,
@@ -156,7 +158,7 @@ pub(super) fn column_header(theme: &Theme, bytes_per_row: usize) -> Div {
         }
 
         hex = hex.child(
-            cell_box(HEX_CELL_WIDTH)
+            self::cell_box(HEX_CELL_WIDTH)
                 .font_family(theme.mono_font)
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
@@ -164,7 +166,7 @@ pub(super) fn column_header(theme: &Theme, bytes_per_row: usize) -> Div {
                 .child(format!("{col:02X}")),
         );
         ascii = ascii.child(
-            cell_box(ASCII_CELL_WIDTH)
+            self::cell_box(ASCII_CELL_WIDTH)
                 .font_family(theme.mono_font)
                 .text_xs()
                 .font_weight(FontWeight::BOLD)

@@ -1022,7 +1022,7 @@ dependencies = [
 [[package]]
 name = "chipi-backend-rust"
 version = "1.0.0"
-source = "git+https://github.com/ioncodes/chipi?branch=1.0#5c56a3f1016a871ae2d1a4e642dfd85ee711a8e9"
+source = "git+https://github.com/ioncodes/chipi?branch=1.0#31df64cd2861c127ac352eb59fce919e24b42575"
 dependencies = [
  "chipi-core",
  "chipi-syntax",
@@ -1031,7 +1031,7 @@ dependencies = [
 [[package]]
 name = "chipi-core"
 version = "1.0.0"
-source = "git+https://github.com/ioncodes/chipi?branch=1.0#5c56a3f1016a871ae2d1a4e642dfd85ee711a8e9"
+source = "git+https://github.com/ioncodes/chipi?branch=1.0#31df64cd2861c127ac352eb59fce919e24b42575"
 dependencies = [
  "chipi-syntax",
 ]
@@ -1039,7 +1039,7 @@ dependencies = [
 [[package]]
 name = "chipi-macros"
 version = "1.0.0"
-source = "git+https://github.com/ioncodes/chipi?branch=1.0#5c56a3f1016a871ae2d1a4e642dfd85ee711a8e9"
+source = "git+https://github.com/ioncodes/chipi?branch=1.0#31df64cd2861c127ac352eb59fce919e24b42575"
 dependencies = [
  "chipi-backend-rust",
  "chipi-core",
@@ -1048,7 +1048,7 @@ dependencies = [
 [[package]]
 name = "chipi-syntax"
 version = "1.0.0"
-source = "git+https://github.com/ioncodes/chipi?branch=1.0#5c56a3f1016a871ae2d1a4e642dfd85ee711a8e9"
+source = "git+https://github.com/ioncodes/chipi?branch=1.0#31df64cd2861c127ac352eb59fce919e24b42575"
 
 [[package]]
 name = "chrono"

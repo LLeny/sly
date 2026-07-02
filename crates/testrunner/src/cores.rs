@@ -6,6 +6,7 @@ pub struct Target {
     pub name: &'static str,
     pub system: &'static str,
     pub tests: &'static str,
+    pub suffix: &'static str,
     build: fn() -> Box<dyn TestCore>,
 }
 
@@ -17,15 +18,24 @@ impl Target {
 
 static TARGETS: &[Target] = &[
     Target {
-        name: "wdc65c02",
+        name: "65816e",
         system: "snes",
-        tests: "submodules/65x02/wdc65c02/v1",
+        tests: "submodules/65816/v1",
+        suffix: ".e",
+        build: || Box::new(snes::SnesCpu::new()),
+    },
+    Target {
+        name: "65816n",
+        system: "snes",
+        tests: "submodules/65816/v1",
+        suffix: ".n",
         build: || Box::new(snes::SnesCpu::new()),
     },
     Target {
         name: "spc700",
         system: "snes",
         tests: "submodules/spc700/v1",
+        suffix: "",
         build: || Box::new(snes::Spc700::new()),
     },
 ];

@@ -39,8 +39,8 @@ pub fn disassemble(apu: &Apu, pc: u16) -> (String, u8, Option<u16>, FlowKind) {
     let reader = Reader { apu };
     let (inst, len) = decoder::decode(pc as u64, &reader);
     let text = inst.render(pc as u64, &reader);
-    let target = control_target(&inst, pc, len);
-    let flow = flow_kind(&inst);
+    let target = self::control_target(&inst, pc, len);
+    let flow = self::flow_kind(&inst);
 
     (text, len, target, flow)
 }
@@ -52,7 +52,7 @@ fn flow_kind(inst: &decoder::Instruction) -> FlowKind {
         Instruction::Branches(Branches::BraRel { .. }) => FlowKind::Branch,
         Instruction::Branches(_) => FlowKind::CondBranch,
         Instruction::BitBranch(_) => FlowKind::CondBranch,
-        Instruction::Jump(_) => FlowKind::Jump,
+        Instruction::JmpAbs { .. } | Instruction::JmpIax { .. } => FlowKind::Jump,
         Instruction::Call(_) => FlowKind::Call,
         Instruction::Returns(_) => FlowKind::Return,
         Instruction::Halt(Halt::Stop) => FlowKind::Return,
@@ -61,7 +61,7 @@ fn flow_kind(inst: &decoder::Instruction) -> FlowKind {
 }
 
 fn control_target(inst: &decoder::Instruction, pc: u16, len: u8) -> Option<u16> {
-    use decoder::{BitBranch, Branches, Call, Instruction, Jump};
+    use decoder::{BitBranch, Branches, Call, Instruction};
 
     let next = pc.wrapping_add(len as u16);
     let rel = |disp: i8| next.wrapping_add(disp as i16 as u16);
@@ -106,7 +106,7 @@ fn control_target(inst: &decoder::Instruction, pc: u16, len: u8) -> Option<u16> 
             };
             Some(rel(disp))
         }
-        Instruction::Jump(Jump::JmpAbs { addr }) => Some(*addr),
+        Instruction::JmpAbs { addr } => Some(*addr),
         Instruction::Call(Call::CallAbs { addr }) => Some(*addr),
         Instruction::Call(Call::Pcall { u }) => Some(0xFF00 | *u as u16),
         _ => None,

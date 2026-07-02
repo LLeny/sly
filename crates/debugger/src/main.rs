@@ -33,6 +33,7 @@ use target::DebugTarget;
 fn main() {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,snes=trace"));
+
     let logs = LogBuffer::new();
     tracing_subscriber::registry()
         .with(filter)
@@ -71,7 +72,7 @@ fn main() {
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {
-                    title: Some("debugger".into()),
+                    title: Some("Sly Debugger".into()),
                     appears_transparent: true,
                     traffic_light_position: Some(Point::new(px(12.), px(10.))),
                 }),

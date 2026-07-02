@@ -774,15 +774,15 @@ impl Render for Debugger {
                 let mut items = vec![
                     MenuItem::new(
                         "Copy Address",
-                        clipboard_listener(cx, menu.address.clone(), Debugger::close_menu),
+                        self::clipboard_listener(cx, menu.address.clone(), Debugger::close_menu),
                     ),
                     MenuItem::new(
                         "Copy Bytes",
-                        clipboard_listener(cx, menu.bytes.clone(), Debugger::close_menu),
+                        self::clipboard_listener(cx, menu.bytes.clone(), Debugger::close_menu),
                     ),
                     MenuItem::new(
                         "Copy Disassembly",
-                        clipboard_listener(cx, menu.text.clone(), Debugger::close_menu),
+                        self::clipboard_listener(cx, menu.text.clone(), Debugger::close_menu),
                     ),
                     MenuItem::new(
                         "Set PC to here",
@@ -960,19 +960,19 @@ impl Render for Debugger {
             let items = vec![
                 MenuItem::new(
                     "Copy Address",
-                    clipboard_listener(cx, menu.address.clone(), Debugger::memory_close_menu),
+                    self::clipboard_listener(cx, menu.address.clone(), Debugger::memory_close_menu),
                 ),
                 MenuItem::new(
                     "Copy Hex",
-                    clipboard_listener(cx, menu.hex.clone(), Debugger::memory_close_menu),
+                    self::clipboard_listener(cx, menu.hex.clone(), Debugger::memory_close_menu),
                 ),
                 MenuItem::new(
                     "Copy Raw",
-                    clipboard_listener(cx, menu.raw.clone(), Debugger::memory_close_menu),
+                    self::clipboard_listener(cx, menu.raw.clone(), Debugger::memory_close_menu),
                 ),
                 MenuItem::new(
                     "Copy ASCII",
-                    clipboard_listener(cx, menu.ascii.clone(), Debugger::memory_close_menu),
+                    self::clipboard_listener(cx, menu.ascii.clone(), Debugger::memory_close_menu),
                 ),
                 MenuItem::new("Add read breakpoint", {
                     let label = bp_label.clone();
@@ -1083,7 +1083,7 @@ impl Render for Debugger {
             .font_family(t.ui_font)
             .text_color(t.text_primary)
             .text_sm()
-            .child(title_bar(t, "codename: idk yet", titlebar_controls))
+            .child(title_bar(t, "Sly Debugger", titlebar_controls))
             .child(
                 div()
                     .flex()

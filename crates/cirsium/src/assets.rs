@@ -11,7 +11,7 @@ pub mod icon {
     pub const MINIMIZE: &str = "icons/minus.svg";
     pub const MAXIMIZE: &str = "icons/square.svg";
     pub const CLOSE: &str = "icons/x.svg";
-    pub const LOGO: &str = "icons/banana.svg";
+    pub const LOGO: &str = "icons/raccoon.svg";
     pub const CPU: &str = "icons/cpu.svg";
     pub const CARTRIDGE: &str = "icons/memory-stick.svg";
     pub const CHECK: &str = "icons/check.svg";

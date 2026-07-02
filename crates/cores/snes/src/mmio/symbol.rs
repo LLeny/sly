@@ -1,9 +1,10 @@
 use crate::Snes;
+use crate::mmio::MemoryMap;
 
 pub(crate) trait MmioReg {
-    fn read(snes: &Snes) -> u8;
-    fn write(snes: &mut Snes, value: u8);
-    fn peek(snes: &Snes) -> u8;
+    fn read<M: MemoryMap>(snes: &Snes<M>) -> u8;
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8);
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8;
 }
 
 pub struct MmioSymbol {
@@ -29,7 +30,7 @@ pub fn symbol(addr: u16) -> Option<&'static str> {
 
 /// Whether `name` is a registered MMIO register name.
 pub fn is_symbol(name: &str) -> bool {
-    address_of(name).is_some()
+    self::address_of(name).is_some()
 }
 
 /// The address a symbol name resolves to.

@@ -130,17 +130,17 @@ impl RenderOnce for MmioWidget {
             );
         } else {
             for group in &self.view.groups {
-                list = list.child(group_header(t, group.name.clone()));
+                list = list.child(self::group_header(t, group.name.clone()));
                 for reg in &group.registers {
                     let is_expanded = self.expanded.contains(&reg.id);
-                    list = list.child(register_row(
+                    list = list.child(self::register_row(
                         t,
                         reg,
                         is_expanded,
                         self.on_toggle_register.clone(),
                     ));
                     if is_expanded {
-                        list = list.children(field_rows(t, &reg.fields, 0));
+                        list = list.children(self::field_rows(t, &reg.fields, 0));
                     }
                 }
             }
@@ -234,9 +234,9 @@ fn register_row(
 fn field_rows(theme: &Theme, fields: &[MmioFieldView], depth: usize) -> Vec<Div> {
     let mut rows = Vec::new();
     for field in fields {
-        rows.push(field_row(theme, field, depth));
+        rows.push(self::field_row(theme, field, depth));
         if !field.children.is_empty() {
-            rows.extend(field_rows(theme, &field.children, depth + 1));
+            rows.extend(self::field_rows(theme, &field.children, depth + 1));
         }
     }
     rows

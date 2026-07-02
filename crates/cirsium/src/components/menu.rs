@@ -44,7 +44,7 @@ pub fn popover(
     content: impl IntoElement,
     on_dismiss: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    overlay(
+    self::overlay(
         theme,
         position,
         Anchor::TopRight,
@@ -81,9 +81,9 @@ pub fn context_menu(
         items
             .into_iter()
             .enumerate()
-            .map(|(i, item)| menu_row(theme, i, item)),
+            .map(|(i, item)| self::menu_row(theme, i, item)),
     );
-    overlay(
+    self::overlay(
         theme,
         position,
         Anchor::TopLeft,

@@ -214,7 +214,7 @@ impl RenderOnce for BreakpointsWidget {
                 );
         } else {
             list = list.children(self.view.entries.into_iter().map(|entry| {
-                breakpoint_row(
+                self::breakpoint_row(
                     t,
                     entry,
                     self.on_toggle_entry.clone(),

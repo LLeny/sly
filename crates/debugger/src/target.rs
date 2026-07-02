@@ -25,7 +25,7 @@ pub trait DebugTarget {
     fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> Vec<DisasmLine>;
 
     fn manifest(&self) -> ComponentManifest {
-        standard_manifest(&self.cpus())
+        self::standard_manifest(&self.cpus())
     }
 
     fn step(&mut self) -> bool;

@@ -1,13 +1,15 @@
-pub mod addressing;
+mod addressing;
+mod alu;
 mod decoder;
 pub mod disasm;
 mod interpreter;
+mod operand;
 
 pub use disasm::disassemble_at;
 
 use crate::Snes;
-use crate::mmio::Address;
-use interpreter::InterpreterView;
+use crate::mmio::{Address, MemoryMap};
+use interpreter::Interpreter;
 
 pub struct Cpu {
     pub acc: u16,
@@ -19,7 +21,7 @@ pub struct Cpu {
     pub flags: Flags,
     pub pc: u16,
     pub stack_pointer: u16,
-    emulation: bool,
+    pub emulation: bool,
 }
 
 impl Cpu {
@@ -37,16 +39,55 @@ impl Cpu {
             emulation: true,
         }
     }
+
+    /// The M/X width bits are hardwired to 1 and the stack pointer is confined
+    /// to page one in emulation mode.
+    pub fn normalize_emulation(&mut self) {
+        if self.emulation {
+            self.flags = Flags::from_raw(self.flags.raw() | 0x30);
+            self.stack_pointer = self.confine_sp(self.stack_pointer);
+        }
+    }
+
+    /// Confine a stack pointer to page one while in emulation mode.
+    pub fn confine_sp(&self, sp: u16) -> u16 {
+        if self.emulation {
+            0x0100 | (sp & 0x00ff)
+        } else {
+            sp
+        }
+    }
+
+    /// Clear the index register high bytes while the X flag selects 8bit width.
+    pub fn narrow_index(&mut self) {
+        if self.flags.x() {
+            self.index_x &= 0x00ff;
+            self.index_y &= 0x00ff;
+        }
+    }
+
+    /// Accumulator/memory operations are 16bit. Emulation mode forces 8bit
+    /// regardless of the M bit.
+    pub fn acc_wide(&self) -> bool {
+        !self.emulation && self.flags.is_acc_16bits()
+    }
+
+    /// Index registers are 16bit. Emulation mode forces 8bit regardless of the
+    /// X bit.
+    pub fn index_wide(&self) -> bool {
+        !self.emulation && self.flags.is_index_16bits()
+    }
 }
 
-pub(crate) struct CodeReader<'a> {
-    pub snes: &'a Snes,
+pub(crate) struct CodeReader<'a, M: MemoryMap> {
+    pub snes: &'a Snes<M>,
+    pub bank: u8,
     pub peek: bool,
 }
 
-impl decoder::DisasmCtx for CodeReader<'_> {
+impl<M: MemoryMap> decoder::DisasmCtx for CodeReader<'_, M> {
     fn read_u8(&self, addr: u64) -> u8 {
-        let addr = Address::from_24bit(addr as u32);
+        let addr = Address::new(self.bank, addr as u16);
         if self.peek {
             self.snes.peek8(addr)
         } else {
@@ -57,39 +98,107 @@ impl decoder::DisasmCtx for CodeReader<'_> {
     fn symbol(&self, addr: u64) -> Option<(String, u64)> {
         crate::mmio::symbol(addr as u16).map(|name| (name.to_string(), 0))
     }
+
+    /// The decoder's `m`/`x` width selectors.
+    fn mode(&self, name: &str) -> u64 {
+        let cpu = &self.snes.cpu;
+        match name {
+            "m" => !cpu.acc_wide() as u64,
+            "x" => !cpu.index_wide() as u64,
+            _ => 0,
+        }
+    }
 }
 
-pub fn step(snes: &mut Snes) {
-    let (bank, pc, modes) = {
+/// Pack the M/X width selectors the decoder needs.
+pub(crate) fn mode_selectors(cpu: &Cpu) -> usize {
+    decoder::pack_modes(!cpu.acc_wide() as u64, !cpu.index_wide() as u64)
+}
+
+pub(crate) struct Decoded {
+    pub inst: decoder::Instruction,
+    pub id: usize,
+    pub mnemonic: decoder::Mnemonic,
+    pub form: decoder::Form,
+}
+
+/// Resolve an opcode byte to its instruction, id, mnemonic and form.
+pub(crate) fn decode(opcode: u8, combo: usize) -> Decoded {
+    let inst = decoder::Instruction(opcode);
+    let id = inst.opcode_in(combo);
+    Decoded {
+        inst,
+        id,
+        mnemonic: decoder::OPCODE_MNEMONIC[id],
+        form: decoder::OPCODE_FORM[id],
+    }
+}
+
+/// The effective data address of the instruction at `pc`.
+pub fn effective_address<M: MemoryMap>(snes: &Snes<M>, pc: u16) -> Option<Address> {
+    use decoder::Form as F;
+
+    let combo = self::mode_selectors(&snes.cpu);
+    let bank = snes.cpu.program_bank;
+    let opcode = snes.peek8(Address::new(bank, pc));
+    let Decoded {
+        inst,
+        mnemonic,
+        form,
+        ..
+    } = self::decode(opcode, combo);
+
+    if matches!(form, F::Dp | F::Abs | F::Abl) {
+        return None;
+    }
+
+    let reader = CodeReader {
+        snes,
+        bank,
+        peek: true,
+    };
+    let arg = operand::fetch_arg(inst, mnemonic, form, pc as u64, &reader);
+    addressing::resolve(snes, form, arg).map(|(lo, _)| lo)
+}
+
+pub fn step<M: MemoryMap>(snes: &mut Snes<M>) {
+    let (bank, pc, combo) = {
         let cpu = &snes.cpu;
-        (
-            cpu.program_bank,
-            cpu.pc,
-            decoder::pack_modes(cpu.flags.m() as u64, cpu.flags.x() as u64),
-        )
+        (cpu.program_bank, cpu.pc, self::mode_selectors(cpu))
     };
 
-    let cia = ((bank as u64) << 16) | pc as u64;
-    let (instr, len) = {
+    let opcode = snes.read8(Address::new(bank, pc));
+    let Decoded {
+        inst,
+        id,
+        mnemonic,
+        form,
+    } = self::decode(opcode, combo);
+    let len = decoder::stream_len_of(combo, id);
+
+    let arg = {
         let reader = CodeReader {
             snes: &*snes,
+            bank,
             peek: false,
         };
-        decoder::decode(modes, cia, &reader)
+        operand::fetch_arg(inst, mnemonic, form, pc as u64, &reader)
     };
 
     #[cfg(feature = "debug")]
     snes.mmu.access.resume();
 
-    let mut view = InterpreterView::new(&mut *snes, len);
-    view.exec(instr);
-    let (next_bank, next_pc) = view.next();
+    let mut vm = Interpreter::new(&mut *snes, len);
+    vm.exec(mnemonic, form, arg);
+    let (next_bank, next_pc) = vm.next();
 
     #[cfg(feature = "debug")]
     snes.mmu.access.pause();
 
     snes.cpu.program_bank = next_bank;
     snes.cpu.pc = next_pc;
+    snes.cpu.normalize_emulation();
+    snes.cpu.narrow_index();
 }
 
 #[chapa::bitfield(u8, order = lsb0)]

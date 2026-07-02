@@ -92,7 +92,7 @@ pub(super) fn arrow_gutters(lines: &[DisasmLine]) -> (Vec<GutterCell>, f32) {
     let mut cells = vec![GutterCell::default(); n];
     for (from, to, lane, color_index) in placed {
         let related = selected == Some(from) || selected == Some(to);
-        let mut color = arrow_color(color_index);
+        let mut color = self::arrow_color(color_index);
         let thickness = if related {
             ARROW_THICKNESS + ARROW_EMPHASIS
         } else {

@@ -11,3 +11,6 @@
 [submodule "submodules/spc700"]
 	path = submodules/spc700
 	url = https://github.com/SingleStepTests/spc700
+[submodule "submodules/65816"]
+	path = submodules/65816
+	url = https://github.com/SingleStepTests/65816

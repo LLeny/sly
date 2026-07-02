@@ -114,7 +114,7 @@ impl Theme {
             on_accent: rgb(0xffffff).into(),
             selection: rgb(0x4a2f7a).into(),
             selection_border: rgb(0x7d5bb8).into(),
-            logo: rgb(0xffd60a).into(),
+            logo: rgb(0xa55cff).into(),
 
             success: rgb(0x6cc98a).into(),
             warning: rgb(0xd9b46a).into(),
@@ -172,7 +172,7 @@ impl Theme {
             on_accent: rgb(0xffffff).into(),
             selection: rgb(0xcdb4f5).into(),
             selection_border: rgb(0x9d7fd0).into(),
-            logo: rgb(0xeab308).into(),
+            logo: rgb(0x7c3aed).into(),
 
             success: rgb(0x1f9d57).into(),
             warning: rgb(0xb5800f).into(),

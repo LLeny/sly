@@ -119,7 +119,7 @@ impl RenderOnce for CartridgeWidget {
             .flex_col()
             .gap_1()
             .pt_1()
-            .children(self.view.fields.iter().map(|f| field_row(t, f)));
+            .children(self.view.fields.iter().map(|f| self::field_row(t, f)));
 
         let body = div()
             .flex()

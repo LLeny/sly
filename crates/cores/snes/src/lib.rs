@@ -9,7 +9,7 @@ pub mod mmio;
 pub use cartridge::Cartridge;
 pub use cpu::Cpu;
 pub use error::SnesError;
-pub use mmio::Mmio;
+pub use mmio::{CartridgeMap, MemoryMap, Mmio};
 
 use crate::apu::Apu;
 use crate::cpu::disasm::Disasm;
@@ -22,9 +22,9 @@ use crate::mmio::dma::Dma;
 // TODO: lol
 pub const INSTRUCTIONS_PER_FRAME: usize = 10_000;
 
-pub struct Snes {
+pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub cpu: Cpu,
-    pub mmu: Mmio,
+    pub mmu: Mmio<M>,
     pub irq: Irq,
     pub dma: Dma,
     pub apu: Apu,
@@ -32,9 +32,15 @@ pub struct Snes {
 
 impl Snes {
     pub fn new(cartridge: Cartridge) -> Self {
+        Self::with_mmu(Mmio::new(cartridge))
+    }
+}
+
+impl<M: MemoryMap> Snes<M> {
+    pub fn with_mmu(mmu: Mmio<M>) -> Self {
         let mut snes = Self {
             cpu: Cpu::new(0),
-            mmu: Mmio::new(cartridge),
+            mmu,
             irq: Irq::default(),
             dma: Dma::default(),
             apu: Apu::new(),

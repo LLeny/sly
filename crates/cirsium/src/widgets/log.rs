@@ -204,7 +204,7 @@ impl RenderOnce for LogWidget {
                 let theme = Theme::global(cx);
                 let t = &*theme;
                 range
-                    .map(|ix| log_row(t, ix, &self.view.entries[ix]))
+                    .map(|ix| self::log_row(t, ix, &self.view.entries[ix]))
                     .collect::<Vec<_>>()
             })
             .track_scroll(&self.scroll)
@@ -282,7 +282,7 @@ fn log_row(theme: &Theme, ix: usize, entry: &LogEntry) -> Stateful<gpui::Div> {
                 .flex_none()
                 .text_color(theme.text_muted)
                 .truncate()
-                .child(short_target(&entry.target)),
+                .child(self::short_target(&entry.target)),
         )
         .child(
             div()

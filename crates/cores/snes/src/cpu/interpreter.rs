@@ -1,19 +1,69 @@
-use super::decoder;
+use super::addressing::resolve;
+use super::alu::{AluResult, Width, adc_bcd8, add_binary, bcd16, sbc_bcd8};
+use super::decoder::{Form, Mnemonic};
+use super::operand::Arg;
 use crate::Snes;
-use crate::cpu::Flags;
-use crate::cpu::addressing::{self, AddrMode};
-use crate::cpu::decoder::{Alu, Call, Compare, Pop, Push, Ret, Shift, Transfer};
-use crate::mmio::Address;
-use decoder::{Branches, FlagMask, FlagOps, Instruction, Jump, Load, RegStep, Store, SwTrap};
+use crate::cpu::{Cpu, Flags};
+use crate::mmio::{Address, MemoryMap};
 
-pub(crate) struct InterpreterView<'a> {
-    snes: &'a mut Snes,
+#[derive(Clone, Copy)]
+enum ShiftOp {
+    Asl,
+    Lsr,
+    Rol,
+    Ror,
+}
+
+#[derive(Clone, Copy)]
+enum StackWrap {
+    Confined,
+    Wide,
+}
+
+impl StackWrap {
+    fn step(self, cpu: &Cpu, sp: u16) -> u16 {
+        match self {
+            StackWrap::Confined => cpu.confine_sp(sp),
+            StackWrap::Wide => sp,
+        }
+    }
+}
+
+trait StackWord: Copy {
+    fn to_stack_bytes(self) -> impl Iterator<Item = u8>;
+    fn from_stack_bytes(pop: impl FnMut() -> u8) -> Self;
+}
+
+impl StackWord for u8 {
+    fn to_stack_bytes(self) -> impl Iterator<Item = u8> {
+        std::iter::once(self)
+    }
+
+    fn from_stack_bytes(mut pop: impl FnMut() -> u8) -> Self {
+        pop()
+    }
+}
+
+impl StackWord for u16 {
+    fn to_stack_bytes(self) -> impl Iterator<Item = u8> {
+        [(self >> 8) as u8, self as u8].into_iter()
+    }
+
+    fn from_stack_bytes(mut pop: impl FnMut() -> u8) -> Self {
+        let lo = pop() as u16;
+        let hi = pop() as u16;
+        lo | (hi << 8)
+    }
+}
+
+pub(crate) struct Interpreter<'a, M: MemoryMap> {
+    snes: &'a mut Snes<M>,
     next_bank: u8,
     next_pc: u16,
 }
 
-impl<'a> InterpreterView<'a> {
-    pub(crate) fn new(snes: &'a mut Snes, len: u8) -> Self {
+impl<'a, M: MemoryMap> Interpreter<'a, M> {
+    pub(crate) fn new(snes: &'a mut Snes<M>, len: u8) -> Self {
         let cpu = &snes.cpu;
         let next_bank = cpu.program_bank;
         let next_pc = cpu.pc.wrapping_add(len as u16);
@@ -28,6 +78,497 @@ impl<'a> InterpreterView<'a> {
     /// The committed NIA (program bank, offset) after the op has run.
     pub(crate) fn next(&self) -> (u8, u16) {
         (self.next_bank, self.next_pc)
+    }
+
+    /// Le juice.
+    pub(crate) fn exec(&mut self, mnemonic: Mnemonic, form: Form, arg: Arg) {
+        use Form as F;
+        use Mnemonic as M;
+
+        let aw = self.snes.cpu.acc_wide();
+        let iw = self.snes.cpu.index_wide();
+        let imm = |arg: Arg| match arg {
+            Arg::Imm(v) => v,
+            _ => 0,
+        };
+
+        match mnemonic {
+            M::Invalid | M::Nop | M::WdmImm | M::Stp | M::Wai => {}
+
+            // loads and stores
+            M::Lda => {
+                let v = self.operand(form, arg, aw);
+                self.lda(v);
+            }
+            M::Ldx => {
+                let v = self.operand(form, arg, iw);
+                self.ldx(v);
+            }
+            M::Ldy => {
+                let v = self.operand(form, arg, iw);
+                self.ldy(v);
+            }
+            M::Sta => self.store(form, arg, self.snes.cpu.acc, aw),
+            M::Stx => self.store(form, arg, self.snes.cpu.index_x, iw),
+            M::Sty => self.store(form, arg, self.snes.cpu.index_y, iw),
+            M::Stz => self.store(form, arg, 0, aw),
+
+            // accumulator arithmetic and logic
+            M::Adc => {
+                let v = self.operand(form, arg, aw);
+                self.adc(v);
+            }
+            M::Sbc => {
+                let v = self.operand(form, arg, aw);
+                self.sbc(v);
+            }
+            M::And => {
+                let v = self.operand(form, arg, aw);
+                self.lda(self.snes.cpu.acc & v);
+            }
+            M::Ora => {
+                let v = self.operand(form, arg, aw);
+                self.lda(self.snes.cpu.acc | v);
+            }
+            M::Eor => {
+                let v = self.operand(form, arg, aw);
+                self.lda(self.snes.cpu.acc ^ v);
+            }
+            M::Cmp => {
+                let v = self.operand(form, arg, aw);
+                self.compare_values(self.snes.cpu.acc, v, aw);
+            }
+            M::Cpx => {
+                let v = self.operand(form, arg, iw);
+                self.compare_values(self.snes.cpu.index_x, v, iw);
+            }
+            M::Cpy => {
+                let v = self.operand(form, arg, iw);
+                self.compare_values(self.snes.cpu.index_y, v, iw);
+            }
+            M::Bit => match form {
+                F::Imm => self.bit_imm(imm(arg)),
+                _ => self.bit(form, arg),
+            },
+
+            // alu shit
+            M::Asl => self.shift(ShiftOp::Asl, form, arg),
+            M::Lsr => self.shift(ShiftOp::Lsr, form, arg),
+            M::Rol => self.shift(ShiftOp::Rol, form, arg),
+            M::Ror => self.shift(ShiftOp::Ror, form, arg),
+            M::Inc => match form {
+                F::A => self.lda(self.snes.cpu.acc.wrapping_add(1)),
+                _ => self.mem_step(form, arg, 1),
+            },
+            M::Dec => match form {
+                F::A => self.lda(self.snes.cpu.acc.wrapping_sub(1)),
+                _ => self.mem_step(form, arg, u16::MAX),
+            },
+            M::Inx => self.ldx(self.snes.cpu.index_x.wrapping_add(1)),
+            M::Dex => self.ldx(self.snes.cpu.index_x.wrapping_sub(1)),
+            M::Iny => self.ldy(self.snes.cpu.index_y.wrapping_add(1)),
+            M::Dey => self.ldy(self.snes.cpu.index_y.wrapping_sub(1)),
+            M::Tsb => self.bit_modify(form, arg, true),
+            M::Trb => self.bit_modify(form, arg, false),
+
+            // branches
+            M::Bra | M::Brl => self.branch(true, arg),
+            M::Beq => self.branch(self.snes.cpu.flags.zero(), arg),
+            M::Bne => self.branch(!self.snes.cpu.flags.zero(), arg),
+            M::Bcs => self.branch(self.snes.cpu.flags.carry(), arg),
+            M::Bcc => self.branch(!self.snes.cpu.flags.carry(), arg),
+            M::Bmi => self.branch(self.snes.cpu.flags.negative(), arg),
+            M::Bpl => self.branch(!self.snes.cpu.flags.negative(), arg),
+            M::Bvs => self.branch(self.snes.cpu.flags.overflow(), arg),
+            M::Bvc => self.branch(!self.snes.cpu.flags.overflow(), arg),
+
+            // jumps, calls and returns
+            M::Jmp => match (form, arg) {
+                (F::Abs, Arg::Abs(a)) => self.set_pc(a),
+                (F::Abl, Arg::Long(a)) => self.set_pc_addr(Address::from_24bit(a)),
+                (F::Ind, Arg::Abs(a)) => {
+                    let target = self.snes.read16(Address::new(0, a));
+                    self.set_pc(target);
+                }
+                (F::Iax, Arg::Abs(a)) => {
+                    let target = self.indexed_indirect(a);
+                    self.set_pc(target);
+                }
+                _ => unreachable!("jmp form"),
+            },
+            M::Jml => {
+                let target = self.snes.read24(Address::new(0, arg.abs()));
+                self.set_pc_addr(Address::from_24bit(target));
+            }
+            M::Jsr => {
+                self.push(self.next_pc.wrapping_sub(1), StackWrap::Confined);
+                match (form, arg) {
+                    (F::Abs, Arg::Abs(a)) => self.set_pc(a),
+                    (F::Iax, Arg::Abs(a)) => {
+                        let target = self.indexed_indirect(a);
+                        self.set_pc(target);
+                    }
+                    _ => unreachable!("jsr form"),
+                }
+            }
+            M::Jsl => {
+                self.push(self.next_bank, StackWrap::Wide);
+                self.push(self.next_pc.wrapping_sub(1), StackWrap::Wide);
+                match arg {
+                    Arg::Long(a) => self.set_pc_addr(Address::from_24bit(a)),
+                    _ => unreachable!("jsl form"),
+                }
+            }
+            M::Rts => {
+                let return_pc = self.pop::<u16>(StackWrap::Confined);
+                self.set_pc(return_pc.wrapping_add(1));
+            }
+            M::Rtl => {
+                let return_pc = self.pop::<u16>(StackWrap::Wide);
+                let bank = self.pop::<u8>(StackWrap::Wide);
+                self.set_pc_long(bank, return_pc.wrapping_add(1));
+            }
+            M::Rti => {
+                let flags = self.pop::<u8>(StackWrap::Confined);
+                self.snes.cpu.flags = Flags::from_raw(flags);
+                let return_pc = self.pop::<u16>(StackWrap::Confined);
+                if self.snes.cpu.emulation {
+                    self.set_pc(return_pc);
+                } else {
+                    let bank = self.pop::<u8>(StackWrap::Confined);
+                    self.set_pc_long(bank, return_pc);
+                }
+            }
+
+            // stack
+            M::Pha => self.push_reg(self.snes.cpu.acc, aw),
+            M::Phx => self.push_reg(self.snes.cpu.index_x, iw),
+            M::Phy => self.push_reg(self.snes.cpu.index_y, iw),
+            M::Php => self.push(self.snes.cpu.flags.raw(), StackWrap::Confined),
+            M::Phb => self.push(self.snes.cpu.data_bank, StackWrap::Wide),
+            M::Phk => self.push(self.snes.cpu.program_bank, StackWrap::Wide),
+            M::Phd => self.push(self.snes.cpu.direct_page, StackWrap::Wide),
+            M::Pea => self.push(arg.abs(), StackWrap::Wide),
+            M::Pei => {
+                let value = self.operand_addr(form, arg).0.address();
+                self.push(value, StackWrap::Wide);
+            }
+            M::Per => {
+                let Arg::Rel(disp) = arg else {
+                    unreachable!("per form")
+                };
+                let target = self.next_pc.wrapping_add(disp as u16);
+                self.push(target, StackWrap::Wide);
+            }
+            M::Pla => {
+                let value = self.pop_reg(aw);
+                self.lda(value);
+            }
+            M::Plx => {
+                let value = self.pop_reg(iw);
+                self.ldx(value);
+            }
+            M::Ply => {
+                let value = self.pop_reg(iw);
+                self.ldy(value);
+            }
+            M::Plb => {
+                self.snes.cpu.data_bank = self.pop::<u8>(StackWrap::Wide);
+                self.set_nz(self.snes.cpu.data_bank as u16, false);
+            }
+            M::Pld => {
+                self.snes.cpu.direct_page = self.pop::<u16>(StackWrap::Wide);
+                self.set_nz(self.snes.cpu.direct_page, true);
+            }
+            M::Plp => self.snes.cpu.flags = Flags::from_raw(self.pop::<u8>(StackWrap::Confined)),
+
+            // transfers
+            M::Tax => self.ldx(self.snes.cpu.acc),
+            M::Tay => self.ldy(self.snes.cpu.acc),
+            M::Tsx => self.ldx(self.snes.cpu.stack_pointer),
+            M::Txa => self.lda(self.snes.cpu.index_x),
+            M::Tya => self.lda(self.snes.cpu.index_y),
+            M::Txy => self.ldy(self.snes.cpu.index_x),
+            M::Tyx => self.ldx(self.snes.cpu.index_y),
+            M::Txs => self.set_sp(self.snes.cpu.index_x),
+            M::Tcs => self.set_sp(self.snes.cpu.acc),
+            M::Tcd => {
+                self.snes.cpu.direct_page = self.snes.cpu.acc;
+                self.set_nz(self.snes.cpu.direct_page, true);
+            }
+            M::Tdc => {
+                self.snes.cpu.acc = self.snes.cpu.direct_page;
+                self.set_nz(self.snes.cpu.acc, true);
+            }
+            M::Tsc => {
+                self.snes.cpu.acc = self.snes.cpu.stack_pointer;
+                self.set_nz(self.snes.cpu.acc, true);
+            }
+
+            // flags
+            M::Clc => self.snes.cpu.flags.set_carry(false),
+            M::Sec => self.snes.cpu.flags.set_carry(true),
+            M::Cli => self.snes.cpu.flags.set_irq_disable(false),
+            M::Sei => self.snes.cpu.flags.set_irq_disable(true),
+            M::Cld => self.snes.cpu.flags.set_decimal(false),
+            M::Sed => self.snes.cpu.flags.set_decimal(true),
+            M::Clv => self.snes.cpu.flags.set_overflow(false),
+            M::RepImm => {
+                let raw = self.snes.cpu.flags.raw();
+                self.snes.cpu.flags = Flags::from_raw(raw & !(imm(arg) as u8));
+            }
+            M::SepImm => {
+                let raw = self.snes.cpu.flags.raw();
+                self.snes.cpu.flags = Flags::from_raw(raw | (imm(arg) as u8));
+            }
+
+            // mode switches
+            M::Xce => {
+                let cpu = &mut self.snes.cpu;
+                let carry = cpu.flags.carry();
+                cpu.flags.set_carry(cpu.emulation);
+                cpu.emulation = carry;
+            }
+            M::Xba => {
+                self.snes.cpu.acc = self.snes.cpu.acc.rotate_left(8);
+                self.set_nz(self.snes.cpu.acc, false);
+            }
+
+            // block moves
+            M::Mvn => self.block_move(arg, false),
+            M::Mvp => self.block_move(arg, true),
+
+            // software interrupts
+            M::BrkImm => self.service_interrupt(0xFFE6, 0xFFFE),
+            M::CopImm => self.service_interrupt(0xFFE4, 0xFFF4),
+        }
+    }
+
+    fn set_acc(&mut self, value: u16, wide: bool) {
+        self.snes.cpu.acc = if wide {
+            value
+        } else {
+            (self.snes.cpu.acc & 0xff00) | (value & 0x00ff)
+        };
+    }
+
+    fn lda(&mut self, value: u16) {
+        let wide = self.snes.cpu.acc_wide();
+
+        self.set_acc(value, wide);
+        self.set_nz(value, wide);
+    }
+
+    fn ldx(&mut self, value: u16) {
+        let wide = self.snes.cpu.index_wide();
+
+        self.snes.cpu.index_x = value & wide.mask();
+        self.set_nz(self.snes.cpu.index_x, wide);
+    }
+
+    fn ldy(&mut self, value: u16) {
+        let wide = self.snes.cpu.index_wide();
+
+        self.snes.cpu.index_y = value & wide.mask();
+        self.set_nz(self.snes.cpu.index_y, wide);
+    }
+
+    fn adc(&mut self, value: u16) {
+        self.add_sub(adc_bcd8, value, value);
+    }
+
+    fn sbc(&mut self, value: u16) {
+        let wide = self.snes.cpu.acc_wide();
+        self.add_sub(sbc_bcd8, value, value ^ wide.mask());
+    }
+
+    fn add_sub(&mut self, bcd8: fn(u16, u16, bool) -> AluResult, value: u16, binary: u16) {
+        let wide = self.snes.cpu.acc_wide();
+        let a = self.snes.cpu.acc;
+        let carry = self.snes.cpu.flags.carry();
+
+        let flags = if self.snes.cpu.flags.decimal() {
+            if wide {
+                bcd16(bcd8, a, value, carry)
+            } else {
+                bcd8(a, value, carry)
+            }
+        } else {
+            add_binary(a, binary, carry, wide)
+        };
+
+        self.apply_alu_result(flags, wide);
+    }
+
+    fn apply_alu_result(&mut self, alu: AluResult, wide: bool) {
+        let flags = &mut self.snes.cpu.flags;
+        flags.set_carry(alu.carry);
+        flags.set_overflow(alu.overflow);
+        flags.set_negative(alu.negative);
+        flags.set_zero(alu.zero);
+
+        self.set_acc(alu.result, wide);
+    }
+
+    fn compare_values(&mut self, reg: u16, value: u16, wide: bool) {
+        let mask = wide.mask();
+        let sign = wide.sign_bit();
+
+        let reg = reg & mask;
+        let value = value & mask;
+        let result = reg.wrapping_sub(value) & mask;
+
+        let flags = &mut self.snes.cpu.flags;
+        flags.set_carry(reg >= value);
+        flags.set_zero(result == 0);
+        flags.set_negative(result & sign != 0);
+    }
+
+    fn bit(&mut self, form: Form, arg: Arg) {
+        let wide = self.snes.cpu.acc_wide();
+        let value = self.operand(form, arg, wide);
+        let mask = wide.mask();
+        let sign = wide.sign_bit();
+        let overflow_bit = sign >> 1;
+
+        let zero = (self.snes.cpu.acc & value) & mask == 0;
+        let flags = &mut self.snes.cpu.flags;
+        flags.set_zero(zero);
+        flags.set_negative(value & sign != 0);
+        flags.set_overflow(value & overflow_bit != 0);
+    }
+
+    fn bit_imm(&mut self, value: u16) {
+        let mask = self.snes.cpu.acc_wide().mask();
+        let zero = (self.snes.cpu.acc & value) & mask == 0;
+        self.snes.cpu.flags.set_zero(zero);
+    }
+
+    fn shift(&mut self, op: ShiftOp, form: Form, arg: Arg) {
+        let wide = self.snes.cpu.acc_wide();
+        if matches!(form, Form::A) {
+            let result = self.do_shift(op, self.snes.cpu.acc, wide);
+            self.set_acc(result, wide);
+        } else {
+            let (lo, hi) = self.operand_addr(form, arg);
+            let value = self.read_value(lo, hi, wide);
+            let result = self.do_shift(op, value, wide);
+            self.write_value(lo, hi, result, wide);
+        }
+    }
+
+    fn do_shift(&mut self, op: ShiftOp, value: u16, wide: bool) -> u16 {
+        let mask = wide.mask();
+        let msb = wide.sign_bit();
+        let value = value & mask;
+        let carry_in = self.snes.cpu.flags.carry() as u16;
+
+        let (result, carry_out) = match op {
+            ShiftOp::Asl => ((value << 1) & mask, value & msb != 0),
+            ShiftOp::Lsr => (value >> 1, value & 1 != 0),
+            ShiftOp::Rol => (((value << 1) | carry_in) & mask, value & msb != 0),
+            ShiftOp::Ror => {
+                let hi = if carry_in != 0 { msb } else { 0 };
+                ((value >> 1) | hi, value & 1 != 0)
+            }
+        };
+
+        self.snes.cpu.flags.set_carry(carry_out);
+        self.set_nz(result, wide);
+        result
+    }
+
+    fn mem_step(&mut self, form: Form, arg: Arg, delta: u16) {
+        let wide = self.snes.cpu.acc_wide();
+        let (lo, hi) = self.operand_addr(form, arg);
+        let value = self.read_value(lo, hi, wide);
+
+        let result = value.wrapping_add(delta) & wide.mask();
+
+        self.write_value(lo, hi, result, wide);
+        self.set_nz(result, wide);
+    }
+
+    fn bit_modify(&mut self, form: Form, arg: Arg, set: bool) {
+        let wide = self.snes.cpu.acc_wide();
+        let (lo, hi) = self.operand_addr(form, arg);
+        let value = self.read_value(lo, hi, wide);
+        let acc = self.snes.cpu.acc;
+        let mask = wide.mask();
+
+        self.snes.cpu.flags.set_zero((value & acc) & mask == 0);
+        let result = if set { value | acc } else { value & !acc } & mask;
+        self.write_value(lo, hi, result, wide);
+    }
+
+    fn branch(&mut self, taken: bool, arg: Arg) {
+        let Arg::Rel(disp) = arg else {
+            unreachable!("branch form")
+        };
+        if taken {
+            self.next_pc = self.next_pc.wrapping_add(disp as u16);
+        }
+    }
+
+    fn block_move(&mut self, arg: Arg, descending: bool) {
+        let Arg::Move { dst, src } = arg else {
+            unreachable!("block move form")
+        };
+
+        let byte = self.snes.read8(Address::new(src, self.snes.cpu.index_x));
+        self.snes
+            .write8(Address::new(dst, self.snes.cpu.index_y), byte);
+        self.snes.cpu.data_bank = dst;
+
+        let step = if descending { u16::MAX } else { 1 };
+        self.snes.cpu.index_x = self.snes.cpu.index_x.wrapping_add(step);
+        self.snes.cpu.index_y = self.snes.cpu.index_y.wrapping_add(step);
+        self.snes.cpu.acc = self.snes.cpu.acc.wrapping_sub(1);
+
+        if self.snes.cpu.acc != 0xffff {
+            self.set_pc(self.snes.cpu.pc);
+        }
+    }
+
+    fn operand_addr(&self, form: Form, arg: Arg) -> (Address, Address) {
+        resolve(self.snes, form, arg).expect("form without a memory operand")
+    }
+
+    fn read_value(&self, lo: Address, hi: Address, wide: bool) -> u16 {
+        let low = self.snes.read8(lo) as u16;
+        if wide {
+            low | ((self.snes.read8(hi) as u16) << 8)
+        } else {
+            low
+        }
+    }
+
+    fn write_value(&mut self, lo: Address, hi: Address, value: u16, wide: bool) {
+        self.snes.write8(lo, value as u8);
+        if wide {
+            self.snes.write8(hi, (value >> 8) as u8);
+        }
+    }
+
+    fn operand(&self, form: Form, arg: Arg, wide: bool) -> u16 {
+        match arg {
+            Arg::Imm(v) => v,
+            _ => {
+                let (lo, hi) = self.operand_addr(form, arg);
+                self.read_value(lo, hi, wide)
+            }
+        }
+    }
+
+    fn store(&mut self, form: Form, arg: Arg, value: u16, wide: bool) {
+        let (lo, hi) = self.operand_addr(form, arg);
+        self.write_value(lo, hi, value, wide);
+    }
+
+    fn set_nz(&mut self, value: u16, wide: bool) {
+        let flags = &mut self.snes.cpu.flags;
+        flags.set_zero(value & wide.mask() == 0);
+        flags.set_negative(value & wide.sign_bit() != 0);
     }
 
     /// Redirect execution within the current program bank.
@@ -46,109 +587,61 @@ impl<'a> InterpreterView<'a> {
         self.set_pc_long(target.bank(), target.address());
     }
 
-    /// Resolve the (abs,x) indirect target.
+    /// Resolve the (abs,x) indirect target within the program bank.
     fn indexed_indirect(&self, addr: u16) -> u16 {
         let bank = self.snes.cpu.program_bank;
         let ptr = addr.wrapping_add(self.snes.cpu.index_x);
         self.snes.read16(Address::new(bank, ptr))
     }
 
-    /// Take a relative branch.
-    fn branch(&mut self, offset: i16) {
-        self.next_pc = self.next_pc.wrapping_add(offset as u16);
+    fn set_sp(&mut self, value: u16) {
+        self.snes.cpu.stack_pointer = self.snes.cpu.confine_sp(value);
     }
 
-    /// Write the low byte of `value` to `ea`, and the high byte to the next
-    /// address when the accumulator is in 16bit mode.
-    fn write(&mut self, ea: Address, value: u16) {
-        if self.snes.cpu.flags.is_acc_16bits() {
-            self.snes.write16(ea, value);
-        } else {
-            self.snes.write8(ea, value as u8);
+    /// Push a `u8` or `u16` onto the stack, high byte first.
+    fn push<T: StackWord>(&mut self, value: T, wrap: StackWrap) {
+        for byte in value.to_stack_bytes() {
+            let sp = self.snes.cpu.stack_pointer;
+            self.snes.write8(Address::new(0, sp), byte);
+            self.snes.cpu.stack_pointer = wrap.step(&self.snes.cpu, sp.wrapping_sub(1));
         }
     }
 
-    /// Read the low byte from `ea`, and the high byte from the next address when
-    /// the accumulator is in 16bit mode.
-    fn read(&self, ea: Address) -> u16 {
-        if self.snes.cpu.flags.is_acc_16bits() {
-            self.snes.read16(ea)
-        } else {
-            self.snes.read8(ea) as u16
-        }
+    /// Pop a `u8` or `u16` off the stack, low byte first (the `push` inverse).
+    fn pop<T: StackWord>(&mut self, wrap: StackWrap) -> T {
+        T::from_stack_bytes(|| {
+            let sp = wrap.step(&self.snes.cpu, self.snes.cpu.stack_pointer.wrapping_add(1));
+            self.snes.cpu.stack_pointer = sp;
+            self.snes.read8(Address::new(0, sp))
+        })
     }
 
-    /// Write a result into the accumulator honoring its width.
-    fn set_acc(&mut self, value: u16, wide: bool) {
-        self.snes.cpu.acc = if wide {
-            value
-        } else {
-            (self.snes.cpu.acc & 0xff00) | (value & 0x00ff)
-        };
-    }
-
-    /// Load a value into the accumulator and update N/Z, honoring its width.
-    fn load_acc(&mut self, value: u16, wide: bool) {
-        self.set_acc(value, wide);
-        self.set_nz(value, wide);
-    }
-
-    /// Push a byte onto the stack.
-    fn push8(&mut self, value: u8) {
-        let sp = self.snes.cpu.stack_pointer;
-        self.snes.write8(Address::new(0, sp), value);
-        self.snes.cpu.stack_pointer = sp.wrapping_sub(1);
-    }
-
-    /// Push a word onto the stack.
-    fn push16(&mut self, value: u16) {
-        self.push8((value >> 8) as u8);
-        self.push8(value as u8);
-    }
-
-    /// Push a register value, honoring its current 8/16bit width.
     fn push_reg(&mut self, value: u16, wide: bool) {
         if wide {
-            self.push16(value);
+            self.push(value, StackWrap::Confined);
         } else {
-            self.push8(value as u8);
+            self.push(value as u8, StackWrap::Confined);
         }
     }
 
-    /// Pop a byte from the stack.
-    fn pop8(&mut self) -> u8 {
-        let sp = self.snes.cpu.stack_pointer.wrapping_add(1);
-        self.snes.cpu.stack_pointer = sp;
-        self.snes.read8(Address::new(0, sp))
-    }
-
-    /// Pop a word from the stack.
-    fn pop16(&mut self) -> u16 {
-        let lo = self.pop8() as u16;
-        let hi = self.pop8() as u16;
-        lo | (hi << 8)
-    }
-
-    /// Pop a register value, honoring its current 8/16bit width.
     fn pop_reg(&mut self, wide: bool) -> u16 {
         if wide {
-            self.pop16()
+            self.pop::<u16>(StackWrap::Confined)
         } else {
-            self.pop8() as u16
+            self.pop::<u8>(StackWrap::Confined) as u16
         }
     }
 
-    /// Shared interrupt entry sequence.
     fn service_interrupt(&mut self, native_vector: u16, emu_vector: u16) {
         let (program_bank, return_pc) = self.next();
         let emulation = self.snes.cpu.emulation;
 
         if !emulation {
-            self.push8(program_bank);
+            self.push(program_bank, StackWrap::Confined);
         }
 
-        self.push16(return_pc);
-        self.push8(self.snes.cpu.flags.raw());
+        self.push(return_pc, StackWrap::Confined);
+        self.push(self.snes.cpu.flags.raw(), StackWrap::Confined);
 
         self.snes.cpu.flags.set_irq_disable(true);
         self.snes.cpu.flags.set_decimal(false);
@@ -157,462 +650,5 @@ impl<'a> InterpreterView<'a> {
         let vector = if emulation { emu_vector } else { native_vector };
         let target = self.snes.read16(Address::new(0, vector));
         self.set_pc_long(0, target);
-    }
-}
-
-impl InterpreterView<'_> {
-    pub(crate) fn exec(&mut self, inst: Instruction) {
-        match inst {
-            Instruction::Nop => {}
-
-            Instruction::RegStep(op) => self.reg_step(op),
-            Instruction::FlagOps(op) => self.flag_ops(op),
-            Instruction::FlagMask(op) => self.flag_mask(op),
-            Instruction::Branches(op) => self.branches(op),
-            Instruction::SwTrap(op) => self.sw_trap(op),
-            Instruction::Store(op) => self.store(op),
-            Instruction::Load(op) => self.load(op),
-            Instruction::Jump(op) => self.jump(op),
-            Instruction::Transfer(op) => self.transfer(op),
-            Instruction::Alu(op) => self.alu(op),
-            Instruction::Call(op) => self.call(op),
-            Instruction::Ret(op) => self.ret(op),
-            Instruction::Push(op) => self.push(op),
-            Instruction::Pop(op) => self.pop(op),
-            Instruction::Compare(op) => self.compare(op),
-            Instruction::Shift(op) => self.shift(op),
-
-            Instruction::Xce => self.xce(),
-            Instruction::Xba => self.xba(),
-
-            other => todo!("Implement instruction {other:?}"),
-        }
-    }
-
-    fn reg_step(&mut self, op: RegStep) {
-        match op {
-            RegStep::Inx => {
-                self.snes.cpu.index_x = self.snes.cpu.index_x.wrapping_add(1);
-                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
-            }
-            RegStep::Dex => {
-                self.snes.cpu.index_x = self.snes.cpu.index_x.wrapping_sub(1);
-                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
-            }
-            RegStep::Iny => {
-                self.snes.cpu.index_y = self.snes.cpu.index_y.wrapping_add(1);
-                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
-            }
-            RegStep::Dey => {
-                self.snes.cpu.index_y = self.snes.cpu.index_y.wrapping_sub(1);
-                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
-            }
-            RegStep::IncA => {
-                self.snes.cpu.acc = self.snes.cpu.acc.wrapping_add(1);
-                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
-            }
-            RegStep::DecA => {
-                self.snes.cpu.acc = self.snes.cpu.acc.wrapping_sub(1);
-                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
-            }
-        }
-    }
-
-    fn flag_ops(&mut self, op: FlagOps) {
-        let flags = &mut self.snes.cpu.flags;
-        match op {
-            FlagOps::Clc => flags.set_carry(false),
-            FlagOps::Sec => flags.set_carry(true),
-            FlagOps::Cli => flags.set_irq_disable(false),
-            FlagOps::Sei => flags.set_irq_disable(true),
-            FlagOps::Cld => flags.set_decimal(false),
-            FlagOps::Sed => flags.set_decimal(true),
-            FlagOps::Clv => flags.set_overflow(false),
-        }
-    }
-
-    fn flag_mask(&mut self, op: FlagMask) {
-        let cpu = &mut self.snes.cpu;
-        let raw = cpu.flags.raw();
-        cpu.flags = Flags::from_raw(match op {
-            FlagMask::RepImm { mask } => raw & !mask,
-            FlagMask::SepImm { mask } => raw | mask,
-        });
-
-        if cpu.flags.x() {
-            cpu.index_x &= 0x00ff;
-            cpu.index_y &= 0x00ff;
-        }
-    }
-
-    fn branches(&mut self, op: Branches) {
-        let flags = self.snes.cpu.flags;
-        let (taken, disp) = match op {
-            Branches::BraRel { disp } => (true, disp as i16),
-            Branches::BeqRel { disp } => (flags.zero(), disp as i16),
-            Branches::BneRel { disp } => (!flags.zero(), disp as i16),
-            Branches::BcsRel { disp } => (flags.carry(), disp as i16),
-            Branches::BccRel { disp } => (!flags.carry(), disp as i16),
-            Branches::BmiRel { disp } => (flags.negative(), disp as i16),
-            Branches::BplRel { disp } => (!flags.negative(), disp as i16),
-            Branches::BvsRel { disp } => (flags.overflow(), disp as i16),
-            Branches::BvcRel { disp } => (!flags.overflow(), disp as i16),
-            Branches::BrlRell { disp } => (true, disp),
-        };
-
-        if taken {
-            self.branch(disp);
-        }
-    }
-
-    fn jump(&mut self, op: Jump) {
-        match op {
-            Jump::JmpAbs { addr } => self.set_pc(addr),
-            Jump::JmpAbl { addr } => self.set_pc_addr(Address::from_24bit(addr)),
-            Jump::JmpInd { addr } => {
-                let target = self.snes.read16(Address::new(0, addr));
-                self.set_pc(target);
-            }
-            Jump::JmpIax { addr } => {
-                let target = self.indexed_indirect(addr);
-                self.set_pc(target);
-            }
-            Jump::JmlIal { addr } => {
-                let target = addressing::read24(self.snes, Address::new(0, addr));
-                self.set_pc_addr(Address::from_24bit(target));
-            }
-        }
-    }
-
-    fn transfer(&mut self, op: Transfer) {
-        match op {
-            Transfer::Tax => {
-                self.snes.cpu.index_x = self.snes.cpu.acc;
-                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
-            }
-            Transfer::Tay => {
-                self.snes.cpu.index_y = self.snes.cpu.acc;
-                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
-            }
-            Transfer::Tcd => {
-                self.snes.cpu.direct_page = self.snes.cpu.acc;
-                self.set_nz(self.snes.cpu.direct_page, true);
-            }
-            Transfer::Tcs => self.snes.cpu.stack_pointer = self.snes.cpu.acc,
-            Transfer::Tdc => {
-                self.snes.cpu.acc = self.snes.cpu.direct_page;
-                self.set_nz(self.snes.cpu.acc, true);
-            }
-            Transfer::Tsc => {
-                self.snes.cpu.acc = self.snes.cpu.stack_pointer;
-                self.set_nz(self.snes.cpu.acc, true);
-            }
-            Transfer::Tsx => {
-                self.snes.cpu.index_x = self.snes.cpu.stack_pointer;
-                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
-            }
-            Transfer::Txa => {
-                self.snes.cpu.acc = self.snes.cpu.index_x;
-                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
-            }
-            Transfer::Txs => self.snes.cpu.stack_pointer = self.snes.cpu.index_x,
-            Transfer::Txy => {
-                self.snes.cpu.index_y = self.snes.cpu.index_x;
-                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
-            }
-            Transfer::Tya => {
-                self.snes.cpu.acc = self.snes.cpu.index_y;
-                self.set_nz(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits());
-            }
-            Transfer::Tyx => {
-                self.snes.cpu.index_x = self.snes.cpu.index_y;
-                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
-            }
-        }
-    }
-
-    fn sw_trap(&mut self, op: SwTrap) {
-        const BRK_VECTOR_NATIVE: u16 = 0xFFE6;
-        const BRK_VECTOR_EMULATION: u16 = 0xFFFE;
-        const COP_VECTOR_NATIVE: u16 = 0xFFE4;
-        const COP_VECTOR_EMULATION: u16 = 0xFFF4;
-
-        let (native_vector, emu_vector) = match op {
-            SwTrap::BrkImm { .. } => (BRK_VECTOR_NATIVE, BRK_VECTOR_EMULATION),
-            SwTrap::CopImm { .. } => (COP_VECTOR_NATIVE, COP_VECTOR_EMULATION),
-        };
-        self.service_interrupt(native_vector, emu_vector);
-    }
-
-    fn store(&mut self, op: Store) {
-        let (mode, value) = match op {
-            Store::StzAbs { addr } => (AddrMode::Abs(addr), 0),
-            Store::StaAbs { addr } => (AddrMode::Abs(addr), self.snes.cpu.acc),
-            Store::StaAbl { addr } => (AddrMode::Abl(addr), self.snes.cpu.acc),
-            Store::StaAlx { addr } => (AddrMode::AlX(addr), self.snes.cpu.acc),
-            other => todo!("Implement store instruction {other:?}"),
-        };
-        let ea = addressing::resolve(self.snes, mode);
-        self.write(ea, value);
-    }
-
-    fn load(&mut self, op: Load) {
-        match op {
-            Load::LdaImmM8 { imm } => self.load_acc(imm as u16, false),
-            Load::LdaImmM16 { imm } => self.load_acc(imm, true),
-            Load::LdaIdly { dp } => {
-                let ea = addressing::resolve(self.snes, AddrMode::Idly(dp));
-                let wide = self.snes.cpu.flags.is_acc_16bits();
-                let value = self.read(ea);
-                self.load_acc(value, wide);
-            }
-            Load::LdxImmX8 { imm } => {
-                self.snes.cpu.index_x = imm as u16;
-                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
-            }
-            Load::LdxImmX16 { imm } => {
-                self.snes.cpu.index_x = imm;
-                self.set_nz(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits());
-            }
-            Load::LdyImmX8 { imm } => {
-                self.snes.cpu.index_y = imm as u16;
-                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
-            }
-            Load::LdyImmX16 { imm } => {
-                self.snes.cpu.index_y = imm;
-                self.set_nz(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits());
-            }
-            other => todo!("Implement load instruction {other:?}"),
-        }
-    }
-
-    fn alu(&mut self, op: Alu) {
-        match op {
-            Alu::SbcImmM16 { imm } => {
-                let cpu = &mut self.snes.cpu;
-
-                let borrow = if cpu.flags.carry() { 0 } else { 1 };
-                let wide = (cpu.acc as u32)
-                    .wrapping_sub(imm as u32)
-                    .wrapping_sub(borrow);
-                let result = wide as u16;
-
-                cpu.flags.set_carry(wide & 0x1_0000 == 0);
-                cpu.flags
-                    .set_overflow((cpu.acc ^ imm) & (cpu.acc ^ result) & 0x8000 != 0);
-                cpu.flags.set_zero(result == 0);
-                cpu.flags.set_negative(result & 0x8000 != 0);
-
-                cpu.acc = result;
-            }
-            Alu::AdcImmM8 { imm } => {
-                let a = self.snes.cpu.acc & 0x00ff;
-                let imm = imm as u16;
-                let carry = self.snes.cpu.flags.carry() as u16;
-                let sum = a + imm + carry;
-                let result = sum & 0x00ff;
-
-                let flags = &mut self.snes.cpu.flags;
-                flags.set_carry(sum & 0x100 != 0);
-                flags.set_overflow((!(a ^ imm) & (a ^ result) & 0x80) != 0);
-                flags.set_zero(result == 0);
-                flags.set_negative(result & 0x80 != 0);
-
-                self.set_acc(result, false);
-            }
-            other => todo!("Implement ALU instruction {other:?}"),
-        }
-    }
-
-    fn call(&mut self, op: Call) {
-        match op {
-            decoder::Call::JsrAbs { addr } => {
-                self.push16(self.next_pc);
-                self.set_pc(addr);
-            }
-            decoder::Call::JsrIax { addr } => {
-                self.push16(self.next_pc);
-                let target = self.indexed_indirect(addr);
-                self.set_pc(target);
-            }
-            decoder::Call::JslAbl { addr } => {
-                self.push8(self.next_bank);
-                self.push16(self.next_pc);
-                self.set_pc_addr(Address::from_24bit(addr));
-            }
-        }
-    }
-
-    fn ret(&mut self, op: Ret) {
-        match op {
-            Ret::Rts => {
-                let return_pc = self.pop16();
-                self.set_pc(return_pc);
-            }
-            Ret::Rti => {
-                let flags = self.pop8();
-                self.snes.cpu.flags = Flags::from_raw(flags);
-                let return_pc = self.pop16();
-                if self.snes.cpu.emulation {
-                    self.set_pc(return_pc);
-                } else {
-                    let bank = self.pop8();
-                    self.set_pc_long(bank, return_pc);
-                }
-            }
-            Ret::Rtl => {
-                let return_pc = self.pop16();
-                let bank = self.pop8();
-                self.set_pc_long(bank, return_pc);
-            }
-        }
-    }
-
-    fn push(&mut self, op: Push) {
-        match op {
-            Push::Pha => self.push_reg(self.snes.cpu.acc, self.snes.cpu.flags.is_acc_16bits()),
-            Push::Phx => {
-                self.push_reg(self.snes.cpu.index_x, self.snes.cpu.flags.is_index_16bits())
-            }
-            Push::Phy => {
-                self.push_reg(self.snes.cpu.index_y, self.snes.cpu.flags.is_index_16bits())
-            }
-            Push::Phb => self.push8(self.snes.cpu.data_bank),
-            Push::Phd => self.push16(self.snes.cpu.direct_page),
-            Push::Phk => self.push8(self.snes.cpu.program_bank),
-            Push::Php => self.push8(self.snes.cpu.flags.raw()),
-            Push::PeaAbs { addr } => self.push16(addr),
-            Push::PeiIdp { dp } => {
-                let ea = addressing::resolve(self.snes, AddrMode::Idp(dp));
-                self.push16(ea.address());
-            }
-            Push::PerRell { disp } => {
-                let target = self.next_pc.wrapping_add(disp as u16);
-                self.push16(target);
-            }
-        }
-    }
-
-    fn pop(&mut self, op: Pop) {
-        match op {
-            Pop::Pla => {
-                let wide = self.snes.cpu.flags.is_acc_16bits();
-                let value = self.pop_reg(wide);
-                self.load_acc(value, wide);
-            }
-            Pop::Plx => {
-                let wide = self.snes.cpu.flags.is_index_16bits();
-                self.snes.cpu.index_x = self.pop_reg(wide);
-                self.set_nz(self.snes.cpu.index_x, wide);
-            }
-            Pop::Ply => {
-                let wide = self.snes.cpu.flags.is_index_16bits();
-                self.snes.cpu.index_y = self.pop_reg(wide);
-                self.set_nz(self.snes.cpu.index_y, wide);
-            }
-            Pop::Plb => {
-                self.snes.cpu.data_bank = self.pop8();
-                self.set_nz(self.snes.cpu.data_bank as u16, false);
-            }
-            Pop::Pld => {
-                self.snes.cpu.direct_page = self.pop16();
-                self.set_nz(self.snes.cpu.direct_page, true);
-            }
-            Pop::Plp => self.snes.cpu.flags = Flags::from_raw(self.pop8()),
-        }
-    }
-
-    fn compare(&mut self, op: Compare) {
-        match op {
-            Compare::CmpAbs { addr } => {
-                let ea = addressing::resolve(self.snes, AddrMode::Abs(addr));
-                let value = self.read(ea);
-                let wide = self.snes.cpu.flags.is_acc_16bits();
-                self.compare_values(self.snes.cpu.acc, value, wide);
-            }
-            Compare::CpxImmX16 { imm } => {
-                let wide = self.snes.cpu.flags.is_index_16bits();
-                self.compare_values(self.snes.cpu.index_x, imm, wide);
-            }
-            other => todo!("Implement compare instruction {other:?}"),
-        }
-    }
-
-    fn shift(&mut self, op: Shift) {
-        match op {
-            Shift::RolA => {
-                let wide = self.snes.cpu.flags.is_acc_16bits();
-                let result = self.rol(self.snes.cpu.acc, wide);
-                self.set_acc(result, wide);
-            }
-            Shift::RolAbs { addr } => {
-                let ea = addressing::resolve(self.snes, AddrMode::Abs(addr));
-                let wide = self.snes.cpu.flags.is_acc_16bits();
-                let value = self.read(ea);
-                let result = self.rol(value, wide);
-                self.write(ea, result);
-            }
-            other => todo!("Implement shift instruction {other:?}"),
-        }
-    }
-
-    fn compare_values(&mut self, reg: u16, value: u16, wide: bool) {
-        let (mask, sign) = if wide {
-            (0xffff, 0x8000)
-        } else {
-            (0x00ff, 0x0080)
-        };
-        let reg = reg & mask;
-        let value = value & mask;
-        let result = reg.wrapping_sub(value) & mask;
-
-        let flags = &mut self.snes.cpu.flags;
-        flags.set_carry(reg >= value);
-        flags.set_zero(result == 0);
-        flags.set_negative(result & sign != 0);
-    }
-
-    fn xce(&mut self) {
-        let cpu = &mut self.snes.cpu;
-        let carry = cpu.flags.carry();
-        cpu.flags.set_carry(cpu.emulation);
-        cpu.emulation = carry;
-
-        if cpu.emulation {
-            tracing::error!("Entering emulation mode, weird?");
-        }
-    }
-
-    fn xba(&mut self) {
-        self.snes.cpu.acc = self.snes.cpu.acc.rotate_left(8);
-        self.set_nz(self.snes.cpu.acc, false);
-    }
-
-    fn set_nz(&mut self, value: u16, wide: bool) {
-        let (mask, sign) = if wide {
-            (0xffff, 0x8000)
-        } else {
-            (0x00ff, 0x0080)
-        };
-
-        let flags = &mut self.snes.cpu.flags;
-        flags.set_zero(value & mask == 0);
-        flags.set_negative(value & sign != 0);
-    }
-
-    fn rol(&mut self, value: u16, wide: bool) -> u16 {
-        let (msb, mask) = if wide {
-            (0x8000, 0xffff)
-        } else {
-            (0x80, 0x00ff)
-        };
-        let value = value & mask;
-        let carry_in = self.snes.cpu.flags.carry() as u16;
-        let result = ((value << 1) | carry_in) & mask;
-
-        self.snes.cpu.flags.set_carry(value & msb != 0);
-        self.set_nz(result, wide);
-
-        result
     }
 }

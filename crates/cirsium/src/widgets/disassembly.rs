@@ -387,11 +387,12 @@ impl RenderOnce for DisassemblyWidget {
 
         let body = match view_mode {
             ViewMode::Linear => {
-                render_linear(view, scroll, id.clone(), on_select, on_context).into_any_element()
+                self::render_linear(view, scroll, id.clone(), on_select, on_context)
+                    .into_any_element()
             }
             ViewMode::Graph => {
                 let theme = Theme::global(cx);
-                render_graph(
+                self::render_graph(
                     &theme,
                     view,
                     id.clone(),
@@ -511,7 +512,11 @@ fn disasm_row(
         );
     }
 
-    row = row.child(instruction_text(theme, &line.tokens, LINEAR_MNEMONIC_W));
+    row = row.child(self::instruction_text(
+        theme,
+        &line.tokens,
+        LINEAR_MNEMONIC_W,
+    ));
 
     if !line.note.is_empty() {
         row = row.child(
@@ -566,7 +571,7 @@ fn render_linear(
         };
         range
             .map(|ix| {
-                disasm_row(
+                self::disasm_row(
                     t,
                     ix,
                     &view.lines[ix],
@@ -652,7 +657,7 @@ fn render_graph(
         },
         move |bounds, _, window, cx| {
             let theme_now = Theme::global(cx);
-            paint_edges(
+            self::paint_edges(
                 window,
                 bounds,
                 offset,
@@ -690,7 +695,7 @@ fn render_graph(
             return;
         }
         if let Some(hover) = &on_edge_hover {
-            let hit = edge_at(&move_edges, e.position, move_origin.get(), offset);
+            let hit = self::edge_at(&move_edges, e.position, move_origin.get(), offset);
             hover(hit, window, cx);
         }
     });
@@ -700,7 +705,8 @@ fn render_graph(
         let jump_blocks = blocks.clone();
         let jump_origin = origin.clone();
         container = container.on_click(move |e, window, cx| {
-            let Some(ei) = edge_at(&jump_edges, e.position(), jump_origin.get(), offset) else {
+            let Some(ei) = self::edge_at(&jump_edges, e.position(), jump_origin.get(), offset)
+            else {
                 return;
             };
             let Some(block) = jump_blocks.get(jump_edges[ei].to) else {
@@ -789,7 +795,11 @@ fn render_graph(
                     |d| d.bg(theme.bg_panel_alt),
                 )
                 .child(gutter)
-                .child(instruction_text(theme, &line.tokens, GRAPH_MNEMONIC_W));
+                .child(self::instruction_text(
+                    theme,
+                    &line.tokens,
+                    GRAPH_MNEMONIC_W,
+                ));
 
             if !line.note.is_empty() {
                 row = row.child(
@@ -847,7 +857,7 @@ fn paint_edges(
             EdgeKind::Normal => theme.accent,
         };
         let (color, width, head_len, head_w) = if hovered == Some(ei) {
-            (brighten(base), 2.75, 10., 5.)
+            (self::brighten(base), 2.75, 10., 5.)
         } else {
             (base, 1.5, 8., 4.)
         };
@@ -913,14 +923,14 @@ fn instruction_text(theme: &Theme, tokens: &[DisasmToken], mnemonic_min: f32) ->
                 .min_w(px(mnemonic_min))
                 .pr_2()
                 .flex_none()
-                .text_color(token_color(theme, mnemonic.kind))
+                .text_color(self::token_color(theme, mnemonic.kind))
                 .child(mnemonic.text.clone()),
         );
     }
     for tok in tokens.iter().skip(1) {
         text = text.child(
             div()
-                .text_color(token_color(theme, tok.kind))
+                .text_color(self::token_color(theme, tok.kind))
                 .child(tok.text.clone()),
         );
     }

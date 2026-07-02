@@ -64,7 +64,7 @@ impl<S: Subscriber> Layer<S> for LogLayer {
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
         self.buffer.push(LogEntry {
-            level: level_view(*metadata.level()),
+            level: self::level_view(*metadata.level()),
             target: metadata.target().to_string().into(),
             message: visitor.message.into(),
         });
@@ -101,7 +101,7 @@ impl TargetFilter {
     fn matches(&self, target: &str) -> bool {
         match self {
             TargetFilter::All => true,
-            TargetFilter::Cores => is_core_target(target),
+            TargetFilter::Cores => self::is_core_target(target),
             TargetFilter::Exact(wanted) => wanted.as_ref() == target,
         }
     }

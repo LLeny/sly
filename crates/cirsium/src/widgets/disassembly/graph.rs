@@ -55,7 +55,7 @@ pub(super) fn edge_at(edges: &[GraphEdge], x: f32, y: f32) -> Option<usize> {
     let mut best: Option<(usize, f32)> = None;
     for (ei, edge) in edges.iter().enumerate() {
         for seg in edge.points.windows(2) {
-            let d = point_segment_dist_sq(x, y, seg[0], seg[1]);
+            let d = self::point_segment_dist_sq(x, y, seg[0], seg[1]);
             if d <= hit_sq && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((ei, d));
             }
@@ -116,7 +116,7 @@ pub(super) fn build(lines: &[DisasmLine]) -> GraphLayout {
 
     for (idx, &start) in leaders.iter().enumerate() {
         let end = leaders.get(idx + 1).copied().unwrap_or(n);
-        blocks.push(block_geometry(lines, start, end));
+        blocks.push(self::block_geometry(lines, start, end));
     }
 
     for (bi, block) in blocks.iter().enumerate() {
@@ -158,9 +158,9 @@ pub(super) fn build(lines: &[DisasmLine]) -> GraphLayout {
         }
     }
 
-    let (layer, max_width) = layout_blocks(&mut blocks, &edges);
+    let (layer, max_width) = self::layout_blocks(&mut blocks, &edges);
 
-    let edges = route_edges(&edges, &blocks, &layer, max_width);
+    let edges = self::route_edges(&edges, &blocks, &layer, max_width);
 
     for block in &mut blocks {
         block.x += MARGIN;
@@ -323,16 +323,16 @@ fn route_edges(
             let lf = layer[f].max(0) as usize;
             let lt = layer[t].max(0) as usize;
             let points = if f == t {
-                self_loop(&blocks[f], e.sx, e.tx)
+                self::self_loop(&blocks[f], e.sx, e.tx)
             } else if is_forward(f, t) {
                 let channel = (rank_bot[lf] + rank_top[lt]) / 2.;
-                forward_route(e.sx, e.sy, e.tx, e.ty, channel)
+                self::forward_route(e.sx, e.sy, e.tx, e.ty, channel)
             } else {
                 let lane = max_width + BACK_LANE_GAP * (1 + back_lane) as f32;
                 back_lane += 1;
                 let out_y = rank_bot[lf] + PORT_STUB;
                 let in_y = rank_top[lt] - PORT_STUB;
-                back_route(e.sx, e.sy, e.tx, e.ty, lane, out_y, in_y)
+                self::back_route(e.sx, e.sy, e.tx, e.ty, lane, out_y, in_y)
             };
             GraphEdge {
                 kind,
@@ -342,7 +342,7 @@ fn route_edges(
         })
         .collect();
 
-    separate_channels(&mut routed);
+    self::separate_channels(&mut routed);
     routed
 }
 

@@ -1,6 +1,6 @@
 use crate::Snes;
 use crate::macros::{mmio_passthrough, register_mmio, register_mmio_raw};
-use crate::mmio::MmioReg;
+use crate::mmio::{MemoryMap, MmioReg};
 
 pub const APU_IO_START: u16 = 0x2140;
 pub const APU_IO_END: u16 = APU_IO_START + 3;
@@ -88,11 +88,11 @@ mmio_passthrough!(NmiTimerEnable => irq.nmitimen);
 mmio_passthrough!(HdmaTransferEnable => dma.hdmaen);
 
 impl MmioReg for DmaTransferStart {
-    fn read(snes: &Snes) -> u8 {
+    fn read<M: MemoryMap>(snes: &Snes<M>) -> u8 {
         snes.dma.mdmaen.raw()
     }
 
-    fn write(snes: &mut Snes, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
         snes.dma.mdmaen = Self::from_raw(value);
         tracing::error!(
             value = format!("{:02X}", value),
@@ -100,7 +100,7 @@ impl MmioReg for DmaTransferStart {
         );
     }
 
-    fn peek(snes: &Snes) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
         snes.dma.mdmaen.raw()
     }
 }

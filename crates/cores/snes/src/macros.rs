@@ -51,15 +51,15 @@ macro_rules! register_mmio_raw {
 macro_rules! mmio_passthrough {
     ($name:ident => $($field:ident).+) => {
         impl crate::mmio::MmioReg for $name {
-            fn read(snes: &crate::Snes) -> u8 {
+            fn read<M: crate::mmio::MemoryMap>(snes: &crate::Snes<M>) -> u8 {
                 snes.$($field).+.raw()
             }
 
-            fn write(snes: &mut crate::Snes, value: u8) {
+            fn write<M: crate::mmio::MemoryMap>(snes: &mut crate::Snes<M>, value: u8) {
                 snes.$($field).+ = Self::from_raw(value);
             }
 
-            fn peek(snes: &crate::Snes) -> u8 {
+            fn peek<M: crate::mmio::MemoryMap>(snes: &crate::Snes<M>) -> u8 {
                 snes.$($field).+.raw()
             }
         }

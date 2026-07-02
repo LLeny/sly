@@ -26,7 +26,7 @@ fn main() {
             .unwrap_or_else(|e| panic!("failed to read No-Intro DAT {dat:?}: {e}"));
 
         writeln!(out, "static TABLE_{i}: &[(u32, &str)] = &[").unwrap();
-        for (crc, name) in parse(&text) {
+        for (crc, name) in self::parse(&text) {
             writeln!(out, "    ({crc:#010X}, {name:?}),").unwrap();
         }
         out.push_str("];\n");
@@ -53,7 +53,7 @@ fn parse(text: &str) -> BTreeMap<u32, String> {
         if let Some(rest) = line.strip_prefix("name \"") {
             current = rest.split('"').next();
         } else if line.starts_with("rom (") {
-            if let (Some(name), Some(crc)) = (current, extract_crc(line)) {
+            if let (Some(name), Some(crc)) = (current, self::extract_crc(line)) {
                 titles.entry(crc).or_insert_with(|| name.to_string());
             }
         }

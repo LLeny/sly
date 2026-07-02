@@ -36,21 +36,21 @@ pub fn title_bar(theme: &Theme, title: impl Into<SharedString>, controls: impl I
 
     #[cfg(not(target_os = "macos"))]
     let trailing = trailing
-        .child(window_button(
+        .child(self::window_button(
             theme,
             "win-min",
             false,
             icon::MINIMIZE,
             |w, _| w.minimize_window(),
         ))
-        .child(window_button(
+        .child(self::window_button(
             theme,
             "win-max",
             false,
             icon::MAXIMIZE,
             |w, _| w.zoom_window(),
         ))
-        .child(window_button(
+        .child(self::window_button(
             theme,
             "win-close",
             true,
@@ -103,7 +103,7 @@ pub fn window_button(
     } else {
         theme.bg_panel_alt
     };
-    icon_button(theme, id, hover_bg, icon_path, move |_, window, cx| {
+    self::icon_button(theme, id, hover_bg, icon_path, move |_, window, cx| {
         action(window, cx)
     })
 }

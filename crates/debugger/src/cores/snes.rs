@@ -62,13 +62,13 @@ impl SnesTarget {
                 .into()
         });
 
-        let mut cartridge = cartridge_view(&cart);
+        let mut cartridge = self::cartridge_view(&cart);
         cartridge.cover = provider.cover_art(&GameRef::new(System::Snes, name));
 
         let segments = vec![
-            mapper_name(&cart).into(),
+            self::mapper_name(&cart).into(),
             cart.region().tv_system().to_string().into(),
-            human_size(cart.rom.len()).into(),
+            self::human_size(cart.rom.len()).into(),
         ];
 
         Ok(Self {
@@ -128,7 +128,7 @@ impl SnesTarget {
             return (access, Some(CPU_SPC));
         }
         if let Some(spc) = spc {
-            merge_access(&mut access, &spc);
+            self::merge_access(&mut access, &spc);
         }
 
         (access, None)
@@ -240,7 +240,7 @@ impl DebugTarget for SnesTarget {
 
         for _ in 0..snes::INSTRUCTIONS_PER_FRAME {
             let (step, fault) = self.step_machine();
-            merge_access(&mut access, &step);
+            self::merge_access(&mut access, &step);
 
             if let Some(cpu) = fault {
                 self.last_access = access;
@@ -269,15 +269,15 @@ impl DebugTarget for SnesTarget {
 
     fn cpu_view(&self, cpu: &CpuId) -> CpuView {
         match cpu.as_str() {
-            CPU_SPC => spc_cpu_view(&self.core.apu.spc700),
-            _ => cpu_view(&self.core.cpu),
+            CPU_SPC => self::spc_cpu_view(&self.core.apu.spc700),
+            _ => self::cpu_view(&self.core.cpu),
         }
     }
 
     fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> Vec<DisasmLine> {
         match cpu.as_str() {
-            CPU_SPC => spc_disasm_view(&self.core.apu, base as u16, count),
-            _ => disasm_view(&self.core, base as u16, count),
+            CPU_SPC => self::spc_disasm_view(&self.core.apu, base as u16, count),
+            _ => self::disasm_view(&self.core, base as u16, count),
         }
     }
 
@@ -286,7 +286,7 @@ impl DebugTarget for SnesTarget {
     }
 
     fn mmio_view(&self) -> MmioView {
-        mmio_view(&self.core)
+        self::mmio_view(&self.core)
     }
 
     fn status(&self, label: &str) -> StatusView {
@@ -294,7 +294,7 @@ impl DebugTarget for SnesTarget {
             system: self.system.clone(),
             session: self.label.clone(),
             segments: self.segments.clone(),
-            state: caption(label, &self.core),
+            state: self::caption(label, &self.core),
             ..Default::default()
         }
     }
@@ -303,7 +303,7 @@ impl DebugTarget for SnesTarget {
         if self.fault == Some(CPU_SPC) {
             return format!("{label} @ SPC700:{:04X}", self.core.apu.spc700.pc).into();
         }
-        caption(label, &self.core)
+        self::caption(label, &self.core)
     }
 
     fn memory_regions(&self) -> Vec<MemoryRegion> {
@@ -415,23 +415,23 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
         let d = snes.disassemble_at(addr);
         let len = d.length.max(1);
         let text = strip_symbol_sigils(&d.text, &SNES_SYNTAX);
-        let tokens = tokenize(&text, mnemonic_kind(d.class), &SNES_SYNTAX);
+        let tokens = tokenize(&text, self::mnemonic_kind(d.class), &SNES_SYNTAX);
         let ea = (addr == pc)
-            .then(|| effective_address(snes, &text))
+            .then(|| snes::cpu::effective_address(snes, addr))
             .flatten();
-        let note = disasm_note(&tokens, &d, bank, ea);
+        let note = self::disasm_note(&tokens, &d, bank, ea);
 
         lines.push(
             DisasmLine::new(
                 addr as u32,
                 format!("{bank:02X}:{addr:04X}"),
-                read_bytes(snes, bank, addr, len),
+                self::read_bytes(snes, bank, addr, len),
                 &*text,
                 tokens,
                 addr == pc,
             )
             .target(d.target)
-            .flow(map_flow(d.flow))
+            .flow(self::map_flow(d.flow))
             .note(note),
         );
 
@@ -475,20 +475,20 @@ fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> Vec<DisasmLine> {
         let (raw, len, target, flow) = spc700::disassemble(apu, addr);
         let len = len.max(1);
         let text = strip_symbol_sigils(&raw, &SPC_SYNTAX);
-        let tokens = tokenize(&text, spc_mnemonic_kind(&text), &SPC_SYNTAX);
+        let tokens = tokenize(&text, self::spc_mnemonic_kind(&text), &SPC_SYNTAX);
         let note = target.map_or(String::new(), |t| format!("→ ${t:04X}"));
 
         lines.push(
             DisasmLine::new(
                 addr as u32,
                 format!("{addr:04X}"),
-                spc_read_bytes(apu, addr, len),
+                self::spc_read_bytes(apu, addr, len),
                 &*text,
                 tokens,
                 addr == pc,
             )
             .target(target.map(|t| t as u32))
-            .flow(map_flow(flow))
+            .flow(self::map_flow(flow))
             .note(note),
         );
 
@@ -499,7 +499,7 @@ fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> Vec<DisasmLine> {
 }
 
 fn spc_read_bytes(apu: &Apu, addr: u16, len: u8) -> String {
-    format_bytes(len, |offset| apu.peek(addr.wrapping_add(offset)))
+    self::format_bytes(len, |offset| apu.peek(addr.wrapping_add(offset)))
 }
 
 fn spc_mnemonic_kind(text: &str) -> TokenKind {
@@ -523,7 +523,7 @@ const SPC_SYNTAX: SyntaxSpec = SyntaxSpec {
 };
 
 fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
-    format_bytes(len, |offset| {
+    self::format_bytes(len, |offset| {
         snes.peek8(Address::new(bank, addr.wrapping_add(offset)))
     })
 }
@@ -562,42 +562,6 @@ fn disasm_note(tokens: &[DisasmToken], d: &Disasm, bank: u8, ea: Option<Address>
     }
 
     parts.join("  ")
-}
-
-fn effective_address(snes: &Snes, text: &str) -> Option<Address> {
-    use snes::cpu::addressing::AddrMode::*;
-
-    let op = text.split_once(' ')?.1.trim();
-    let (base, width) = operand_base(op)?;
-    let (dp, ab) = (base as u8, base as u16);
-
-    let mode = match width {
-        2 if op.ends_with(",s),y") => Isy(dp),
-        2 if op.ends_with(",x)") => Idx(dp),
-        2 if op.ends_with("),y") => Idy(dp),
-        2 if op.ends_with("],y") => Idly(dp),
-        2 if op.ends_with(",s") => Sr(dp),
-        2 if op.ends_with(']') => Idl(dp),
-        2 if op.ends_with(')') => Idp(dp),
-        2 if op.ends_with(",x") => DpX(dp),
-        2 if op.ends_with(",y") => DpY(dp),
-        4 if op.ends_with(",x") => AbsX(ab),
-        4 if op.ends_with(",y") => AbsY(ab),
-        6 if op.ends_with(",x") => AlX(base),
-        _ => return None,
-    };
-
-    Some(snes::cpu::addressing::resolve(snes, mode))
-}
-
-fn operand_base(op: &str) -> Option<(u32, usize)> {
-    if let Some((_, rest)) = op.split_once('$') {
-        let hex: String = rest.chars().take_while(char::is_ascii_hexdigit).collect();
-        return Some((u32::from_str_radix(&hex, 16).ok()?, hex.len()));
-    }
-
-    op.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-        .find_map(|tok| Some((snes::mmio::address_of(tok)? as u32, 4)))
 }
 
 fn mnemonic_kind(class: InstructionClass) -> TokenKind {
@@ -651,7 +615,7 @@ fn mmio_field_views(fields: &[snes::mmio::FieldInfo], parent: u32) -> Vec<MmioFi
     ordered.sort_by_key(|f| f.offset);
     ordered
         .into_iter()
-        .map(|f| mmio_field_view(f, parent))
+        .map(|f| self::mmio_field_view(f, parent))
         .collect()
 }
 
@@ -689,7 +653,7 @@ fn mmio_field_view(field: &snes::mmio::FieldInfo, parent: u32) -> MmioFieldView 
                 .unwrap_or_else(fmt_hex);
             (display, false, Vec::new())
         }
-        FieldKind::Struct(fields) => (fmt_hex(), false, mmio_field_views(fields, value)),
+        FieldKind::Struct(fields) => (fmt_hex(), false, self::mmio_field_views(fields, value)),
     };
 
     MmioFieldView {
@@ -704,13 +668,13 @@ fn mmio_field_view(field: &snes::mmio::FieldInfo, parent: u32) -> MmioFieldView 
 
 fn mmio_view(core: &Snes) -> MmioView {
     let mut symbols: Vec<_> = snes::mmio::symbols().collect();
-    symbols.sort_by_key(|s| (mmio_component(s.addr).0, s.addr));
+    symbols.sort_by_key(|s| (self::mmio_component(s.addr).0, s.addr));
 
     let mut groups: Vec<MmioGroup> = Vec::new();
     for sym in symbols {
-        let (_, component) = mmio_component(sym.addr);
-        let value = read_mmio(core, sym.addr, sym.bits);
-        let fields = mmio_field_views(sym.fields, value);
+        let (_, component) = self::mmio_component(sym.addr);
+        let value = self::read_mmio(core, sym.addr, sym.bits);
+        let fields = self::mmio_field_views(sym.fields, value);
 
         let reg = MmioRegisterView {
             id: format!("mmio-{:04X}", sym.addr).into(),
@@ -746,10 +710,10 @@ fn cartridge_view(cart: &Cartridge) -> CartridgeView {
     CartridgeView {
         title: cart.title().into(),
         fields: vec![
-            CartridgeField::new("Mapper", mapper_name(cart)).accented(),
+            CartridgeField::new("Mapper", self::mapper_name(cart)).accented(),
             CartridgeField::new("Speed", speed),
             CartridgeField::new("Region", cart.region().to_string()),
-            CartridgeField::new("ROM size", human_size(cart.rom.len())),
+            CartridgeField::new("ROM size", self::human_size(cart.rom.len())),
             CartridgeField::new("Header", format!("${:06X}", cart.header_offset())),
         ],
         cover: None,

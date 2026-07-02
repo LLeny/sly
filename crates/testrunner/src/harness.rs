@@ -7,35 +7,51 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Regs {
     pub pc: u16,
-    pub sp: u8,
-    pub a: u8,
-    pub x: u8,
-    pub y: u8,
-    pub psw: u8,
+    pub s: u16,
+    pub a: u16,
+    pub x: u16,
+    pub y: u16,
+    pub p: u8,
+    pub dbr: u8,
+    pub d: u16,
+    pub pbr: u8,
+    pub e: u8,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct State {
     pub pc: u16,
-    #[serde(alias = "s")]
-    pub sp: u8,
-    pub a: u8,
-    pub x: u8,
-    pub y: u8,
-    #[serde(alias = "p")]
-    pub psw: u8,
-    pub ram: Vec<(u16, u8)>,
+    #[serde(alias = "sp")]
+    pub s: u16,
+    pub a: u16,
+    pub x: u16,
+    pub y: u16,
+    #[serde(alias = "psw")]
+    pub p: u8,
+    #[serde(default)]
+    pub dbr: u8,
+    #[serde(default)]
+    pub d: u16,
+    #[serde(default)]
+    pub pbr: u8,
+    #[serde(default)]
+    pub e: u8,
+    pub ram: Vec<(u32, u8)>,
 }
 
 impl State {
     pub fn regs(&self) -> Regs {
         Regs {
             pc: self.pc,
-            sp: self.sp,
+            s: self.s,
             a: self.a,
             x: self.x,
             y: self.y,
-            psw: self.psw,
+            p: self.p,
+            dbr: self.dbr,
+            d: self.d,
+            pbr: self.pbr,
+            e: self.e,
         }
     }
 }
@@ -52,11 +68,7 @@ pub trait TestCore {
     fn load(&mut self, initial: &State);
     fn step(&mut self);
     fn regs(&self) -> Regs;
-    fn peek(&self, addr: u16) -> u8;
-
-    fn ignore_flags(&self) -> u8 {
-        0
-    }
+    fn peek(&self, addr: u32) -> u8;
 }
 
 #[derive(Debug)]
@@ -101,7 +113,6 @@ pub fn run_file(
     let tests: Vec<Test> =
         serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))?;
 
-    let ignore = core.ignore_flags();
     let mut passed = 0;
 
     for test in tests.iter().take(limit.unwrap_or(usize::MAX)) {
@@ -115,10 +126,10 @@ pub fn run_file(
             return Ok(OpReport { passed, outcome });
         }
 
-        if state_matches(core, &test.expected, ignore) {
+        if self::state_matches(core, &test.expected) {
             passed += 1;
         } else {
-            let fields = compare(core, &test.expected, ignore);
+            let fields = self::compare(core, &test.expected);
             let outcome = Outcome::Failed {
                 test: test.name.clone(),
                 fields,
@@ -133,19 +144,13 @@ pub fn run_file(
     })
 }
 
-fn mask_regs(mut r: Regs, ignore: u8) -> Regs {
-    r.psw &= !ignore;
-    r
+fn state_matches(core: &dyn TestCore, want: &State) -> bool {
+    core.regs() == want.regs() && want.ram.iter().all(|&(addr, val)| core.peek(addr) == val)
 }
 
-fn state_matches(core: &dyn TestCore, want: &State, ignore: u8) -> bool {
-    mask_regs(core.regs(), ignore) == mask_regs(want.regs(), ignore)
-        && want.ram.iter().all(|&(addr, val)| core.peek(addr) == val)
-}
-
-fn compare(core: &dyn TestCore, want: &State, ignore: u8) -> Vec<Field> {
-    let got = mask_regs(core.regs(), ignore);
-    let expect = mask_regs(want.regs(), ignore);
+fn compare(core: &dyn TestCore, want: &State) -> Vec<Field> {
+    let got = core.regs();
+    let expect = want.regs();
 
     let reg = |name: &str, got: u64, want: u64, bytes| Field {
         name: name.into(),
@@ -156,16 +161,20 @@ fn compare(core: &dyn TestCore, want: &State, ignore: u8) -> Vec<Field> {
 
     let mut fields = vec![
         reg("pc", got.pc as u64, expect.pc as u64, 2),
-        reg("sp", got.sp as u64, expect.sp as u64, 1),
-        reg("a", got.a as u64, expect.a as u64, 1),
-        reg("x", got.x as u64, expect.x as u64, 1),
-        reg("y", got.y as u64, expect.y as u64, 1),
-        reg("psw", got.psw as u64, expect.psw as u64, 1),
+        reg("s", got.s as u64, expect.s as u64, 2),
+        reg("a", got.a as u64, expect.a as u64, 2),
+        reg("x", got.x as u64, expect.x as u64, 2),
+        reg("y", got.y as u64, expect.y as u64, 2),
+        reg("p", got.p as u64, expect.p as u64, 1),
+        reg("dbr", got.dbr as u64, expect.dbr as u64, 1),
+        reg("d", got.d as u64, expect.d as u64, 2),
+        reg("pbr", got.pbr as u64, expect.pbr as u64, 1),
+        reg("e", got.e as u64, expect.e as u64, 1),
     ];
 
     for &(addr, want) in &want.ram {
         fields.push(Field {
-            name: format!("mem[{addr:#06X}]"),
+            name: format!("mem[{addr:#08X}]"),
             got: core.peek(addr) as u64,
             want: want as u64,
             bytes: 1,

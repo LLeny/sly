@@ -141,7 +141,7 @@ impl RenderOnce for CpuWidget {
                     div()
                         .flex()
                         .gap_1()
-                        .children(row.iter().map(|r| reg_cell(t, &self.id, r)))
+                        .children(row.iter().map(|r| self::reg_cell(t, &self.id, r)))
                 }));
 
         let flags = div()

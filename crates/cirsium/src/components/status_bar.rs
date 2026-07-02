@@ -31,7 +31,7 @@ pub fn status_bar(theme: &Theme, status: &StatusView) -> Div {
         .flex()
         .items_center()
         .gap_3()
-        .child(console_pill(theme, status.system.clone()));
+        .child(self::console_pill(theme, status.system.clone()));
     if !status.session.is_empty() {
         left = left.child(
             div()
