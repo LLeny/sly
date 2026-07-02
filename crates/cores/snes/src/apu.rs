@@ -10,6 +10,15 @@ mod symbol;
 pub use map::{ApuMap, HardwareMap, Region};
 pub use symbol::{is_symbol, symbol, symbols};
 
+pub const APU_CLOCK: u64 = 24_576_000;
+pub const SDSP_CLOCK: u64 = APU_CLOCK / 8;
+pub const SPC700_CLOCK: u64 = APU_CLOCK / 24;
+
+pub const SPC_TIMER01_DIVIDER: u64 = 128;
+pub const SPC_TIMER2_DIVIDER: u64 = 16;
+
+pub const SNES_CYCLES_PER_SPC700_CYCLE: u64 = 21;
+
 const IPL_ROM: &[u8] = include_bytes!("../assets/spc700.rom");
 
 pub struct Apu<M: ApuMap = HardwareMap> {

@@ -98,7 +98,7 @@ impl<M: MemoryMap> Scheduler<M> {
 pub(crate) fn spc700_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: u64) {
     crate::apu::spc700::step(&mut snes.apu);
     snes.scheduler.schedule_event(
-        deadline + crate::apu::spc700::MASTER_CLOCK_DIVIDER,
+        deadline + crate::apu::SNES_CYCLES_PER_SPC700_CYCLE,
         spc700_tick,
     );
 }

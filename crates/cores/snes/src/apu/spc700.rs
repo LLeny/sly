@@ -10,8 +10,6 @@ use crate::apu::map::ApuMap;
 use crate::cpu::disasm::FlowKind;
 use interpreter::Interpreter;
 
-pub const MASTER_CLOCK_DIVIDER: u64 = 24;
-
 struct Reader<'a, M: ApuMap> {
     apu: &'a Apu<M>,
 }
