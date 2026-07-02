@@ -1,18 +1,10 @@
 use super::addressing::resolve;
-use super::alu::{AluResult, Width, adc_bcd8, add_binary, bcd16, sbc_bcd8};
 use super::decoder::{Form, Mnemonic};
 use super::operand::Arg;
 use crate::Snes;
+use crate::alu::{AluResult, ShiftOp, Width, adc_bcd8, add_binary, bcd16, sbc_bcd8};
 use crate::cpu::{Cpu, Flags};
 use crate::mmio::{Address, MemoryMap};
-
-#[derive(Clone, Copy)]
-enum ShiftOp {
-    Asl,
-    Lsr,
-    Rol,
-    Ror,
-}
 
 #[derive(Clone, Copy)]
 enum StackWrap {
@@ -458,20 +450,8 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
     }
 
     fn do_shift(&mut self, op: ShiftOp, value: u16, wide: bool) -> u16 {
-        let mask = wide.mask();
-        let msb = wide.sign_bit();
-        let value = value & mask;
-        let carry_in = self.snes.cpu.flags.carry() as u16;
-
-        let (result, carry_out) = match op {
-            ShiftOp::Asl => ((value << 1) & mask, value & msb != 0),
-            ShiftOp::Lsr => (value >> 1, value & 1 != 0),
-            ShiftOp::Rol => (((value << 1) | carry_in) & mask, value & msb != 0),
-            ShiftOp::Ror => {
-                let hi = if carry_in != 0 { msb } else { 0 };
-                ((value >> 1) | hi, value & 1 != 0)
-            }
-        };
+        let carry_in = self.snes.cpu.flags.carry();
+        let (result, carry_out) = crate::alu::shift(op, value, carry_in, wide);
 
         self.snes.cpu.flags.set_carry(carry_out);
         self.set_nz(result, wide);

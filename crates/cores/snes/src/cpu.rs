@@ -1,5 +1,4 @@
 mod addressing;
-mod alu;
 mod decoder;
 pub mod disasm;
 mod interpreter;

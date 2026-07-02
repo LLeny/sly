@@ -1,5 +1,5 @@
-use snes::apu::Apu;
 use snes::apu::spc700::{self, Flags as PswFlags};
+use snes::apu::{Apu, ApuMap, Region};
 use snes::cpu::Flags;
 use snes::mmio::{Address, AddressSpace};
 use snes::{Cartridge, MemoryMap, Mmio, Snes};
@@ -74,19 +74,28 @@ impl TestCore for SnesCpu {
     }
 }
 
+struct FlatRam;
+
+impl ApuMap for FlatRam {
+    fn region(&self, _addr: u16) -> Region {
+        Region::Ram
+    }
+}
+
 pub struct Spc700 {
-    apu: Apu,
+    apu: Apu<FlatRam>,
 }
 
 impl Spc700 {
     pub fn new() -> Self {
-        Self { apu: Apu::new() }
+        Self {
+            apu: Apu::with_map(FlatRam),
+        }
     }
 }
 
 impl TestCore for Spc700 {
     fn load(&mut self, initial: &State) {
-        self.apu = Apu::new();
         for &(addr, value) in &initial.ram {
             self.apu.write(addr as u16, value);
         }

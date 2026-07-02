@@ -22,6 +22,31 @@ impl Width for bool {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum ShiftOp {
+    Asl,
+    Lsr,
+    Rol,
+    Ror,
+}
+
+pub(crate) fn shift(op: ShiftOp, value: u16, carry_in: bool, wide: bool) -> (u16, bool) {
+    let mask = wide.mask();
+    let msb = wide.sign_bit();
+    let value = value & mask;
+    let carry = carry_in as u16;
+
+    match op {
+        ShiftOp::Asl => ((value << 1) & mask, value & msb != 0),
+        ShiftOp::Lsr => (value >> 1, value & 1 != 0),
+        ShiftOp::Rol => (((value << 1) | carry) & mask, value & msb != 0),
+        ShiftOp::Ror => {
+            let hi = if carry != 0 { msb } else { 0 };
+            ((value >> 1) | hi, value & 1 != 0)
+        }
+    }
+}
+
 pub(crate) fn adc_bcd8(a: u16, b: u16, carry_in: bool) -> AluResult {
     let a = a & 0xff;
     let b = b & 0xff;

@@ -2,15 +2,19 @@ use crate::apu::regs::Control;
 #[cfg(feature = "debug")]
 use crate::mmio::{AccessTracker, MemKind, MemoryAccess};
 
+mod map;
 mod regs;
 pub mod spc700;
 mod symbol;
 
+pub use map::{ApuMap, HardwareMap, Region};
 pub use symbol::{is_symbol, symbol};
 
 const IPL_ROM: &[u8] = include_bytes!("../assets/spc700.rom");
 
-pub struct Apu {
+pub struct Apu<M: ApuMap = HardwareMap> {
+    map: M,
+
     // Registers ($00F0-$00FF except $F8-$F9)
     unknown: u8,             // $F0
     control: Control,        // $F1 (W)
@@ -31,11 +35,18 @@ pub struct Apu {
     pub access: AccessTracker,
 }
 
-impl Apu {
+impl Apu<HardwareMap> {
     pub fn new() -> Self {
+        Self::with_map(HardwareMap)
+    }
+}
+
+impl<M: ApuMap> Apu<M> {
+    pub fn with_map(map: M) -> Self {
         let reset_vector = u16::from_le_bytes([IPL_ROM[0x3E], IPL_ROM[0x3F]]);
 
         Self {
+            map,
             unknown: 0,
             control: Control::default(),
             dsp_addr: 0,
@@ -56,9 +67,10 @@ impl Apu {
         #[cfg(feature = "debug")]
         self.access.record((MemKind::Spc, addr as u32), false);
 
-        match addr {
-            0x00F0..=0x00F7 | 0x00FA..=0x00FF => self.read_io(addr as u8),
-            _ => self.peek(addr),
+        match self.map.region(addr) {
+            Region::Register => self.read_io(addr as u8),
+            Region::Ipl if self.control.ipl_rom_enable() => IPL_ROM[(addr - 0xFFC0) as usize],
+            _ => self.ram[addr as usize],
         }
     }
 
@@ -80,9 +92,9 @@ impl Apu {
     }
 
     pub fn peek(&self, addr: u16) -> u8 {
-        match addr {
-            0x00F0..=0x00F7 | 0x00FA..=0x00FF => self.peek_io(addr as u8),
-            0xFFC0..=0xFFFF if self.control.ipl_rom_enable() => IPL_ROM[(addr - 0xFFC0) as usize],
+        match self.map.region(addr) {
+            Region::Register => self.peek_io(addr as u8),
+            Region::Ipl if self.control.ipl_rom_enable() => IPL_ROM[(addr - 0xFFC0) as usize],
             _ => self.ram[addr as usize],
         }
     }
@@ -90,8 +102,9 @@ impl Apu {
     pub fn write(&mut self, addr: u16, value: u8) {
         #[cfg(feature = "debug")]
         self.access.record((MemKind::Spc, addr as u32), true);
-        match addr {
-            0x00F0..=0x00F7 | 0x00FA..=0x00FF => self.write_io(addr as u8, value),
+
+        match self.map.region(addr) {
+            Region::Register => self.write_io(addr as u8, value),
             _ => self.ram[addr as usize] = value,
         }
     }

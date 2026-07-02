@@ -6,14 +6,15 @@ mod interpreter;
 pub use regs::{Flags, Spc700};
 
 use crate::apu::Apu;
+use crate::apu::map::ApuMap;
 use crate::cpu::disasm::FlowKind;
 use interpreter::Interpreter;
 
-struct Reader<'a> {
-    apu: &'a Apu,
+struct Reader<'a, M: ApuMap> {
+    apu: &'a Apu<M>,
 }
 
-impl decoder::DisasmCtx for Reader<'_> {
+impl<M: ApuMap> decoder::DisasmCtx for Reader<'_, M> {
     fn read_u8(&self, addr: u64) -> u8 {
         self.apu.peek(addr as u16)
     }
@@ -23,7 +24,7 @@ impl decoder::DisasmCtx for Reader<'_> {
     }
 }
 
-pub fn step(apu: &mut Apu) {
+pub fn step<M: ApuMap>(apu: &mut Apu<M>) {
     let pc = apu.spc700.pc;
     let (inst, len) = {
         let reader = Reader { apu: &*apu };
@@ -35,7 +36,7 @@ pub fn step(apu: &mut Apu) {
     apu.spc700.pc = view.next_pc();
 }
 
-pub fn disassemble(apu: &Apu, pc: u16) -> (String, u8, Option<u16>, FlowKind) {
+pub fn disassemble<M: ApuMap>(apu: &Apu<M>, pc: u16) -> (String, u8, Option<u16>, FlowKind) {
     let reader = Reader { apu };
     let (inst, len) = decoder::decode(pc as u64, &reader);
     let text = inst.render(pc as u64, &reader);

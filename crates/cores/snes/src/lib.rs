@@ -1,3 +1,4 @@
+mod alu;
 pub mod apu;
 pub mod cartridge;
 pub mod cpu;
