@@ -1,6 +1,7 @@
 use crate::apu::regs::Control;
 #[cfg(feature = "debug")]
 use crate::mmio::{AccessTracker, MemKind, MemoryAccess};
+use crate::{MemoryMap, Snes};
 
 mod map;
 mod regs;
@@ -19,6 +20,9 @@ pub const SPC_TIMER2_DIVIDER: u64 = 16;
 
 pub const SNES_CYCLES_PER_SPC700_CYCLE: u64 = 21;
 
+pub const TIMER01_PERIOD: u64 = SPC_TIMER01_DIVIDER * SNES_CYCLES_PER_SPC700_CYCLE;
+pub const TIMER2_PERIOD: u64 = SPC_TIMER2_DIVIDER * SNES_CYCLES_PER_SPC700_CYCLE;
+
 const IPL_ROM: &[u8] = include_bytes!("../assets/spc700.rom");
 
 pub struct Apu<M: ApuMap = HardwareMap> {
@@ -33,6 +37,8 @@ pub struct Apu<M: ApuMap = HardwareMap> {
     apu_to_cpu: [u8; 4],     // written by SPC $F4-$F7, read by main CPU $2140-$2143
     timer_settings: [u8; 3], // $FA-$FC on write
     timer_counters: [u8; 3], // $FD-$FF on read
+
+    internal_timers: [u16; 3], // internal counters for timers 0, 1 and 2
 
     // 64 KB RAM
     ram: [u8; 0x10000],
@@ -64,9 +70,9 @@ impl<M: ApuMap> Apu<M> {
             apu_to_cpu: [0; 4],
             timer_settings: [0; 3],
             timer_counters: [0; 3],
+            internal_timers: [0; 3],
             ram: [0; 0x10000],
             spc700: spc700::Spc700::new(reset_vector),
-
             #[cfg(feature = "debug")]
             access: AccessTracker::default(),
         }
@@ -157,15 +163,34 @@ impl<M: ApuMap> Apu<M> {
         match reg {
             0xF0 => self.unknown = value,
             0xF1 => {
-                self.control = Control::from_raw(value);
-                if self.control.clear_cpuio0() {
+                let ctrl = Control::from_raw(value);
+
+                if ctrl.clear_cpuio0() {
                     self.cpu_to_apu[0] = 0;
                     self.cpu_to_apu[1] = 0;
                 }
-                if self.control.clear_cpuio1() {
+
+                if ctrl.clear_cpuio1() {
                     self.cpu_to_apu[2] = 0;
                     self.cpu_to_apu[3] = 0;
                 }
+
+                if !self.control.enable_timer0() && ctrl.enable_timer0() {
+                    self.timer_counters[0] = 0;
+                    self.internal_timers[0] = 0;
+                }
+
+                if !self.control.enable_timer1() && ctrl.enable_timer1() {
+                    self.timer_counters[1] = 0;
+                    self.internal_timers[1] = 0;
+                }
+
+                if !self.control.enable_timer2() && ctrl.enable_timer2() {
+                    self.timer_counters[2] = 0;
+                    self.internal_timers[2] = 0;
+                }
+
+                self.control = ctrl;
             }
             0xF2 => self.dsp_addr = value,
             0xF3 => self.dsp_data = value,
@@ -180,4 +205,41 @@ impl<M: ApuMap> Apu<M> {
             }
         }
     }
+}
+
+pub(crate) fn timer01_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: u64) {
+    if snes.apu.control.enable_timer0() {
+        snes.apu.internal_timers[0] = snes.apu.internal_timers[0].wrapping_add(1);
+
+        if snes.apu.internal_timers[0] > snes.apu.timer_settings[0] as u16 {
+            snes.apu.internal_timers[0] = 0;
+            snes.apu.timer_counters[0] = snes.apu.timer_counters[0].wrapping_add(1);
+        }
+    }
+
+    if snes.apu.control.enable_timer1() {
+        snes.apu.internal_timers[1] = snes.apu.internal_timers[1].wrapping_add(1);
+
+        if snes.apu.internal_timers[1] > snes.apu.timer_settings[1] as u16 {
+            snes.apu.internal_timers[1] = 0;
+            snes.apu.timer_counters[1] = snes.apu.timer_counters[1].wrapping_add(1);
+        }
+    }
+
+    snes.scheduler
+        .schedule_event(deadline + TIMER01_PERIOD, self::timer01_tick);
+}
+
+pub(crate) fn timer2_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: u64) {
+    if snes.apu.control.enable_timer2() {
+        snes.apu.internal_timers[2] = snes.apu.internal_timers[2].wrapping_add(1);
+
+        if snes.apu.internal_timers[2] > snes.apu.timer_settings[2] as u16 {
+            snes.apu.internal_timers[2] = 0;
+            snes.apu.timer_counters[2] = snes.apu.timer_counters[2].wrapping_add(1);
+        }
+    }
+
+    snes.scheduler
+        .schedule_event(deadline + TIMER2_PERIOD, self::timer2_tick);
 }

@@ -64,9 +64,17 @@ impl<M: MemoryMap + 'static> Snes<M> {
         self.irq = Irq::default();
         self.dma = Dma::default();
         self.apu = Apu::new();
+
         self.scheduler = Scheduler::new(tv_system);
         self.scheduler
             .schedule_event(apu::SNES_CYCLES_PER_SPC700_CYCLE, scheduler::spc700_tick);
+
+        // TODO: Could schedule these when enabled?
+        self.scheduler
+            .schedule_event(apu::TIMER01_PERIOD, apu::timer01_tick);
+        self.scheduler
+            .schedule_event(apu::TIMER2_PERIOD, apu::timer2_tick);
+
         self.mmu.reset();
         self.cpu.pc = self.read16(Address::new(BANK_ZERO, RESET_VECTOR_ADDR));
     }
