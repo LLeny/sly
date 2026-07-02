@@ -8,7 +8,7 @@ pub mod spc700;
 mod symbol;
 
 pub use map::{ApuMap, HardwareMap, Region};
-pub use symbol::{is_symbol, symbol};
+pub use symbol::{is_symbol, symbol, symbols};
 
 const IPL_ROM: &[u8] = include_bytes!("../assets/spc700.rom");
 
@@ -67,6 +67,8 @@ impl<M: ApuMap> Apu<M> {
         #[cfg(feature = "debug")]
         self.access.record((MemKind::Spc, addr as u32), false);
 
+        tracing::trace!(addr = format!("{:04X}", addr), "APU read");
+
         match self.map.region(addr) {
             Region::Register => self.read_io(addr as u8),
             Region::Ipl if self.control.ipl_rom_enable() => IPL_ROM[(addr - 0xFFC0) as usize],
@@ -103,12 +105,19 @@ impl<M: ApuMap> Apu<M> {
         #[cfg(feature = "debug")]
         self.access.record((MemKind::Spc, addr as u32), true);
 
+        tracing::trace!(
+            addr = format!("{:04X}", addr),
+            value = format!("{:02X}", value),
+            "APU write"
+        );
+
         match self.map.region(addr) {
             Region::Register => self.write_io(addr as u8, value),
             _ => self.ram[addr as usize] = value,
         }
     }
 
+    /// Sideeffect free & allows reading write only registers.
     fn peek_io(&self, reg: u8) -> u8 {
         match reg {
             0xF0 => self.unknown,
@@ -116,6 +125,7 @@ impl<M: ApuMap> Apu<M> {
             0xF2 => self.dsp_addr,
             0xF3 => self.dsp_data,
             0xF4..=0xF7 => self.cpu_to_apu[(reg - 0xF4) as usize],
+            0xFA..=0xFC => self.timer_settings[(reg - 0xFA) as usize],
             0xFD..=0xFF => self.timer_counters[(reg - 0xFD) as usize],
             _ => 0,
         }

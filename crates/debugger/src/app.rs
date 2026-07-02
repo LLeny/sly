@@ -541,6 +541,11 @@ impl Debugger {
         cx.notify();
     }
 
+    fn log_toggle_dedup(&mut self, cx: &mut Context<Self>) {
+        self.logs.toggle_dedup();
+        cx.notify();
+    }
+
     fn on_log_filter_event(
         &mut self,
         input: Entity<TextInput>,
@@ -847,6 +852,15 @@ impl Render for Debugger {
                     "Show bytes",
                     CheckboxSize::Small,
                     cx.listener(|this, _, _, cx| this.toggle_bytes(cx)),
+                ))
+                .child(div().text_xs().text_color(t.text_muted).child("LOG"))
+                .child(checkbox(
+                    t,
+                    "set-log-dedup",
+                    self.logs.dedup(),
+                    "Drop repeated logs",
+                    CheckboxSize::Small,
+                    cx.listener(|this, _, _, cx| this.log_toggle_dedup(cx)),
                 ));
             popover(
                 t,

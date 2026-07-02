@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cirsium::components::ComboOption;
@@ -16,21 +17,36 @@ const CORE_CRATES: &[&str] = &["snes"];
 #[derive(Clone)]
 pub struct LogBuffer {
     inner: Arc<Mutex<VecDeque<LogEntry>>>,
+    dedup: Arc<AtomicBool>,
 }
 
 impl LogBuffer {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(VecDeque::with_capacity(CAPACITY))),
+            dedup: Arc::new(AtomicBool::new(false)),
         }
     }
 
     fn push(&self, entry: LogEntry) {
         let mut entries = self.inner.lock().unwrap();
+        if self.dedup.load(Ordering::Relaxed) && entries.back() == Some(&entry) {
+            return;
+        }
+
         while entries.len() >= CAPACITY {
             entries.pop_front();
         }
+
         entries.push_back(entry);
+    }
+
+    fn dedup(&self) -> bool {
+        self.dedup.load(Ordering::Relaxed)
+    }
+
+    fn toggle_dedup(&self) {
+        self.dedup.fetch_xor(true, Ordering::Relaxed);
     }
 
     fn clear(&self) {
@@ -150,7 +166,7 @@ impl Logs {
         let needle = self.message.trim().to_lowercase();
         let min_rank = self.level.map(LogLevel::rank);
         let target = &self.target;
-        let entries = self.buffer.with_entries(|entries| {
+        let mut entries = self.buffer.with_entries(|entries| {
             entries
                 .iter()
                 .filter(|entry| {
@@ -161,6 +177,10 @@ impl Logs {
                 .cloned()
                 .collect::<Vec<LogEntry>>()
         });
+
+        if self.buffer.dedup() {
+            entries.dedup();
+        }
 
         LogView { entries }
     }
@@ -227,6 +247,14 @@ impl Logs {
 
     pub fn set_message(&mut self, text: String) {
         self.message = text;
+    }
+
+    pub fn dedup(&self) -> bool {
+        self.buffer.dedup()
+    }
+
+    pub fn toggle_dedup(&mut self) {
+        self.buffer.toggle_dedup();
     }
 
     pub fn open_target_combo(&mut self, position: Point<Pixels>) {

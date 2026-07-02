@@ -83,7 +83,7 @@ impl LogLevel {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct LogEntry {
     pub level: LogLevel,
     /// Full tracing target (module path), e.g. `snes::cpu::interpreter`.

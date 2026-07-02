@@ -674,17 +674,7 @@ fn mmio_view(core: &Snes) -> MmioView {
     for sym in symbols {
         let (_, component) = self::mmio_component(sym.addr);
         let value = self::read_mmio(core, sym.addr, sym.bits);
-        let fields = self::mmio_field_views(sym.fields, value);
-
-        let reg = MmioRegisterView {
-            id: format!("mmio-{:04X}", sym.addr).into(),
-            name: sym.name.into(),
-            addr: format!("${:04X}", sym.addr).into(),
-            value,
-            bits: sym.bits,
-            highlight: Highlight::None,
-            fields,
-        };
+        let reg = self::mmio_register("mmio", 4, sym, value);
 
         match groups.last_mut() {
             Some(group) if group.name == component => group.registers.push(reg),
@@ -695,7 +685,36 @@ fn mmio_view(core: &Snes) -> MmioView {
         }
     }
 
+    let spc = MmioGroup {
+        name: "SPC".into(),
+        registers: snes::apu::symbols()
+            .map(|sym| self::mmio_register("spc", 2, sym, core.apu.peek(sym.addr) as u32))
+            .collect(),
+    };
+    let after_apu = groups
+        .iter()
+        .position(|g| g.name == "APU")
+        .map_or(groups.len(), |ix| ix + 1);
+    groups.insert(after_apu, spc);
+
     MmioView { groups }
+}
+
+fn mmio_register(
+    id_prefix: &str,
+    addr_width: usize,
+    sym: &snes::mmio::MmioSymbol,
+    value: u32,
+) -> MmioRegisterView {
+    MmioRegisterView {
+        id: format!("{id_prefix}-{:0width$X}", sym.addr, width = addr_width).into(),
+        name: sym.name.into(),
+        addr: format!("${:0width$X}", sym.addr, width = addr_width).into(),
+        value,
+        bits: sym.bits,
+        highlight: Highlight::None,
+        fields: self::mmio_field_views(sym.fields, value),
+    }
 }
 
 fn cartridge_view(cart: &Cartridge) -> CartridgeView {
