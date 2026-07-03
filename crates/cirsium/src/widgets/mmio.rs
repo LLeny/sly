@@ -49,6 +49,50 @@ pub struct MmioView {
     pub groups: Vec<MmioGroup>,
 }
 
+impl From<debugger_model::MmioFieldView> for MmioFieldView {
+    fn from(field: debugger_model::MmioFieldView) -> Self {
+        Self {
+            name: field.name.into(),
+            bit_label: field.bit_label.into(),
+            value: field.value,
+            display: field.display.into(),
+            is_bool: field.is_bool,
+            children: field.children.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<debugger_model::MmioRegisterView> for MmioRegisterView {
+    fn from(reg: debugger_model::MmioRegisterView) -> Self {
+        Self {
+            id: reg.id.into(),
+            name: reg.name.into(),
+            addr: reg.addr.into(),
+            value: reg.value,
+            bits: reg.bits,
+            highlight: reg.highlight,
+            fields: reg.fields.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<debugger_model::MmioGroup> for MmioGroup {
+    fn from(group: debugger_model::MmioGroup) -> Self {
+        Self {
+            name: group.name.into(),
+            registers: group.registers.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<debugger_model::MmioView> for MmioView {
+    fn from(view: debugger_model::MmioView) -> Self {
+        Self {
+            groups: view.groups.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 impl MmioView {
     fn register_count(&self) -> usize {
         self.groups.iter().map(|g| g.registers.len()).sum()

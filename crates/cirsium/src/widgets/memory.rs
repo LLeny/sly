@@ -24,30 +24,6 @@ type ContextCallback = Rc<dyn Fn(u32, Point<Pixels>, &mut Window, &mut App) + 's
 pub type RowProvider = Rc<dyn Fn(Range<usize>, &mut App) -> Vec<MemoryRow> + 'static>;
 
 #[derive(Clone)]
-pub struct MemoryRegion {
-    pub id: SharedString,
-    pub name: SharedString,
-    pub base: u32,
-    pub size: u32,
-}
-
-impl MemoryRegion {
-    pub fn new(
-        id: impl Into<SharedString>,
-        name: impl Into<SharedString>,
-        base: u32,
-        size: u32,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            name: name.into(),
-            base,
-            size,
-        }
-    }
-}
-
-#[derive(Clone)]
 pub struct MemoryCell {
     pub value: u8,
     pub highlight: Highlight,

@@ -123,9 +123,13 @@ impl RegisterView {
     }
 
     pub fn hex(&self) -> String {
-        let width = (self.bits as usize).div_ceil(4);
-        format!("${:0width$X}", self.value, width = width)
+        self::hex(self.value, self.bits)
     }
+}
+
+pub fn hex(value: u32, bits: u8) -> String {
+    let width = (bits as usize).div_ceil(4);
+    format!("${value:0width$X}")
 }
 
 #[derive(Clone)]
@@ -158,4 +162,92 @@ impl Default for CpuView {
             flags: Vec::new(),
         }
     }
+}
+
+#[derive(Clone)]
+pub struct CartridgeField {
+    pub label: Arc<str>,
+    pub value: Arc<str>,
+    pub accent: bool,
+}
+
+impl CartridgeField {
+    pub fn new(label: impl Into<Arc<str>>, value: impl Into<Arc<str>>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            accent: false,
+        }
+    }
+
+    pub fn accented(mut self) -> Self {
+        self.accent = true;
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct CartridgeView {
+    pub title: Arc<str>,
+    pub fields: Vec<CartridgeField>,
+    pub cover: Option<Arc<str>>,
+}
+
+#[derive(Clone)]
+pub struct MmioFieldView {
+    pub name: Arc<str>,
+    pub bit_label: Arc<str>,
+    pub value: u32,
+    pub display: Arc<str>,
+    pub is_bool: bool,
+    pub children: Vec<MmioFieldView>,
+}
+
+#[derive(Clone)]
+pub struct MmioRegisterView {
+    pub id: Arc<str>,
+    pub name: Arc<str>,
+    pub addr: Arc<str>,
+    pub value: u32,
+    pub bits: u8,
+    pub highlight: Highlight,
+    pub fields: Vec<MmioFieldView>,
+}
+
+#[derive(Clone)]
+pub struct MmioGroup {
+    pub name: Arc<str>,
+    pub registers: Vec<MmioRegisterView>,
+}
+
+#[derive(Clone, Default)]
+pub struct MmioView {
+    pub groups: Vec<MmioGroup>,
+}
+
+#[derive(Clone)]
+pub struct MemoryRegion {
+    pub id: Arc<str>,
+    pub name: Arc<str>,
+    pub base: u32,
+    pub size: u32,
+}
+
+impl MemoryRegion {
+    pub fn new(id: impl Into<Arc<str>>, name: impl Into<Arc<str>>, base: u32, size: u32) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            base,
+            size,
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct StatusView {
+    pub system: Arc<str>,
+    pub session: Arc<str>,
+    pub segments: Vec<Arc<str>>,
+    pub state: Arc<str>,
 }

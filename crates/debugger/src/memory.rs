@@ -1,11 +1,9 @@
 use std::ops::Range;
 
 use cirsium::components::ComboOption;
-use cirsium::widgets::{BreakpointKind, MemoryCell, MemoryRegion, MemoryRow, ascii_glyph};
+use cirsium::widgets::{MemoryCell, MemoryRow, ascii_glyph};
+use debugger_model::{BreakpointKind, BreakpointMark, DebugCore, MemoryRegion, mark_at};
 use gpui::{Pixels, Point, ScrollStrategy, SharedString, UniformListScrollHandle};
-
-use crate::breakpoints::{BreakpointMark, mark_at};
-use crate::target::DebugTarget;
 
 pub const BYTES_PER_ROW: usize = 16;
 
@@ -31,7 +29,7 @@ pub struct Memory {
 }
 
 impl Memory {
-    pub fn new(target: &dyn DebugTarget) -> Self {
+    pub fn new(target: &dyn DebugCore) -> Self {
         let regions = target.memory_regions();
         let current = regions
             .first()
@@ -66,7 +64,7 @@ impl Memory {
     }
 
     pub fn region_label(&self) -> SharedString {
-        self.current.name.clone()
+        self.current.name.clone().into()
     }
 
     pub fn selection(&self) -> Option<(u32, u32)> {
@@ -84,7 +82,7 @@ impl Memory {
         (self.current.size as usize).div_ceil(BYTES_PER_ROW)
     }
 
-    pub fn rows_for(&self, range: Range<usize>, target: &dyn DebugTarget) -> Vec<MemoryRow> {
+    pub fn rows_for(&self, range: Range<usize>, target: &dyn DebugCore) -> Vec<MemoryRow> {
         let region = self.current.id.as_ref();
         range
             .map(|row_ix| {
@@ -109,7 +107,7 @@ impl Memory {
                     .collect();
                 MemoryRow {
                     addr,
-                    label: target.format_address(region, addr),
+                    label: target.format_address(region, addr).into(),
                     cells,
                 }
             })
@@ -190,7 +188,7 @@ impl Memory {
         self.combo_open.take().is_some()
     }
 
-    pub fn open_menu(&mut self, addr: u32, position: Point<Pixels>, target: &dyn DebugTarget) {
+    pub fn open_menu(&mut self, addr: u32, position: Point<Pixels>, target: &dyn DebugCore) {
         let (lo, hi) = match self.selection {
             Some((a, b)) if (a.min(b)..=a.max(b)).contains(&addr) => (a.min(b), a.max(b)),
             _ => {
@@ -209,7 +207,7 @@ impl Memory {
         self.menu = Some(MemMenu {
             position,
             range: (lo, hi),
-            address: target.format_address(&self.current.id, lo),
+            address: target.format_address(&self.current.id, lo).into(),
             hex: hex.into(),
             raw: raw.into(),
             ascii: ascii.into(),

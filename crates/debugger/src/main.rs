@@ -1,13 +1,10 @@
 mod app;
 mod art;
 mod breakpoints;
-mod cores;
 mod db;
 mod disasm;
 mod logging;
 mod memory;
-mod processor;
-mod target;
 
 use std::sync::Arc;
 
@@ -25,14 +22,12 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use app::Debugger;
-use art::LibretroThumbnails;
-use cores::SnesTarget;
+use art::{AssetProvider, GameRef, LibretroThumbnails, System};
+use debugger_model::DebugCore;
 use logging::{LogBuffer, LogLayer};
-use target::DebugTarget;
 
 fn main() {
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,snes=trace"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
 
     let logs = LogBuffer::new();
     tracing_subscriber::registry()
@@ -46,8 +41,8 @@ fn main() {
         std::process::exit(2);
     };
     let provider = LibretroThumbnails::new();
-    let target: Box<dyn DebugTarget> = match SnesTarget::load(&path, &provider) {
-        Ok(target) => Box::new(target),
+    let target: Box<dyn DebugCore> = match self::load_snes(&path, &provider) {
+        Ok(target) => target,
         Err(err) => {
             eprintln!("failed to load {path}: {err}");
             std::process::exit(1);
@@ -84,4 +79,31 @@ fn main() {
         .unwrap();
         cx.activate(true);
     });
+}
+
+fn load_snes(
+    path: &str,
+    provider: &dyn AssetProvider,
+) -> Result<Box<dyn DebugCore>, Box<dyn std::error::Error>> {
+    let rom = std::fs::read(path)?;
+    let title = db::title(System::Snes, &rom);
+
+    let file_name = std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string());
+
+    let name = title.map(str::to_string).unwrap_or_else(|| {
+        std::path::Path::new(path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| file_name.clone())
+    });
+
+    let cart = snes::Cartridge::new(rom)?;
+    let cover = provider.cover_art(&GameRef::new(System::Snes, name));
+
+    Ok(Box::new(snes::debug::SnesDebug::new(
+        cart, file_name, cover,
+    )))
 }

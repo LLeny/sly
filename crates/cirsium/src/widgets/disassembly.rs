@@ -9,7 +9,7 @@ use gpui::{
     svg, uniform_list,
 };
 
-use super::breakpoints::BreakpointKind;
+use super::breakpoints::{BreakpointKind, breakpoint_color};
 use crate::assets::icon;
 use crate::components::{ClickHandler, Panel, Segmented};
 use crate::theme::Theme;
@@ -448,7 +448,12 @@ fn disasm_row(
         .items_center()
         .justify_center();
     if let Some(kind) = line.breakpoint {
-        gutter = gutter.child(div().size(px(8.)).rounded_full().bg(kind.color(theme)));
+        gutter = gutter.child(
+            div()
+                .size(px(8.))
+                .rounded_full()
+                .bg(breakpoint_color(theme, kind)),
+        );
     } else if line.current {
         gutter = gutter.child(
             svg()
@@ -469,7 +474,7 @@ fn disasm_row(
         .rounded_md()
         .when(line.current, |d| d.bg(theme.accent_soft))
         .when_some(line.breakpoint.filter(|_| !line.current), |d, kind| {
-            d.bg(kind.color(theme).opacity(0.20))
+            d.bg(breakpoint_color(theme, kind).opacity(0.20))
         })
         .when(
             line.selected && !line.current && line.breakpoint.is_none(),
@@ -769,7 +774,12 @@ fn render_graph(
                 .items_center()
                 .justify_center();
             if let Some(kind) = line.breakpoint {
-                gutter = gutter.child(div().size(px(7.)).rounded_full().bg(kind.color(theme)));
+                gutter = gutter.child(
+                    div()
+                        .size(px(7.))
+                        .rounded_full()
+                        .bg(breakpoint_color(theme, kind)),
+                );
             } else if line.current {
                 gutter = gutter.child(
                     svg()
@@ -788,7 +798,7 @@ fn render_graph(
                 .flex_none()
                 .when(line.current, |d| d.bg(theme.accent_soft))
                 .when_some(line.breakpoint.filter(|_| !line.current), |d, kind| {
-                    d.bg(kind.color(theme).opacity(0.20))
+                    d.bg(breakpoint_color(theme, kind).opacity(0.20))
                 })
                 .when(
                     line.selected && !line.current && line.breakpoint.is_none(),

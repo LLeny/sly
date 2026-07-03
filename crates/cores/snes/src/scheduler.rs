@@ -11,10 +11,11 @@ const MASTER_CLOCK_PAL: u32 = 21_281_370;
 const CYCLES_PER_FRAME_NTSC: u64 = MASTER_CLOCK_NTSC as u64 / 60;
 const CYCLES_PER_FRAME_PAL: u64 = MASTER_CLOCK_PAL as u64 / 50;
 
-pub type Callback<M = CartridgeMap> = Box<dyn FnMut(&mut Snes<M>, u64)>;
+pub type Callback<M = CartridgeMap> = fn(&mut Snes<M>, u64);
 
 pub struct Event<M: MemoryMap = CartridgeMap> {
     deadline: u64,
+    period: Option<u64>,
     callback: Callback<M>,
 }
 
@@ -66,6 +67,10 @@ impl<M: MemoryMap> Scheduler<M> {
         self.cycles_per_frame
     }
 
+    pub fn frame_deadline(&self) -> u64 {
+        self.cycles + self.cycles_per_frame
+    }
+
     pub fn advance_by(&mut self, cycles: u64) {
         self.cycles += cycles;
     }
@@ -74,19 +79,32 @@ impl<M: MemoryMap> Scheduler<M> {
         match self.events.peek() {
             Some(next) if next.0.deadline <= self.cycles => {
                 let event = self.events.pop().unwrap().0;
+                if let Some(period) = event.period {
+                    self.events.push(Reverse(Event {
+                        deadline: event.deadline + period,
+                        period: event.period,
+                        callback: event.callback,
+                    }));
+                }
                 Some((event.deadline, event.callback))
             }
             _ => None,
         }
     }
 
-    pub fn schedule_event<F>(&mut self, deadline: u64, callback: F)
-    where
-        F: FnMut(&mut Snes<M>, u64) + 'static,
-    {
+    pub fn schedule_event(&mut self, deadline: u64, callback: Callback<M>) {
         self.events.push(Reverse(Event {
             deadline,
-            callback: Box::new(callback),
+            period: None,
+            callback,
+        }));
+    }
+
+    pub fn schedule_periodic(&mut self, period: u64, callback: Callback<M>) {
+        self.events.push(Reverse(Event {
+            deadline: self.cycles + period,
+            period: Some(period),
+            callback,
         }));
     }
 
@@ -95,10 +113,11 @@ impl<M: MemoryMap> Scheduler<M> {
     }
 }
 
-pub(crate) fn spc700_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: u64) {
+pub(crate) fn spc700_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
+    #[cfg(feature = "debug")]
+    {
+        snes.executing = crate::Component::Spc;
+    }
+
     crate::apu::spc700::step(&mut snes.apu);
-    snes.scheduler.schedule_event(
-        deadline + crate::apu::SNES_CYCLES_PER_SPC700_CYCLE,
-        spc700_tick,
-    );
 }

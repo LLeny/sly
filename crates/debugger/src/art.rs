@@ -1,4 +1,4 @@
-use gpui::SharedString;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum System {
@@ -37,11 +37,11 @@ impl System {
 #[derive(Clone)]
 pub struct GameRef {
     pub system: System,
-    pub name: SharedString,
+    pub name: String,
 }
 
 impl GameRef {
-    pub fn new(system: System, name: impl Into<SharedString>) -> Self {
+    pub fn new(system: System, name: impl Into<String>) -> Self {
         Self {
             system,
             name: name.into(),
@@ -50,17 +50,17 @@ impl GameRef {
 }
 
 pub trait AssetProvider: Send + Sync {
-    fn cover_art(&self, game: &GameRef) -> Option<SharedString>;
+    fn cover_art(&self, game: &GameRef) -> Option<Arc<str>>;
 }
 
 pub struct LibretroThumbnails {
-    base_url: SharedString,
+    base_url: &'static str,
 }
 
 impl LibretroThumbnails {
     pub fn new() -> Self {
         Self {
-            base_url: "https://thumbnails.libretro.com".into(),
+            base_url: "https://thumbnails.libretro.com",
         }
     }
 }
@@ -72,7 +72,7 @@ impl Default for LibretroThumbnails {
 }
 
 impl AssetProvider for LibretroThumbnails {
-    fn cover_art(&self, game: &GameRef) -> Option<SharedString> {
+    fn cover_art(&self, game: &GameRef) -> Option<Arc<str>> {
         let name = game.name.trim();
         if name.is_empty() {
             return None;

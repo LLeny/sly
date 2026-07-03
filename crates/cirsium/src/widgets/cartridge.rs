@@ -35,6 +35,26 @@ pub struct CartridgeView {
     pub cover: Option<SharedString>,
 }
 
+impl From<debugger_model::CartridgeField> for CartridgeField {
+    fn from(field: debugger_model::CartridgeField) -> Self {
+        Self {
+            label: field.label.into(),
+            value: field.value.into(),
+            accent: field.accent,
+        }
+    }
+}
+
+impl From<debugger_model::CartridgeView> for CartridgeView {
+    fn from(view: debugger_model::CartridgeView) -> Self {
+        Self {
+            title: view.title.into(),
+            fields: view.fields.into_iter().map(Into::into).collect(),
+            cover: view.cover.map(Into::into),
+        }
+    }
+}
+
 #[derive(IntoElement)]
 pub struct CartridgeWidget {
     view: CartridgeView,

@@ -14,7 +14,7 @@ use cirsium::widgets::{
     RowProvider, ViewMode,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
-use debugger_model::CpuView;
+use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
 use frontend_model::DockLocation;
 use gpui::prelude::*;
 use gpui::{
@@ -26,20 +26,18 @@ use crate::breakpoints::Breakpoints;
 use crate::disasm::Disasm;
 use crate::logging::{LogBuffer, Logs};
 use crate::memory::{self, Memory};
-use crate::processor::CpuId;
-use crate::target::{DebugTarget, RunOutcome};
 
 struct ProcessorPane {
     id: CpuId,
     title: SharedString,
-    space: SharedString,
+    space: Arc<str>,
     cpu_view: CpuView,
     disasm: Disasm,
     reg_changes: ChangeTracker<Arc<str>>,
 }
 
 pub(crate) struct Debugger {
-    target: Box<dyn DebugTarget>,
+    target: Box<dyn DebugCore>,
     cartridge: CartridgeView,
     mmio_view: MmioView,
     mmio_expanded: HashSet<SharedString>,
@@ -65,7 +63,7 @@ enum CpuRefresh {
 
 impl Debugger {
     pub(crate) fn new(
-        target: Box<dyn DebugTarget>,
+        target: Box<dyn DebugCore>,
         log_buffer: LogBuffer,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -76,7 +74,7 @@ impl Debugger {
                 let mut pane = ProcessorPane {
                     disasm: Disasm::new(desc.id.clone()),
                     id: desc.id,
-                    title: desc.title,
+                    title: desc.title.into(),
                     space: desc.space,
                     cpu_view: CpuView::default(),
                     reg_changes: ChangeTracker::default(),
@@ -87,7 +85,7 @@ impl Debugger {
             .collect();
         assert!(
             !panes.is_empty(),
-            "a DebugTarget must expose at least one processor"
+            "a DebugCore must expose at least one processor"
         );
 
         let jump_input = cx.new(|cx| TextInput::new(cx, "go to...").hex_only(true).max_len(6));
@@ -101,10 +99,10 @@ impl Debugger {
             .detach();
 
         Self {
-            cartridge: target.cartridge().clone(),
-            mmio_view: target.mmio_view(),
+            cartridge: target.cartridge().clone().into(),
+            mmio_view: target.mmio_view().into(),
             mmio_expanded: HashSet::new(),
-            status: target.status("paused"),
+            status: target.status("paused").into(),
             memory: Memory::new(target.as_ref()),
             breakpoints: Breakpoints::default(),
             logs: Logs::new(log_buffer),
@@ -120,7 +118,7 @@ impl Debugger {
         }
     }
 
-    fn refresh_pane_view(target: &dyn DebugTarget, pane: &mut ProcessorPane, mode: CpuRefresh) {
+    fn refresh_pane_view(target: &dyn DebugCore, pane: &mut ProcessorPane, mode: CpuRefresh) {
         pane.cpu_view = Self::track_changes(target.cpu_view(&pane.id), &mut pane.reg_changes, mode);
         pane.disasm.recompute(target);
     }
@@ -129,7 +127,7 @@ impl Debugger {
         for pane in &mut self.panes {
             Self::refresh_pane_view(self.target.as_ref(), pane, mode);
         }
-        self.mmio_view = self.target.mmio_view();
+        self.mmio_view = self.target.mmio_view().into();
     }
 
     fn track_changes(
@@ -171,15 +169,17 @@ impl Debugger {
         cx.notify();
     }
 
+    fn set_state(&mut self, label: &str) {
+        self.status.state = self.target.caption(label).into();
+    }
+
     fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
         if self.running == running {
             return;
         }
 
         self.running = running;
-        self.status.state = self
-            .target
-            .caption(if running { "running" } else { "paused" });
+        self.set_state(if running { "running" } else { "paused" });
 
         if running {
             self.run_task = Some(cx.spawn(async move |this, cx| {
@@ -208,7 +208,10 @@ impl Debugger {
             return false;
         }
 
-        let outcome = self.target.run_frame(self.breakpoints.marks());
+        let outcome = {
+            let _silenced = SilencedPanics::new();
+            self.target.debug_run_frame(self.breakpoints.marks())
+        };
 
         self.refresh_panes(CpuRefresh::Highlight);
         self.follow_memory();
@@ -218,7 +221,7 @@ impl Debugger {
             self.running = false;
         }
 
-        self.status.state = self.target.caption(match outcome {
+        self.set_state(match outcome {
             RunOutcome::Done => "running",
             RunOutcome::Breakpoint => "breakpoint",
             RunOutcome::Fault => "unimplemented op",
@@ -229,12 +232,13 @@ impl Debugger {
     }
 
     fn step(&mut self, cx: &mut Context<Self>) {
-        let ok = self.target.step();
+        let ok = {
+            let _silenced = SilencedPanics::new();
+            self.target.debug_step()
+        };
 
         self.refresh_panes(CpuRefresh::Highlight);
-        self.status.state = self
-            .target
-            .caption(if ok { "paused" } else { "unimplemented op" });
+        self.set_state(if ok { "paused" } else { "unimplemented op" });
         self.running = false;
         self.run_task = None;
         self.follow_memory();
@@ -246,7 +250,7 @@ impl Debugger {
         self.target.reset();
 
         self.refresh_panes(CpuRefresh::Baseline);
-        self.status.state = self.target.caption("reset");
+        self.set_state("reset");
         self.running = false;
         self.run_task = None;
 
@@ -262,7 +266,7 @@ impl Debugger {
             &mut self.panes[pane],
             CpuRefresh::Highlight,
         );
-        self.status.state = self.target.caption("pc set");
+        self.set_state("pc set");
         cx.notify();
     }
 
@@ -453,8 +457,8 @@ impl Debugger {
     ) {
         self.memory.close_menu();
         let cpu = self.panes[0].id.clone();
-        let region: SharedString = self.memory.region_id().to_string().into();
-        let note = self.target.annotate(start);
+        let region: Arc<str> = self.memory.region_id().into();
+        let note = self.target.annotate(start).into();
         self.breakpoints
             .add_labeled(start, end, kind, cpu, region, label, note);
         self.sync_bp_markers();
@@ -463,7 +467,7 @@ impl Debugger {
 
     /// A processor's id and address space, used to tag breakpoints raised from
     /// that pane (or pane 0 for manually-typed and memory-panel breakpoints).
-    fn pane_space(&self, pane: usize) -> (CpuId, SharedString) {
+    fn pane_space(&self, pane: usize) -> (CpuId, Arc<str>) {
         (self.panes[pane].id.clone(), self.panes[pane].space.clone())
     }
 
@@ -590,6 +594,26 @@ impl Debugger {
     }
 }
 
+type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
+
+struct SilencedPanics(Option<PanicHook>);
+
+impl SilencedPanics {
+    fn new() -> Self {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        Self(Some(prev))
+    }
+}
+
+impl Drop for SilencedPanics {
+    fn drop(&mut self) {
+        if let Some(prev) = self.0.take() {
+            std::panic::set_hook(prev);
+        }
+    }
+}
+
 fn clipboard_listener(
     cx: &mut Context<Debugger>,
     payload: SharedString,
@@ -693,7 +717,7 @@ impl Render for Debugger {
         let mut disasm_menus = Vec::new();
 
         for (pane_ix, pane) in self.panes.iter().enumerate() {
-            let cpu_id = SharedString::from(&pane.id);
+            let cpu_id = SharedString::from(pane.id.arc());
             let cpu_widget = CpuWidget::new(pane.cpu_view.clone().into())
                 .id(cpu_id.clone())
                 .title(pane.title.clone())

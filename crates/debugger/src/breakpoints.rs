@@ -1,26 +1,9 @@
+use std::sync::Arc;
+
 use cirsium::components::ComboOption;
-use cirsium::widgets::{BreakpointEntry, BreakpointKind, BreakpointsView};
+use cirsium::widgets::{BreakpointEntry, BreakpointsView};
+use debugger_model::{BreakpointKind, BreakpointMark, CpuId, DebugCore};
 use gpui::{Pixels, Point, SharedString};
-
-use crate::processor::CpuId;
-use crate::target::DebugTarget;
-
-#[derive(Clone)]
-pub struct BreakpointMark {
-    pub start: u32,
-    pub end: u32,
-    pub kind: BreakpointKind,
-    pub cpu: CpuId,
-    pub region: SharedString,
-}
-
-pub fn mark_at(marks: &[BreakpointMark], addr: u32, mask: u32) -> Option<BreakpointKind> {
-    let addr = addr & mask;
-    marks
-        .iter()
-        .find(|m| (m.start & mask..=m.end & mask).contains(&addr))
-        .map(|m| m.kind)
-}
 
 struct Breakpoint {
     id: usize,
@@ -28,7 +11,7 @@ struct Breakpoint {
     end: u32,
     kind: BreakpointKind,
     cpu: CpuId,
-    region: SharedString,
+    region: Arc<str>,
     enabled: bool,
     label: SharedString,
     note: SharedString,
@@ -71,7 +54,7 @@ impl Breakpoints {
             .collect()
     }
 
-    pub fn add(&mut self, addr: u32, cpu: CpuId, region: SharedString, target: &dyn DebugTarget) {
+    pub fn add(&mut self, addr: u32, cpu: CpuId, region: Arc<str>, target: &dyn DebugCore) {
         self.add_kind(addr, addr, self.draft_kind, cpu, region, target);
     }
 
@@ -81,11 +64,11 @@ impl Breakpoints {
         end: u32,
         kind: BreakpointKind,
         cpu: CpuId,
-        region: SharedString,
-        target: &dyn DebugTarget,
+        region: Arc<str>,
+        target: &dyn DebugCore,
     ) {
         let label = format!("${}", target.format_address(&region, start)).into();
-        let note = target.annotate(start);
+        let note = target.annotate(start).into();
         self.add_labeled(start, end, kind, cpu, region, label, note);
     }
 
@@ -96,7 +79,7 @@ impl Breakpoints {
         end: u32,
         kind: BreakpointKind,
         cpu: CpuId,
-        region: SharedString,
+        region: Arc<str>,
         label: SharedString,
         note: SharedString,
     ) {

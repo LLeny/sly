@@ -29,12 +29,7 @@ pub fn bool_chip(theme: &Theme, text: impl Into<SharedString>, on: bool) -> Div 
         .child(text.into())
 }
 
-/// Formats `value` as a `$`-prefixed hex string padded to `bits` (rounded up
-/// to whole nibbles).
-pub fn hex(value: u32, bits: u8) -> String {
-    let width = (bits as usize).div_ceil(4);
-    format!("${value:0width$X}")
-}
+pub use debugger_model::hex;
 
 /// A thin vertical divider for statusbar segments.
 pub fn separator(theme: &Theme) -> Div {

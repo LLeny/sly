@@ -1,6 +1,6 @@
 use crate::apu::regs::Control;
 #[cfg(feature = "debug")]
-use crate::mmio::{AccessTracker, MemKind, MemoryAccess};
+use crate::mmio::{AccessTracker, MemKind};
 use crate::{MemoryMap, Snes};
 
 mod map;
@@ -89,15 +89,6 @@ impl<M: ApuMap> Apu<M> {
             Region::Ipl if self.control.ipl_rom_enable() => IPL_ROM[(addr - 0xFFC0) as usize],
             _ => self.ram[addr as usize],
         }
-    }
-
-    #[cfg(feature = "debug")]
-    pub fn trace(&mut self, body: impl FnOnce(&mut Self)) -> MemoryAccess {
-        self.access.start();
-        self.access.resume();
-        body(self);
-        self.access.stop();
-        self.access.snapshot()
     }
 
     pub fn cpu_read_port(&self, index: usize) -> u8 {
@@ -207,7 +198,7 @@ impl<M: ApuMap> Apu<M> {
     }
 }
 
-pub(crate) fn timer01_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: u64) {
+pub(crate) fn timer01_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
     if snes.apu.control.enable_timer0() {
         snes.apu.internal_timers[0] = snes.apu.internal_timers[0].wrapping_add(1);
 
@@ -225,12 +216,9 @@ pub(crate) fn timer01_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline:
             snes.apu.timer_counters[1] = snes.apu.timer_counters[1].wrapping_add(1);
         }
     }
-
-    snes.scheduler
-        .schedule_event(deadline + TIMER01_PERIOD, self::timer01_tick);
 }
 
-pub(crate) fn timer2_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: u64) {
+pub(crate) fn timer2_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
     if snes.apu.control.enable_timer2() {
         snes.apu.internal_timers[2] = snes.apu.internal_timers[2].wrapping_add(1);
 
@@ -239,7 +227,4 @@ pub(crate) fn timer2_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: 
             snes.apu.timer_counters[2] = snes.apu.timer_counters[2].wrapping_add(1);
         }
     }
-
-    snes.scheduler
-        .schedule_event(deadline + TIMER2_PERIOD, self::timer2_tick);
 }

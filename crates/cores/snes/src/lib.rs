@@ -2,6 +2,8 @@ mod alu;
 pub mod apu;
 pub mod cartridge;
 pub mod cpu;
+#[cfg(feature = "debug")]
+pub mod debug;
 pub mod error;
 pub mod interrupt;
 mod macros;
@@ -24,6 +26,19 @@ use crate::scheduler::Scheduler;
 
 pub const CYCLES_PER_STEP: u64 = 30; // TODO: CYCLE ACCURACY
 
+#[cfg(feature = "debug")]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Component {
+    Cpu,
+    Spc,
+}
+
+#[cfg(feature = "debug")]
+pub struct StepTrace {
+    pub access: MemoryAccess,
+    pub fault: Option<Component>,
+}
+
 pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub cpu: Cpu,
     pub mmu: Mmio<M>,
@@ -31,6 +46,8 @@ pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub dma: Dma,
     pub apu: Apu,
     pub scheduler: Scheduler<M>,
+    #[cfg(feature = "debug")]
+    pub executing: Component,
 }
 
 impl Snes {
@@ -49,6 +66,8 @@ impl<M: MemoryMap + 'static> Snes<M> {
             dma: Dma::default(),
             apu: Apu::new(),
             scheduler: Scheduler::new(tv_system),
+            #[cfg(feature = "debug")]
+            executing: Component::Cpu,
         };
         snes.reset();
         snes
@@ -67,13 +86,13 @@ impl<M: MemoryMap + 'static> Snes<M> {
 
         self.scheduler = Scheduler::new(tv_system);
         self.scheduler
-            .schedule_event(apu::SNES_CYCLES_PER_SPC700_CYCLE, scheduler::spc700_tick);
+            .schedule_periodic(apu::SNES_CYCLES_PER_SPC700_CYCLE, scheduler::spc700_tick);
 
         // TODO: Could schedule these when enabled?
         self.scheduler
-            .schedule_event(apu::TIMER01_PERIOD, apu::timer01_tick);
+            .schedule_periodic(apu::TIMER01_PERIOD, apu::timer01_tick);
         self.scheduler
-            .schedule_event(apu::TIMER2_PERIOD, apu::timer2_tick);
+            .schedule_periodic(apu::TIMER2_PERIOD, apu::timer2_tick);
 
         self.mmu.reset();
         self.cpu.pc = self.read16(Address::new(BANK_ZERO, RESET_VECTOR_ADDR));
@@ -88,19 +107,57 @@ impl<M: MemoryMap + 'static> Snes<M> {
     }
 
     pub fn step(&mut self) {
+        #[cfg(feature = "debug")]
+        {
+            self.executing = Component::Cpu;
+        }
+
         cpu::step(self);
 
         self.scheduler.advance_by(CYCLES_PER_STEP);
-        while let Some((deadline, mut callback)) = self.scheduler.pop_current_event() {
+        while let Some((deadline, callback)) = self.scheduler.pop_current_event() {
             callback(self, deadline);
         }
     }
 
+    pub fn run_frame(&mut self) {
+        let end = self.scheduler.frame_deadline();
+        while self.scheduler.cycles() < end {
+            self.step();
+        }
+    }
+
     #[cfg(feature = "debug")]
-    pub fn trace(&mut self, body: impl FnOnce(&mut Self)) -> MemoryAccess {
+    pub fn step_traced(&mut self) -> StepTrace {
         self.mmu.access.start();
-        body(self);
+        self.apu.access.start();
+        self.apu.access.resume();
+
+        let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.step())).is_ok();
+
         self.mmu.access.stop();
-        self.mmu.access.snapshot()
+        self.apu.access.stop();
+
+        let mut access = self.mmu.access.take();
+        access.merge(&self.apu.access.take());
+
+        StepTrace {
+            access,
+            fault: (!ok).then_some(self.executing),
+        }
+    }
+}
+
+impl<M: MemoryMap + 'static> core_model::Core for Snes<M> {
+    fn reset(&mut self) {
+        Snes::reset(self);
+    }
+
+    fn step(&mut self) {
+        Snes::step(self);
+    }
+
+    fn run_frame(&mut self) {
+        Snes::run_frame(self);
     }
 }

@@ -1,24 +1,18 @@
-use cirsium::Highlight;
-use cirsium::components::StatusView;
-use cirsium::widgets::{
-    BreakpointKind, CartridgeField, CartridgeView, MemoryRegion, MmioFieldView, MmioGroup,
-    MmioRegisterView, MmioView,
-};
-use debugger_model::{
-    CpuView, DisasmLine, DisasmToken, FlagView, FlowKind, RegisterView, SyntaxSpec, TokenKind,
-    strip_symbol_sigils, tokenize,
-};
-use gpui::SharedString;
-use snes::apu::{Apu, spc700};
-use snes::cartridge::{MapMode, Speed};
-use snes::cpu::disasm::{Disasm, FlowKind as CoreFlow, InstructionClass};
-use snes::mmio::{Address, MemKind, MemoryAccess};
-use snes::{Cartridge, Snes};
+use std::sync::Arc;
 
-use crate::art::{AssetProvider, GameRef, System};
-use crate::breakpoints::BreakpointMark;
-use crate::processor::{CpuDescriptor, CpuId};
-use crate::target::{DebugTarget, RunOutcome};
+use core_model::Core;
+use debugger_model::{
+    BreakpointKind, BreakpointMark, CartridgeField, CartridgeView, CpuDescriptor, CpuId, CpuView,
+    DebugCore, DisasmLine, DisasmToken, FlagView, FlowKind, Highlight, MemoryRegion, MmioFieldView,
+    MmioGroup, MmioRegisterView, MmioView, RegisterView, RunOutcome, StatusView, SyntaxSpec,
+    TokenKind, hex, strip_symbol_sigils, tokenize,
+};
+
+use crate::apu::{Apu, spc700};
+use crate::cartridge::{MapMode, Speed};
+use crate::cpu::disasm::{Disasm, FlowKind as CoreFlow, InstructionClass};
+use crate::mmio::{Address, MemKind, MemoryAccess};
+use crate::{Cartridge, Component, Snes};
 
 const WRAM_SIZE: u32 = 0x2_0000;
 const PPU_BASE: u32 = 0x2100;
@@ -30,40 +24,20 @@ const BUS_SIZE: u32 = 0x100_0000;
 const CPU_MAIN: &str = "cpu.65c816";
 const CPU_SPC: &str = "apu.spc700";
 
-pub struct SnesTarget {
+pub struct SnesDebug {
     core: Snes,
     cartridge: CartridgeView,
-    system: SharedString,
-    label: SharedString,
-    segments: Vec<SharedString>,
+    system: Arc<str>,
+    label: Arc<str>,
+    segments: Vec<Arc<str>>,
     last_access: MemoryAccess,
-    fault: Option<&'static str>,
+    fault: Option<Component>,
 }
 
-impl SnesTarget {
-    pub fn load(
-        path: &str,
-        provider: &dyn AssetProvider,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let rom = std::fs::read(path)?;
-        let title = crate::db::title(System::Snes, &rom);
-        let cart = Cartridge::new(rom)?;
-
-        let file_name = std::path::Path::new(path)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.to_string());
-
-        let name: SharedString = title.map(SharedString::from).unwrap_or_else(|| {
-            std::path::Path::new(path)
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| file_name.clone())
-                .into()
-        });
-
+impl SnesDebug {
+    pub fn new(cart: Cartridge, label: impl Into<Arc<str>>, cover: Option<Arc<str>>) -> Self {
         let mut cartridge = self::cartridge_view(&cart);
-        cartridge.cover = provider.cover_art(&GameRef::new(System::Snes, name));
+        cartridge.cover = cover;
 
         let segments = vec![
             self::mapper_name(&cart).into(),
@@ -71,15 +45,15 @@ impl SnesTarget {
             self::human_size(cart.rom.len()).into(),
         ];
 
-        Ok(Self {
+        Self {
             core: Snes::new(cart),
             cartridge,
             system: "SNES".into(),
-            label: file_name.into(),
+            label: label.into(),
             segments,
             last_access: MemoryAccess::default(),
             fault: None,
-        })
+        }
     }
 
     fn region_byte(&self, region: &str, addr: u32) -> u8 {
@@ -107,33 +81,6 @@ impl SnesTarget {
             "spc" => Some((MemKind::Spc, addr)),
             _ => Some((MemKind::Io, addr)),
         }
-    }
-
-    fn catch(&mut self, f: impl FnOnce(&mut Snes)) -> bool {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&mut self.core))).is_ok()
-    }
-
-    fn step_machine(&mut self) -> (MemoryAccess, Option<&'static str>) {
-        let mut access = None;
-
-        let ok = self.catch(|core| access = Some(core.trace(snes::cpu::step)));
-        let mut access = access.unwrap_or_default();
-
-        if !ok {
-            return (access, Some(CPU_MAIN));
-        }
-
-        let mut spc = None;
-        if !self.catch(|core| spc = Some(core.apu.trace(spc700::step))) {
-            return (access, Some(CPU_SPC));
-        }
-        if let Some(spc) = spc {
-            self::merge_access(&mut access, &spc);
-        }
-
-        self.core.scheduler.advance_by(snes::CYCLES_PER_STEP);
-
-        (access, None)
     }
 
     fn execute_hit(&self, breakpoints: &[BreakpointMark]) -> bool {
@@ -173,35 +120,23 @@ impl SnesTarget {
     }
 }
 
-type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
+impl Core for SnesDebug {
+    fn reset(&mut self) {
+        self.core.reset();
+        self.last_access = MemoryAccess::default();
+        self.fault = None;
+    }
 
-struct SilencedPanics(Option<PanicHook>);
+    fn step(&mut self) {
+        self.core.step();
+    }
 
-impl SilencedPanics {
-    fn new() -> Self {
-        let prev = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-        Self(Some(prev))
+    fn run_frame(&mut self) {
+        self.core.run_frame();
     }
 }
 
-impl Drop for SilencedPanics {
-    fn drop(&mut self) {
-        if let Some(prev) = self.0.take() {
-            std::panic::set_hook(prev);
-        }
-    }
-}
-
-fn merge_access(total: &mut MemoryAccess, step: &MemoryAccess) {
-    total.reads.extend(step.reads.iter().copied());
-    total.writes.extend(step.writes.iter().copied());
-    if step.last.is_some() {
-        total.last = step.last;
-    }
-}
-
-impl DebugTarget for SnesTarget {
+impl DebugCore for SnesDebug {
     fn cpus(&self) -> Vec<CpuDescriptor> {
         vec![
             CpuDescriptor::new(CPU_MAIN, "65C816", "bus"),
@@ -224,36 +159,34 @@ impl DebugTarget for SnesTarget {
         }
     }
 
-    fn step(&mut self) -> bool {
-        let _silenced = SilencedPanics::new();
-        let (access, fault) = self.step_machine();
-        self.last_access = access;
-        self.fault = fault;
-        fault.is_none()
+    fn debug_step(&mut self) -> bool {
+        let trace = self.core.step_traced();
+        self.last_access = trace.access;
+        self.fault = trace.fault;
+        self.fault.is_none()
     }
 
-    fn run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome {
+    fn debug_run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome {
         let watch = breakpoints
             .iter()
             .any(|m| matches!(m.kind, BreakpointKind::Read | BreakpointKind::Write));
 
-        let _silenced = SilencedPanics::new();
         let mut access = MemoryAccess::default();
 
-        let frame_cycles = self.core.scheduler.cycles_per_frame();
-        let frame_end = self.core.scheduler.cycles() + frame_cycles;
+        let frame_end = self.core.scheduler.frame_deadline();
         while self.core.scheduler.cycles() < frame_end {
-            let (step, fault) = self.step_machine();
-            self::merge_access(&mut access, &step);
+            let trace = self.core.step_traced();
+            access.merge(&trace.access);
 
-            if let Some(cpu) = fault {
+            if let Some(component) = trace.fault {
                 self.last_access = access;
-                self.fault = Some(cpu);
+                self.fault = Some(component);
                 return RunOutcome::Fault;
             }
 
             if !breakpoints.is_empty()
-                && ((watch && self.watch_hit(breakpoints, &step)) || self.execute_hit(breakpoints))
+                && ((watch && self.watch_hit(breakpoints, &trace.access))
+                    || self.execute_hit(breakpoints))
             {
                 self.last_access = access;
                 return RunOutcome::Breakpoint;
@@ -263,12 +196,6 @@ impl DebugTarget for SnesTarget {
         self.last_access = access;
         self.fault = None;
         RunOutcome::Done
-    }
-
-    fn reset(&mut self) {
-        self.core.reset();
-        self.last_access = MemoryAccess::default();
-        self.fault = None;
     }
 
     fn cpu_view(&self, cpu: &CpuId) -> CpuView {
@@ -298,14 +225,13 @@ impl DebugTarget for SnesTarget {
             system: self.system.clone(),
             session: self.label.clone(),
             segments: self.segments.clone(),
-            state: self::caption(label, &self.core),
-            ..Default::default()
+            state: self::caption(label, &self.core).into(),
         }
     }
 
-    fn caption(&self, label: &str) -> SharedString {
-        if self.fault == Some(CPU_SPC) {
-            return format!("{label} @ SPC700:{:04X}", self.core.apu.spc700.pc).into();
+    fn caption(&self, label: &str) -> String {
+        if self.fault == Some(Component::Spc) {
+            return format!("{label} @ SPC700:{:04X}", self.core.apu.spc700.pc);
         }
         self::caption(label, &self.core)
     }
@@ -327,7 +253,7 @@ impl DebugTarget for SnesTarget {
             .collect()
     }
 
-    fn format_address(&self, region: &str, addr: u32) -> SharedString {
+    fn format_address(&self, region: &str, addr: u32) -> String {
         match region {
             "wram" => format!("{:02X}:{:04X}", 0x7E + (addr >> 16), addr & 0xFFFF),
             "rom" => format!("{addr:06X}"),
@@ -335,7 +261,6 @@ impl DebugTarget for SnesTarget {
             "spc" => format!("{:04X}", addr & 0xFFFF),
             _ => format!("00:{:04X}", addr & 0xFFFF),
         }
-        .into()
     }
 
     fn memory_highlights(&self, region: &str, addr: u32, len: usize) -> Vec<Highlight> {
@@ -348,13 +273,13 @@ impl DebugTarget for SnesTarget {
             .collect()
     }
 
-    fn annotate(&self, addr: u32) -> SharedString {
-        snes::mmio::symbol((addr & 0xFFFF) as u16)
-            .map(SharedString::from)
+    fn annotate(&self, addr: u32) -> String {
+        crate::mmio::symbol((addr & 0xFFFF) as u16)
+            .map(str::to_string)
             .unwrap_or_default()
     }
 
-    fn latest_access(&self) -> Option<(SharedString, u32)> {
+    fn latest_access(&self) -> Option<(Arc<str>, u32)> {
         let (kind, offset) = self.last_access.last?;
         let region = match kind {
             MemKind::Wram => "wram",
@@ -368,15 +293,14 @@ impl DebugTarget for SnesTarget {
     }
 }
 
-fn caption(label: &str, snes: &Snes) -> SharedString {
+fn caption(label: &str, snes: &Snes) -> String {
     format!(
         "{label} @ {:02X}:{:04X}",
         snes.cpu.program_bank, snes.cpu.pc
     )
-    .into()
 }
 
-fn cpu_view(cpu: &snes::Cpu) -> CpuView {
+fn cpu_view(cpu: &crate::Cpu) -> CpuView {
     let f = &cpu.flags;
     let acc_bits = if f.m() { 8 } else { 16 };
     let idx_bits = if f.x() { 8 } else { 16 };
@@ -421,7 +345,7 @@ fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
         let text = strip_symbol_sigils(&d.text, &SNES_SYNTAX);
         let tokens = tokenize(&text, self::mnemonic_kind(d.class), &SNES_SYNTAX);
         let ea = (addr == pc)
-            .then(|| snes::cpu::effective_address(snes, addr))
+            .then(|| crate::cpu::effective_address(snes, addr))
             .flatten();
         let note = self::disasm_note(&tokens, &d, bank, ea);
 
@@ -523,7 +447,7 @@ fn spc_mnemonic_kind(text: &str) -> TokenKind {
 
 const SPC_SYNTAX: SyntaxSpec = SyntaxSpec {
     registers: &["A", "X", "Y", "SP", "YA", "PSW", "C"],
-    symbols: snes::apu::is_symbol,
+    symbols: crate::apu::is_symbol,
 };
 
 fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
@@ -550,13 +474,13 @@ fn disasm_note(tokens: &[DisasmToken], d: &Disasm, bank: u8, ea: Option<Address>
         .iter()
         .filter(|t| t.kind == TokenKind::Symbol)
         .filter_map(|t| {
-            let addr = snes::mmio::address_of(&t.text)?;
+            let addr = crate::mmio::address_of(&t.text)?;
             Some(format!("{} = ${addr:04X}", t.text))
         })
         .collect();
 
     if let Some(ea) = ea {
-        let name = snes::mmio::symbol(ea.address()).map_or(String::new(), |n| format!(" = {n}"));
+        let name = crate::mmio::symbol(ea.address()).map_or(String::new(), |n| format!(" = {n}"));
         parts.push(format!("→ {:02X}:{:04X}{name}", ea.bank(), ea.address()));
     } else if parts.is_empty()
         && d.class == InstructionClass::ControlFlow
@@ -592,7 +516,7 @@ fn map_flow(flow: CoreFlow) -> FlowKind {
 
 const SNES_SYNTAX: SyntaxSpec = SyntaxSpec {
     registers: &["A", "X", "Y", "S"],
-    symbols: snes::mmio::is_symbol,
+    symbols: crate::mmio::is_symbol,
 };
 
 fn mmio_component(addr: u16) -> (u8, &'static str) {
@@ -614,7 +538,7 @@ fn read_mmio(core: &Snes, addr: u16, bits: u8) -> u32 {
     }
 }
 
-fn mmio_field_views(fields: &[snes::mmio::FieldInfo], parent: u32) -> Vec<MmioFieldView> {
+fn mmio_field_views(fields: &[crate::mmio::FieldInfo], parent: u32) -> Vec<MmioFieldView> {
     let mut ordered: Vec<_> = fields.iter().collect();
     ordered.sort_by_key(|f| f.offset);
     ordered
@@ -623,8 +547,8 @@ fn mmio_field_views(fields: &[snes::mmio::FieldInfo], parent: u32) -> Vec<MmioFi
         .collect()
 }
 
-fn mmio_field_view(field: &snes::mmio::FieldInfo, parent: u32) -> MmioFieldView {
-    use snes::mmio::FieldKind;
+fn mmio_field_view(field: &crate::mmio::FieldInfo, parent: u32) -> MmioFieldView {
+    use crate::mmio::FieldKind;
 
     let mask = if field.width >= 32 {
         u32::MAX
@@ -639,7 +563,7 @@ fn mmio_field_view(field: &snes::mmio::FieldInfo, parent: u32) -> MmioFieldView 
         format!("[{}:{}]", field.offset, field.offset + field.width - 1)
     };
 
-    let fmt_hex = || cirsium::components::hex(value, field.width as u8);
+    let fmt_hex = || hex(value, field.width as u8);
 
     let (display, is_bool, children) = match field.kind {
         FieldKind::Bool => (
@@ -671,7 +595,7 @@ fn mmio_field_view(field: &snes::mmio::FieldInfo, parent: u32) -> MmioFieldView 
 }
 
 fn mmio_view(core: &Snes) -> MmioView {
-    let mut symbols: Vec<_> = snes::mmio::symbols().collect();
+    let mut symbols: Vec<_> = crate::mmio::symbols().collect();
     symbols.sort_by_key(|s| (self::mmio_component(s.addr).0, s.addr));
 
     let mut groups: Vec<MmioGroup> = Vec::new();
@@ -681,7 +605,7 @@ fn mmio_view(core: &Snes) -> MmioView {
         let reg = self::mmio_register("mmio", 4, sym, value);
 
         match groups.last_mut() {
-            Some(group) if group.name == component => group.registers.push(reg),
+            Some(group) if &*group.name == component => group.registers.push(reg),
             _ => groups.push(MmioGroup {
                 name: component.into(),
                 registers: vec![reg],
@@ -691,13 +615,13 @@ fn mmio_view(core: &Snes) -> MmioView {
 
     let spc = MmioGroup {
         name: "SPC".into(),
-        registers: snes::apu::symbols()
+        registers: crate::apu::symbols()
             .map(|sym| self::mmio_register("spc", 2, sym, core.apu.peek(sym.addr) as u32))
             .collect(),
     };
     let after_apu = groups
         .iter()
-        .position(|g| g.name == "APU")
+        .position(|g| &*g.name == "APU")
         .map_or(groups.len(), |ix| ix + 1);
     groups.insert(after_apu, spc);
 
@@ -707,13 +631,13 @@ fn mmio_view(core: &Snes) -> MmioView {
 fn mmio_register(
     id_prefix: &str,
     addr_width: usize,
-    sym: &snes::mmio::MmioSymbol,
+    sym: &crate::mmio::MmioSymbol,
     value: u32,
 ) -> MmioRegisterView {
     MmioRegisterView {
         id: format!("{id_prefix}-{:0width$X}", sym.addr, width = addr_width).into(),
         name: sym.name.into(),
-        addr: format!("${:0width$X}", sym.addr, width = addr_width).into(),
+        addr: hex(sym.addr as u32, (addr_width * 4) as u8).into(),
         value,
         bits: sym.bits,
         highlight: Highlight::None,

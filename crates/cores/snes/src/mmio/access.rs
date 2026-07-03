@@ -10,6 +10,16 @@ pub struct MemoryAccess {
     pub last: Option<(MemKind, u32)>,
 }
 
+impl MemoryAccess {
+    pub fn merge(&mut self, other: &MemoryAccess) {
+        self.reads.extend(other.reads.iter().copied());
+        self.writes.extend(other.writes.iter().copied());
+        if other.last.is_some() {
+            self.last = other.last;
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct AccessTracker {
     tracing: Cell<bool>,
@@ -69,11 +79,11 @@ impl AccessTracker {
         self.last.set(Some(key));
     }
 
-    pub fn snapshot(&self) -> MemoryAccess {
+    pub fn take(&self) -> MemoryAccess {
         MemoryAccess {
-            reads: self.reads.borrow().clone(),
-            writes: self.writes.borrow().clone(),
-            last: self.last.get(),
+            reads: self.reads.take(),
+            writes: self.writes.take(),
+            last: self.last.take(),
         }
     }
 }

@@ -3,7 +3,7 @@ use gpui::{Div, FontWeight, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, d
 
 use crate::diff::Highlight;
 use crate::theme::Theme;
-use crate::widgets::BreakpointKind;
+use crate::widgets::{BreakpointKind, breakpoint_colors};
 
 use super::{
     ByteDownCallback, ByteDragCallback, ContextCallback, MemoryCell, MemoryRow, ascii_glyph,
@@ -235,7 +235,7 @@ fn fill_colors(theme: &Theme, fill: Fill) -> Option<(Hsla, Hsla)> {
         Fill::Read => Some((theme.read_fill, theme.read_border)),
         Fill::Write => Some((theme.write_fill, theme.write_border)),
         Fill::Selection => Some((theme.selection, theme.selection_border)),
-        Fill::Breakpoint(kind) => Some(kind.colors(theme)),
+        Fill::Breakpoint(kind) => Some(breakpoint_colors(theme, kind)),
     }
 }
 

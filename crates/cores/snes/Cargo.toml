@@ -6,10 +6,12 @@ edition = "2024"
 [features]
 default = ["disasm"]
 disasm = []
-debug = []
+debug = ["dep:debugger-model"]
 
 [dependencies]
 chapa = { version = "0.5.0", features = ["reflection"] }
+core-model = { path = "../../models/core" }
+debugger-model = { path = "../../models/debugger", optional = true }
 chipi-macros = { git = "https://github.com/ioncodes/chipi", branch = "1.0" }
 inventory = "0.3.24"
 thiserror = "2.0.18"

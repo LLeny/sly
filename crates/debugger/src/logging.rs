@@ -157,7 +157,7 @@ impl Logs {
             level_combo: None,
             buffer,
             target: TargetFilter::Cores,
-            level: None,
+            level: Some(LogLevel::Warn),
             message: String::new(),
         }
     }

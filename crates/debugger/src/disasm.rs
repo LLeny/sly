@@ -14,9 +14,7 @@ struct GraphAnim {
     start: Instant,
 }
 
-use crate::breakpoints::{BreakpointMark, mark_at};
-use crate::processor::CpuId;
-use crate::target::DebugTarget;
+use debugger_model::{BreakpointMark, CpuId, DebugCore, mark_at};
 
 const LEAD_BYTES: u32 = 48;
 const COUNT: usize = 200;
@@ -77,11 +75,11 @@ impl Disasm {
         self.show_bytes
     }
 
-    pub fn recompute(&mut self, target: &dyn DebugTarget) {
+    pub fn recompute(&mut self, target: &dyn DebugCore) {
         self.rebuild(target, false);
     }
 
-    fn rebuild(&mut self, target: &dyn DebugTarget, force_rebase: bool) {
+    fn rebuild(&mut self, target: &dyn DebugCore, force_rebase: bool) {
         let pc = target.pc(&self.cpu);
 
         let lead = if self.view_mode == ViewMode::Graph {
@@ -190,7 +188,7 @@ impl Disasm {
         self.menu.take().is_some()
     }
 
-    pub fn toggle_follow(&mut self, target: &dyn DebugTarget) {
+    pub fn toggle_follow(&mut self, target: &dyn DebugCore) {
         self.follow_pc = !self.follow_pc;
         self.recompute(target);
     }
@@ -204,7 +202,7 @@ impl Disasm {
         self.view_mode
     }
 
-    pub fn set_view_mode(&mut self, mode: ViewMode, target: &dyn DebugTarget) {
+    pub fn set_view_mode(&mut self, mode: ViewMode, target: &dyn DebugCore) {
         self.view_mode = mode;
         self.rebuild(target, true);
     }

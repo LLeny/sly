@@ -9,59 +9,21 @@ use crate::theme::Theme;
 
 type RowCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum BreakpointKind {
-    Execute,
-    Read,
-    Write,
+pub use debugger_model::BreakpointKind;
+
+pub fn breakpoint_color(theme: &Theme, kind: BreakpointKind) -> Hsla {
+    match kind {
+        BreakpointKind::Execute => theme.danger,
+        BreakpointKind::Read => theme.read_border,
+        BreakpointKind::Write => theme.write_border,
+    }
 }
 
-impl BreakpointKind {
-    pub const ALL: [BreakpointKind; 3] = [
-        BreakpointKind::Execute,
-        BreakpointKind::Read,
-        BreakpointKind::Write,
-    ];
-
-    pub fn id(self) -> &'static str {
-        match self {
-            BreakpointKind::Execute => "execute",
-            BreakpointKind::Read => "read",
-            BreakpointKind::Write => "write",
-        }
-    }
-
-    pub fn from_id(id: &str) -> Option<Self> {
-        match id {
-            "execute" => Some(BreakpointKind::Execute),
-            "read" => Some(BreakpointKind::Read),
-            "write" => Some(BreakpointKind::Write),
-            _ => None,
-        }
-    }
-
-    pub fn tag(self) -> &'static str {
-        match self {
-            BreakpointKind::Execute => "PC",
-            BreakpointKind::Read => "Read",
-            BreakpointKind::Write => "Write",
-        }
-    }
-
-    pub fn color(self, theme: &Theme) -> Hsla {
-        match self {
-            BreakpointKind::Execute => theme.danger,
-            BreakpointKind::Read => theme.read_border,
-            BreakpointKind::Write => theme.write_border,
-        }
-    }
-
-    pub fn colors(self, theme: &Theme) -> (Hsla, Hsla) {
-        match self {
-            BreakpointKind::Execute => (theme.exec_fill, theme.exec_border),
-            BreakpointKind::Read => (theme.read_fill, theme.read_border),
-            BreakpointKind::Write => (theme.write_fill, theme.write_border),
-        }
+pub fn breakpoint_colors(theme: &Theme, kind: BreakpointKind) -> (Hsla, Hsla) {
+    match kind {
+        BreakpointKind::Execute => (theme.exec_fill, theme.exec_border),
+        BreakpointKind::Read => (theme.read_fill, theme.read_border),
+        BreakpointKind::Write => (theme.write_fill, theme.write_border),
     }
 }
 
@@ -255,7 +217,7 @@ fn breakpoint_row(
         enabled,
     } = entry;
 
-    let kind_color = kind.color(theme);
+    let kind_color = breakpoint_color(theme, kind);
 
     let mut dot = div()
         .id(("bp-dot", id))
