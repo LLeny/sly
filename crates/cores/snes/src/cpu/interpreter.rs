@@ -3,6 +3,8 @@ use super::decoder::{Form, Mnemonic};
 use super::operand::Arg;
 use crate::Snes;
 use crate::alu::{AluResult, ShiftOp, Width, adc_bcd8, add_binary, bcd16, sbc_bcd8};
+#[cfg(feature = "debug")]
+use crate::callstack::{CallFrame, CallKind};
 use crate::cpu::{Cpu, Flags};
 use crate::mmio::{Address, MemoryMap};
 
@@ -202,6 +204,13 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
                     }
                     _ => unreachable!("jsr form"),
                 }
+
+                #[cfg(feature = "debug")]
+                self.enter_call(
+                    CallKind::Call,
+                    Address::new(self.snes.cpu.program_bank, self.snes.cpu.pc).as_24bit(),
+                    Address::new(self.next_bank, self.next_pc).as_24bit(),
+                );
             }
             M::Jsl => {
                 self.push(self.next_bank, StackWrap::Wide);
@@ -210,15 +219,28 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
                     Arg::Long(a) => self.set_pc_addr(Address::from_24bit(a)),
                     _ => unreachable!("jsl form"),
                 }
+
+                #[cfg(feature = "debug")]
+                self.enter_call(
+                    CallKind::LongCall,
+                    Address::new(self.snes.cpu.program_bank, self.snes.cpu.pc).as_24bit(),
+                    Address::new(self.next_bank, self.next_pc).as_24bit(),
+                );
             }
             M::Rts => {
                 let return_pc = self.pop::<u16>(StackWrap::Confined);
                 self.set_pc(return_pc.wrapping_add(1));
+
+                #[cfg(feature = "debug")]
+                self.leave_call();
             }
             M::Rtl => {
                 let return_pc = self.pop::<u16>(StackWrap::Wide);
                 let bank = self.pop::<u8>(StackWrap::Wide);
                 self.set_pc_long(bank, return_pc.wrapping_add(1));
+
+                #[cfg(feature = "debug")]
+                self.leave_call();
             }
             M::Rti => {
                 let flags = self.pop::<u8>(StackWrap::Confined);
@@ -230,6 +252,9 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
                     let bank = self.pop::<u8>(StackWrap::Confined);
                     self.set_pc_long(bank, return_pc);
                 }
+
+                #[cfg(feature = "debug")]
+                self.leave_call();
             }
 
             // stack
@@ -578,6 +603,22 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
         self.snes.cpu.stack_pointer = self.snes.cpu.confine_sp(value);
     }
 
+    /// Record a call frame opened by the current instruction.
+    #[cfg(feature = "debug")]
+    fn enter_call(&mut self, kind: CallKind, caller: u32, target: u32) {
+        self.snes.cpu.call_stack.push(CallFrame {
+            kind,
+            caller,
+            target,
+        });
+    }
+
+    /// Close the innermost call frame on return.
+    #[cfg(feature = "debug")]
+    fn leave_call(&mut self) {
+        self.snes.cpu.call_stack.pop();
+    }
+
     /// Push a `u8` or `u16` onto the stack, high byte first.
     fn push<T: StackWord>(&mut self, value: T, wrap: StackWrap) {
         for byte in value.to_stack_bytes() {
@@ -630,5 +671,12 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
         let vector = if emulation { emu_vector } else { native_vector };
         let target = self.snes.read16(Address::new(0, vector));
         self.set_pc_long(0, target);
+
+        #[cfg(feature = "debug")]
+        self.enter_call(
+            CallKind::Interrupt,
+            Address::new(program_bank, return_pc).as_24bit(),
+            Address::new(0, target).as_24bit(),
+        );
     }
 }

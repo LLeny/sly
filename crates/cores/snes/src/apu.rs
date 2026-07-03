@@ -46,6 +46,10 @@ pub struct Apu<M: ApuMap = HardwareMap> {
     // SPC-700 core registers
     pub spc700: spc700::Spc700,
 
+    /// Active SPC700 subroutine frames
+    #[cfg(feature = "debug")]
+    pub call_stack: Vec<crate::callstack::CallFrame>,
+
     #[cfg(feature = "debug")]
     pub access: AccessTracker,
 }
@@ -73,6 +77,8 @@ impl<M: ApuMap> Apu<M> {
             internal_timers: [0; 3],
             ram: [0; 0x10000],
             spc700: spc700::Spc700::new(reset_vector),
+            #[cfg(feature = "debug")]
+            call_stack: Vec::new(),
             #[cfg(feature = "debug")]
             access: AccessTracker::default(),
         }

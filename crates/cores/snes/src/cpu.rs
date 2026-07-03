@@ -7,6 +7,8 @@ mod operand;
 pub use disasm::disassemble_at;
 
 use crate::Snes;
+#[cfg(feature = "debug")]
+use crate::callstack::CallFrame;
 use crate::mmio::{Address, MemoryMap};
 use interpreter::Interpreter;
 
@@ -21,6 +23,9 @@ pub struct Cpu {
     pub pc: u16,
     pub stack_pointer: u16,
     pub emulation: bool,
+
+    #[cfg(feature = "debug")]
+    pub call_stack: Vec<CallFrame>,
 }
 
 impl Cpu {
@@ -36,6 +41,9 @@ impl Cpu {
             flags: Flags::default(),
             stack_pointer: 0x01ff,
             emulation: true,
+
+            #[cfg(feature = "debug")]
+            call_stack: Vec::new(),
         }
     }
 

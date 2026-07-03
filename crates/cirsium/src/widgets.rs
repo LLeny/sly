@@ -1,4 +1,5 @@
 pub mod breakpoints;
+pub mod callstack;
 pub mod cartridge;
 pub mod controls;
 pub mod cpu;
@@ -11,6 +12,7 @@ pub use breakpoints::{
     BreakpointEntry, BreakpointKind, BreakpointsView, BreakpointsWidget, breakpoint_color,
     breakpoint_colors,
 };
+pub use callstack::{CallStackView, CallStackWidget, StackFrameView};
 pub use cartridge::{CartridgeField, CartridgeView, CartridgeWidget};
 pub use controls::{ControlsView, ControlsWidget};
 pub use cpu::{CpuView, CpuWidget, FlagView, RegisterView};

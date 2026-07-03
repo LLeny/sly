@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use core_model::Core;
 use debugger_model::{
-    BreakpointKind, BreakpointMark, CartridgeField, CartridgeView, CpuDescriptor, CpuId, CpuView,
-    DebugCore, DisasmLine, DisasmToken, FlagView, FlowKind, Highlight, MemoryRegion, MmioFieldView,
-    MmioGroup, MmioRegisterView, MmioView, RegisterView, RunOutcome, StatusView, SyntaxSpec,
-    TokenKind, hex, strip_symbol_sigils, tokenize,
+    BreakpointKind, BreakpointMark, CallStackView, CartridgeField, CartridgeView, CpuDescriptor,
+    CpuId, CpuView, DebugCore, DisasmLine, DisasmToken, FlagView, FlowKind, Highlight,
+    MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, RegisterView, RunOutcome,
+    StackFrame, StatusView, SyntaxSpec, TokenKind, hex, strip_symbol_sigils, tokenize,
 };
 
 use crate::apu::{Apu, spc700};
+use crate::callstack::CallFrame;
 use crate::cartridge::{MapMode, Speed};
 use crate::cpu::disasm::{Disasm, FlowKind as CoreFlow, InstructionClass};
 use crate::mmio::{Address, MemKind, MemoryAccess};
@@ -212,6 +213,23 @@ impl DebugCore for SnesDebug {
         }
     }
 
+    fn call_stack(&self, cpu: &CpuId) -> CallStackView {
+        match cpu.as_str() {
+            CPU_SPC => self::call_stack_view(
+                &self.core.apu.call_stack,
+                self.core.apu.spc700.pc as u32,
+                |a| self.format_address("spc", a),
+                |_| String::new(),
+            ),
+            _ => self::call_stack_view(
+                &self.core.cpu.call_stack,
+                Address::new(self.core.cpu.program_bank, self.core.cpu.pc).as_24bit(),
+                |a| self.format_address("bus", a),
+                |a| self.annotate(a),
+            ),
+        }
+    }
+
     fn cartridge(&self) -> &CartridgeView {
         &self.cartridge
     }
@@ -298,6 +316,31 @@ fn caption(label: &str, snes: &Snes) -> String {
         "{label} @ {:02X}:{:04X}",
         snes.cpu.program_bank, snes.cpu.pc
     )
+}
+
+fn call_stack_view(
+    frames: &[CallFrame],
+    pc: u32,
+    fmt: impl Fn(u32) -> String,
+    symbol: impl Fn(u32) -> String,
+) -> CallStackView {
+    let mut rows = vec![StackFrame {
+        kind: "PC".into(),
+        location: fmt(pc).into(),
+        symbol: symbol(pc).into(),
+        caller: Arc::from(""),
+    }];
+
+    for f in frames.iter().rev() {
+        rows.push(StackFrame {
+            kind: f.kind.tag().into(),
+            location: fmt(f.target).into(),
+            symbol: symbol(f.target).into(),
+            caller: format!("from {}", fmt(f.caller)).into(),
+        });
+    }
+
+    CallStackView { frames: rows }
 }
 
 fn cpu_view(cpu: &crate::Cpu) -> CpuView {

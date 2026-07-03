@@ -9,9 +9,9 @@ use cirsium::components::{
     context_menu, field_button, icon_button, popover, status_bar, title_bar,
 };
 use cirsium::widgets::{
-    BreakpointKind, BreakpointsWidget, CartridgeView, CartridgeWidget, ControlsView,
-    ControlsWidget, CpuWidget, DisassemblyWidget, LogWidget, MemoryWidget, MmioView, MmioWidget,
-    RowProvider, ViewMode,
+    BreakpointKind, BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView,
+    CartridgeWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, LogWidget,
+    MemoryWidget, MmioView, MmioWidget, RowProvider, ViewMode,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
@@ -33,6 +33,7 @@ struct ProcessorPane {
     space: Arc<str>,
     cpu_view: CpuView,
     disasm: Disasm,
+    call_stack: CallStackView,
     reg_changes: ChangeTracker<Arc<str>>,
 }
 
@@ -77,6 +78,7 @@ impl Debugger {
                     title: desc.title.into(),
                     space: desc.space,
                     cpu_view: CpuView::default(),
+                    call_stack: CallStackView::default(),
                     reg_changes: ChangeTracker::default(),
                 };
                 Self::refresh_pane_view(target.as_ref(), &mut pane, CpuRefresh::Baseline);
@@ -121,6 +123,7 @@ impl Debugger {
     fn refresh_pane_view(target: &dyn DebugCore, pane: &mut ProcessorPane, mode: CpuRefresh) {
         pane.cpu_view = Self::track_changes(target.cpu_view(&pane.id), &mut pane.reg_changes, mode);
         pane.disasm.recompute(target);
+        pane.call_stack = target.call_stack(&pane.id).into();
     }
 
     fn refresh_panes(&mut self, mode: CpuRefresh) {
@@ -791,9 +794,46 @@ impl Render for Debugger {
                             this.update(cx, |d, cx| d.disasm_jump(pane_ix, from, to, cx))
                         }
                     });
+
+            let cs_id = SharedString::from(format!("{}-callstack", pane.id.as_str()));
+            let cs_title = SharedString::from(format!("{} Call Stack", pane.title));
+            let callstack = CallStackWidget::new(pane.call_stack.clone())
+                .id(cs_id.clone())
+                .title(cs_title)
+                .scrollable(true)
+                .collapsed(self.is_collapsed(&cs_id))
+                .on_toggle({
+                    let id = cs_id.clone();
+                    cx.listener(move |this, _, _, cx| this.toggle(id.clone(), cx))
+                });
+
+            let pane_row = div()
+                .flex()
+                .flex_1()
+                .min_h(px(0.))
+                .gap_2()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .min_h(px(0.))
+                        .child(disassembly),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .w(px(300.))
+                        .flex_none()
+                        .min_h(px(0.))
+                        .child(callstack),
+                );
+
             disasm_panels.push((
                 format!("{}.disasm", pane.id.as_str()),
-                disassembly.into_any_element(),
+                pane_row.into_any_element(),
             ));
 
             if let Some(menu) = pane.disasm.menu.as_ref() {

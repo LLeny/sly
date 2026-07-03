@@ -4,7 +4,8 @@ use core_model::Core;
 use frontend_model::{ComponentManifest, DockLocation, PanelDescriptor, PanelKind, RefreshPolicy};
 
 use crate::model::{
-    CartridgeView, CpuView, DisasmLine, Highlight, MemoryRegion, MmioView, StatusView,
+    CallStackView, CartridgeView, CpuView, DisasmLine, Highlight, MemoryRegion, MmioView,
+    StatusView,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -123,6 +124,10 @@ pub trait DebugCore: Core {
     fn set_pc(&mut self, cpu: &CpuId, addr: u32);
     fn cpu_view(&self, cpu: &CpuId) -> CpuView;
     fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> Vec<DisasmLine>;
+
+    fn call_stack(&self, _cpu: &CpuId) -> CallStackView {
+        CallStackView::default()
+    }
 
     fn manifest(&self) -> ComponentManifest {
         self::standard_manifest(&self.cpus())

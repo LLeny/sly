@@ -1,5 +1,6 @@
 mod alu;
 pub mod apu;
+pub mod callstack;
 pub mod cartridge;
 pub mod cpu;
 #[cfg(feature = "debug")]

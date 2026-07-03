@@ -251,3 +251,16 @@ pub struct StatusView {
     pub segments: Vec<Arc<str>>,
     pub state: Arc<str>,
 }
+
+#[derive(Clone)]
+pub struct StackFrame {
+    pub kind: Arc<str>,
+    pub location: Arc<str>,
+    pub symbol: Arc<str>,
+    pub caller: Arc<str>,
+}
+
+#[derive(Clone, Default)]
+pub struct CallStackView {
+    pub frames: Vec<StackFrame>,
+}

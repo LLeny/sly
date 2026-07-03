@@ -6,6 +6,8 @@ use super::regs::Flags;
 use crate::alu::{ShiftOp, add_binary};
 use crate::apu::Apu;
 use crate::apu::map::ApuMap;
+#[cfg(feature = "debug")]
+use crate::callstack::{CallFrame, CallKind};
 
 #[derive(Clone, Copy)]
 enum AluOp {
@@ -157,6 +159,22 @@ impl<'a, M: ApuMap> Interpreter<'a, M> {
         let lo = self.pop8() as u16;
         let hi = self.pop8() as u16;
         lo | (hi << 8)
+    }
+
+    /// Record a call frame opened by the current instruction.
+    #[cfg(feature = "debug")]
+    fn enter_call(&mut self, kind: CallKind, caller: u16, target: u16) {
+        self.apu.call_stack.push(CallFrame {
+            kind,
+            caller: caller as u32,
+            target: target as u32,
+        });
+    }
+
+    /// Close the innermost call frame on return.
+    #[cfg(feature = "debug")]
+    fn leave_call(&mut self) {
+        self.apu.call_stack.pop();
     }
 
     fn branch(&mut self, disp: i8) {
@@ -743,9 +761,11 @@ impl<'a, M: ApuMap> Interpreter<'a, M> {
             Call::Tcall15 => self.read16(0xFFC0),
         };
 
-        let return_addr = self.next_pc;
-        self.push16(return_addr);
+        self.push16(self.next_pc);
         self.next_pc = target;
+
+        #[cfg(feature = "debug")]
+        self.enter_call(CallKind::Call, self.apu.spc700.pc, target);
     }
 
     fn returns(&mut self, op: Returns) {
@@ -757,11 +777,12 @@ impl<'a, M: ApuMap> Interpreter<'a, M> {
                 self.next_pc = self.pop16();
             }
         }
+        #[cfg(feature = "debug")]
+        self.leave_call();
     }
 
     fn brk(&mut self) {
-        let return_addr = self.next_pc;
-        self.push16(return_addr);
+        self.push16(self.next_pc);
         let flags = self.apu.spc700.psw.raw();
         self.push8(flags);
 
@@ -771,6 +792,9 @@ impl<'a, M: ApuMap> Interpreter<'a, M> {
         self.apu.spc700.psw = psw;
 
         self.next_pc = self.read16(0xFFDE);
+        
+        #[cfg(feature = "debug")]
+        self.enter_call(CallKind::Interrupt, self.apu.spc700.pc, self.next_pc);
     }
 
     fn flag_ops(&mut self, op: FlagOps) {
