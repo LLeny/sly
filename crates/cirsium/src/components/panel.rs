@@ -118,6 +118,7 @@ impl RenderOnce for Panel {
         );
 
         let mut right = div().flex().items_center().gap_2();
+        let has_action = self.header_action.is_some();
         if let Some(action) = self.header_action {
             right = right.child(action);
         }
@@ -139,7 +140,8 @@ impl RenderOnce for Panel {
             .items_center()
             .justify_between()
             .px_3()
-            .py_2()
+            .when(has_action, |h| h.py_1())
+            .when(!has_action, |h| h.py_2())
             .bg(t.bg_header)
             .border_b_1()
             .border_color(t.border_subtle)
