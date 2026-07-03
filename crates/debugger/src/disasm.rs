@@ -28,6 +28,16 @@ pub struct Menu {
     pub text: SharedString,
 }
 
+fn aligned_base(pc: u32, lead: u32, mut sweep: impl FnMut(u32, usize) -> Vec<u32>) -> u32 {
+    for start in pc.saturating_sub(lead)..pc {
+        let addrs = sweep(start, (pc - start) as usize + 1);
+        if addrs.iter().any(|&addr| addr == pc) {
+            return start;
+        }
+    }
+    pc
+}
+
 pub struct Disasm {
     pub view: DisassemblyView,
     pub scroll: UniformListScrollHandle,
@@ -102,7 +112,7 @@ impl Disasm {
             match held {
                 Some(held_lines) => (held_lines, self.base),
                 None => {
-                    let base = pc.saturating_sub(lead);
+                    let base = self.aligned_base(target, pc, lead);
                     let lines = target.disassemble(&self.cpu, base, COUNT);
 
                     if lines.iter().any(|line| line.current) {
@@ -135,6 +145,16 @@ impl Disasm {
         {
             self.scroll.scroll_to_item_strict(ix, ScrollStrategy::Top);
         }
+    }
+
+    fn aligned_base(&self, target: &dyn DebugCore, pc: u32, lead: u32) -> u32 {
+        aligned_base(pc, lead, |start, count| {
+            target
+                .disassemble(&self.cpu, start, count)
+                .iter()
+                .map(|line| line.addr)
+                .collect()
+        })
     }
 
     fn apply_selection(&mut self) {
