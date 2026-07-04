@@ -164,14 +164,15 @@ impl Default for CpuView {
     }
 }
 
+/// A labeled value with optional accent, shared by field-list views.
 #[derive(Clone)]
-pub struct CartridgeField {
+pub struct Field {
     pub label: Arc<str>,
     pub value: Arc<str>,
     pub accent: bool,
 }
 
-impl CartridgeField {
+impl Field {
     pub fn new(label: impl Into<Arc<str>>, value: impl Into<Arc<str>>) -> Self {
         Self {
             label: label.into(),
@@ -185,6 +186,8 @@ impl CartridgeField {
         self
     }
 }
+
+pub type CartridgeField = Field;
 
 #[derive(Clone)]
 pub struct CartridgeView {
@@ -257,27 +260,7 @@ pub struct DmaView {
     pub channels: Vec<DmaChannelView>,
 }
 
-#[derive(Clone)]
-pub struct PpuProperty {
-    pub label: Arc<str>,
-    pub value: Arc<str>,
-    pub accent: bool,
-}
-
-impl PpuProperty {
-    pub fn new(label: impl Into<Arc<str>>, value: impl Into<Arc<str>>) -> Self {
-        Self {
-            label: label.into(),
-            value: value.into(),
-            accent: false,
-        }
-    }
-
-    pub fn accented(mut self) -> Self {
-        self.accent = true;
-        self
-    }
-}
+pub type PpuProperty = Field;
 
 #[derive(Clone)]
 pub struct PpuGroup {
@@ -311,6 +294,18 @@ impl PpuGroup {
 pub struct PpuView {
     pub properties: Vec<PpuProperty>,
     pub groups: Vec<PpuGroup>,
+}
+
+#[derive(Clone)]
+pub struct TilesetTile {
+    pub addr: Arc<str>,
+    pub pixels: Vec<(u8, u8, u8)>,
+}
+
+#[derive(Clone)]
+pub struct Tileset {
+    pub bpp: u8,
+    pub tiles: Vec<TilesetTile>,
 }
 
 #[derive(Clone, Copy)]

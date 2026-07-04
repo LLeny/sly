@@ -25,6 +25,7 @@ pub mod icon {
     pub const GRAPH: &str = "icons/workflow.svg";
     pub const PALETTE: &str = "icons/palette.svg";
     pub const MONITOR: &str = "icons/monitor.svg";
+    pub const GRID: &str = "icons/grid-3x3.svg";
 
     pub const RUN: &str = "icons/play.svg";
     pub const PAUSE: &str = "icons/pause.svg";

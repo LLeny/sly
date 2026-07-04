@@ -8,7 +8,7 @@ use frontend_model::{
 
 use crate::model::{
     CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Highlight, MemoryRegion, MmioView,
-    PaletteView, PpuView, StatusView,
+    PaletteView, PpuView, StatusView, Tileset,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -152,6 +152,18 @@ pub trait DebugCore: Core {
 
     fn ppu_view(&self) -> PpuView {
         PpuView::default()
+    }
+
+    fn tileset_layers(&self) -> Vec<Arc<str>> {
+        Vec::new()
+    }
+
+    fn tileset_palettes(&self) -> usize {
+        0
+    }
+
+    fn tileset(&self, _index: usize, _palette: usize) -> Option<Tileset> {
+        None
     }
 
     fn status(&self, label: &str) -> StatusView;

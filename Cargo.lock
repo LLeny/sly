@@ -1081,6 +1081,7 @@ version = "0.1.0"
 dependencies = [
  "debugger-model",
  "gpui",
+ "image",
  "rust-embed",
  "rust-sugiyama",
 ]

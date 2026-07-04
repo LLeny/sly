@@ -45,6 +45,14 @@ impl Segmented {
         self
     }
 
+    pub fn option_label(
+        self,
+        key: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+    ) -> Self {
+        self.option(key, "", label)
+    }
+
     pub fn selected(mut self, key: impl Into<SharedString>) -> Self {
         self.selected = key.into();
         self
@@ -90,7 +98,9 @@ impl RenderOnce for Segmented {
                 .rounded_sm()
                 .cursor_pointer()
                 .text_xs()
-                .child(svg().path(option.icon).size(px(12.)).text_color(icon_color))
+                .when(!option.icon.is_empty(), |b| {
+                    b.child(svg().path(option.icon).size(px(12.)).text_color(icon_color))
+                })
                 .child(option.label);
 
             if active {

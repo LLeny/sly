@@ -7,8 +7,9 @@ use debugger_model::{
     DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind, Highlight,
     MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView,
     PanelDescriptor, PanelKind, PpuGroup, PpuProperty, PpuView, RefreshPolicy, RegisterView,
-    RunOutcome, StackFrame, StatusView, SyntaxSpec, TokenKind, VIDEO_WORKSPACE,
-    WorkspaceDescriptor, WorkspaceIcon, hex, standard_manifest, strip_symbol_sigils, tokenize,
+    RunOutcome, StackFrame, StatusView, SyntaxSpec, Tileset, TilesetTile, TokenKind,
+    VIDEO_WORKSPACE, WorkspaceDescriptor, WorkspaceIcon, hex, standard_manifest,
+    strip_symbol_sigils, tokenize,
 };
 
 use crate::apu::{Apu, spc700};
@@ -269,6 +270,18 @@ impl DebugCore for SnesDebug {
         self::ppu_view(&self.core)
     }
 
+    fn tileset_layers(&self) -> Vec<Arc<str>> {
+        (1..=4).map(|i| format!("BG{i}").into()).collect()
+    }
+
+    fn tileset_palettes(&self) -> usize {
+        8
+    }
+
+    fn tileset(&self, index: usize, palette: usize) -> Option<Tileset> {
+        self::tileset(&self.core, index, palette)
+    }
+
     fn manifest(&self) -> ComponentManifest {
         let mut manifest = standard_manifest(&self.cpus());
         manifest.workspaces.push(WorkspaceDescriptor::new(
@@ -307,6 +320,17 @@ impl DebugCore for SnesDebug {
                 "PPU",
                 PanelKind::Ppu,
                 DockLocation::Right,
+                RefreshPolicy::OnPause,
+            )
+            .tag(VIDEO_WORKSPACE),
+        );
+        manifest.insert_before(
+            PanelKind::Memory,
+            PanelDescriptor::new(
+                "tileset",
+                "Tileset",
+                PanelKind::Tileset,
+                DockLocation::Center,
                 RefreshPolicy::OnPause,
             )
             .tag(VIDEO_WORKSPACE),
@@ -821,15 +845,8 @@ fn ppu_view(core: &Snes) -> PpuView {
     use crate::ppu::regs::{BackgroundMode, Priority, TileSize};
 
     let mode = match core.ppu.bg_mode {
-        BackgroundMode::Mode0 => "Mode 0",
-        BackgroundMode::Mode1 => "Mode 1",
-        BackgroundMode::Mode2 => "Mode 2",
-        BackgroundMode::Mode3 => "Mode 3",
-        BackgroundMode::Mode4 => "Mode 4",
-        BackgroundMode::Mode5 => "Mode 5",
-        BackgroundMode::Mode6 => "Mode 6",
-        BackgroundMode::Mode7 => "Mode 7",
-        BackgroundMode::Invalid => "Invalid",
+        BackgroundMode::Invalid => "Invalid".to_string(),
+        m => format!("Mode {}", m as u8),
     };
     let bg3_priority = match core.ppu.bg3_priority {
         Priority::Normal => "normal",
@@ -851,20 +868,55 @@ fn ppu_view(core: &Snes) -> PpuView {
                 TileSize::Size8x8 => "8x8",
                 TileSize::Size16x16 => "16x16",
             };
+            let depth = match core.ppu.bg_mode.bpp(i) {
+                Some(bpp) => format!("{bpp}bpp"),
+                None => "unused".to_string(),
+            };
+            let tileset: Arc<str> = hex(layer.tileset_addr, 16).into();
 
             PpuGroup::new(
                 format!("ppu-bg{}", i + 1),
                 format!("BG{}", i + 1),
                 vec![
-                    PpuProperty::new("Tileset", hex(layer.tileset_addr, 16)),
+                    PpuProperty::new("Tileset", tileset.clone()),
                     PpuProperty::new("Tile size", tile_size),
+                    PpuProperty::new("Depth", depth),
                 ],
             )
-            .summary(hex(layer.tileset_addr, 16))
+            .summary(tileset)
         })
         .collect();
 
     PpuView { properties, groups }
+}
+
+fn tileset(core: &Snes, layer: usize, palette: usize) -> Option<Tileset> {
+    let data = core.tileset(layer)?;
+
+    let (base, count) = core.bg_palette(layer, data.bpp, palette);
+    let colors: Vec<(u8, u8, u8)> = (0..count)
+        .map(|i| crate::ppu::cgram::rgb(core.ppu.cgram.word((base + i) as u8)))
+        .collect();
+
+    let tiles = data
+        .tiles
+        .iter()
+        .enumerate()
+        .map(|(i, tile)| TilesetTile {
+            addr: format!("VRAM {}", hex(data.tile_addr(i), 16)).into(),
+            pixels: tile
+                .decode(data.bpp)
+                .as_flattened()
+                .iter()
+                .map(|&index| colors[index as usize])
+                .collect(),
+        })
+        .collect();
+
+    Some(Tileset {
+        bpp: data.bpp,
+        tiles,
+    })
 }
 
 fn mmio_view(core: &Snes) -> MmioView {

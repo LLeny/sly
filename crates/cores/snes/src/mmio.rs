@@ -16,7 +16,10 @@ use crate::mmio::regs::{
     APU_IO_END, APU_IO_START, HdmaTransferEnable, HvStatusJoypadBusy, MdmaTransferStart,
     NmiTimerEnable, VblankFlagCpuVersion,
 };
-use crate::ppu::regs::{Bg12ChrBase, Bg34ChrBase, BgMode, CGADD, CGDATA, RDCGRAM};
+use crate::ppu::regs::{
+    Bg12ChrBase, Bg34ChrBase, BgMode, CGADD, CGDATA, CGWSEL, RDCGRAM, RDVRAMH, RDVRAML, SETINI,
+    VMADDH, VMADDL, VMAIN, VMDATAH, VMDATAL,
+};
 use crate::{Cartridge, Snes};
 
 pub use addr::Address;
@@ -195,6 +198,13 @@ impl<M: MemoryMap> Snes<M> {
             CGADD => self.ppu.cgram.word_addr(),
             CGDATA => self.ppu.cgram.peek_data(),
             RDCGRAM => self.ppu.cgram.read_data(),
+            VMAIN => self.ppu.vram.main(),
+            VMADDL => self.ppu.vram.word_addr() as u8,
+            VMADDH => (self.ppu.vram.word_addr() >> 8) as u8,
+            VMDATAL => self.ppu.vram.peek_low(),
+            VMDATAH => self.ppu.vram.peek_high(),
+            RDVRAML => self.ppu.vram.read_low(),
+            RDVRAMH => self.ppu.vram.read_high(),
             NmiTimerEnable::ADDRESS => NmiTimerEnable::read(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::read(self),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::read(self),
@@ -223,6 +233,24 @@ impl<M: MemoryMap> Snes<M> {
             CGADD => self.ppu.cgram.set_addr(value),
             CGDATA => self.ppu.cgram.write_data(value),
             RDCGRAM => {}
+            VMAIN => self.ppu.vram.set_main(value),
+            VMADDL => self.ppu.vram.set_addr_low(value),
+            VMADDH => self.ppu.vram.set_addr_high(value),
+            VMDATAL => self.ppu.vram.write_low(value),
+            VMDATAH => self.ppu.vram.write_high(value),
+            RDVRAML | RDVRAMH => {}
+            CGWSEL if value & 0x01 != 0 => {
+                tracing::error!(
+                    value = format!("{:02X}", value),
+                    "CGWSEL: direct color mode enabled (unimplemented)"
+                );
+            }
+            SETINI if value & 0x40 != 0 => {
+                tracing::error!(
+                    value = format!("{:02X}", value),
+                    "SETINI: Mode 7 EXTBG enabled (unimplemented)"
+                );
+            }
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::write(self, value),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::write(self, value),
@@ -256,6 +284,11 @@ impl<M: MemoryMap> Snes<M> {
             Bg34ChrBase::ADDRESS => Bg34ChrBase::peek(self),
             CGADD => self.ppu.cgram.word_addr(),
             CGDATA | RDCGRAM => self.ppu.cgram.peek_data(),
+            VMAIN => self.ppu.vram.main(),
+            VMADDL => self.ppu.vram.word_addr() as u8,
+            VMADDH => (self.ppu.vram.word_addr() >> 8) as u8,
+            VMDATAL | RDVRAML => self.ppu.vram.peek_low(),
+            VMDATAH | RDVRAMH => self.ppu.vram.peek_high(),
             NmiTimerEnable::ADDRESS => NmiTimerEnable::peek(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::peek(self),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::peek(self),

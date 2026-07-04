@@ -2,14 +2,15 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, FontWeight, SharedString, Stateful, Window, div, px, svg};
+use gpui::{App, ClickEvent, Div, FontWeight, SharedString, Stateful, Window, div, px};
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, hex, label_text};
+use crate::components::{
+    ClickHandler, DETAIL_INDENT, INDENT_STEP, Panel, RowCallback, chevron_slot, hex, label_text,
+    row_toggle,
+};
 use crate::diff::{Highlight, highlight_color};
 use crate::theme::Theme;
-
-type RegisterCallback = Rc<dyn Fn(SharedString, &mut Window, &mut App) + 'static>;
 
 #[derive(Clone)]
 pub struct MmioFieldView {
@@ -105,7 +106,7 @@ pub struct MmioWidget {
     expanded: HashSet<SharedString>,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
-    on_toggle_register: Option<RegisterCallback>,
+    on_toggle_register: Option<RowCallback>,
 }
 
 impl MmioWidget {
@@ -217,22 +218,10 @@ fn register_row(
     theme: &Theme,
     reg: &MmioRegisterView,
     expanded: bool,
-    on_toggle: Option<RegisterCallback>,
+    on_toggle: Option<RowCallback>,
 ) -> Stateful<Div> {
     let expandable = !reg.fields.is_empty();
-
-    let chevron = div().flex_none().size(px(12.)).when(expandable, |d| {
-        d.child(
-            svg()
-                .path(if expanded {
-                    icon::CHEVRON_DOWN
-                } else {
-                    icon::CHEVRON_RIGHT
-                })
-                .size(px(12.))
-                .text_color(theme.text_muted),
-        )
-    });
+    let chevron = chevron_slot(theme, expandable, expanded);
 
     let name = div()
         .text_xs()
@@ -265,11 +254,7 @@ fn register_row(
         .child(value);
 
     if expandable && let Some(handler) = on_toggle {
-        let id = reg.id.clone();
-        row = row
-            .cursor_pointer()
-            .hover(|s| s.bg(theme.bg_panel_alt))
-            .on_click(move |_, window, cx| handler(id.clone(), window, cx));
+        row = row_toggle(row, theme, reg.id.clone(), handler);
     }
 
     row
@@ -287,7 +272,7 @@ fn field_rows(theme: &Theme, fields: &[MmioFieldView], depth: usize) -> Vec<Div>
 }
 
 fn field_row(theme: &Theme, field: &MmioFieldView, depth: usize) -> Div {
-    let indent = px(24. + depth as f32 * 12.);
+    let indent = px(DETAIL_INDENT + depth as f32 * INDENT_STEP);
 
     let bit_label = div()
         .font_family(theme.mono_font)

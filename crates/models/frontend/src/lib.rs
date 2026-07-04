@@ -26,6 +26,7 @@ pub enum PanelKind {
     Dma,
     Palette,
     Ppu,
+    Tileset,
     Log,
 }
 
@@ -33,7 +34,6 @@ pub enum PanelKind {
 pub enum WorkspaceIcon {
     Cpu,
     Video,
-    Generic,
 }
 
 #[derive(Clone, Debug)]
@@ -95,15 +95,22 @@ pub struct ComponentManifest {
 }
 
 impl ComponentManifest {
+    pub fn in_workspace<'a>(
+        &'a self,
+        workspace: &'a str,
+    ) -> impl Iterator<Item = &'a PanelDescriptor> {
+        self.panels.iter().filter(move |p| {
+            p.workspaces.is_empty() || p.workspaces.iter().any(|w| &**w == workspace)
+        })
+    }
+
     pub fn in_location<'a>(
         &'a self,
         workspace: &'a str,
         location: DockLocation,
     ) -> impl Iterator<Item = &'a PanelDescriptor> {
-        self.panels.iter().filter(move |p| {
-            p.location == location
-                && (p.workspaces.is_empty() || p.workspaces.iter().any(|w| &**w == workspace))
-        })
+        self.in_workspace(workspace)
+            .filter(move |p| p.location == location)
     }
 
     pub fn insert_after(&mut self, anchor: PanelKind, panel: PanelDescriptor) {

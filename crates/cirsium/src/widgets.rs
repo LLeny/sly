@@ -5,11 +5,13 @@ pub mod controls;
 pub mod cpu;
 pub mod disassembly;
 pub mod dma;
+pub mod field;
 pub mod log;
 pub mod memory;
 pub mod mmio;
 pub mod palette;
 pub mod ppu;
+pub mod tileset;
 
 pub use breakpoints::{
     BreakpointEntry, BreakpointKind, BreakpointsView, BreakpointsWidget, breakpoint_color,
@@ -28,3 +30,4 @@ pub use memory::{MemoryCell, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};
 pub use mmio::{MmioFieldView, MmioGroup, MmioRegisterView, MmioView, MmioWidget};
 pub use palette::{PaletteColor, PaletteView, PaletteWidget};
 pub use ppu::{PpuGroup, PpuProperty, PpuView, PpuWidget};
+pub use tileset::{TilesetView, TilesetWidget};

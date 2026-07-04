@@ -6,43 +6,13 @@ use crate::components::{ClickHandler, Copyable, Panel, label_text};
 use crate::theme::Theme;
 
 /// One labeled cartridge field (e.g. "Mapper" / "LoROM").
-#[derive(Clone)]
-pub struct CartridgeField {
-    pub label: SharedString,
-    pub value: SharedString,
-    pub accent: bool,
-}
-
-impl CartridgeField {
-    pub fn new(label: impl Into<SharedString>, value: impl Into<SharedString>) -> Self {
-        Self {
-            label: label.into(),
-            value: value.into(),
-            accent: false,
-        }
-    }
-
-    pub fn accented(mut self) -> Self {
-        self.accent = true;
-        self
-    }
-}
+pub type CartridgeField = super::field::Field;
 
 #[derive(Clone)]
 pub struct CartridgeView {
     pub title: SharedString,
     pub fields: Vec<CartridgeField>,
     pub cover: Option<SharedString>,
-}
-
-impl From<debugger_model::CartridgeField> for CartridgeField {
-    fn from(field: debugger_model::CartridgeField) -> Self {
-        Self {
-            label: field.label.into(),
-            value: field.value.into(),
-            accent: field.accent,
-        }
-    }
 }
 
 impl From<debugger_model::CartridgeView> for CartridgeView {

@@ -2,13 +2,11 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, SharedString, Stateful, Window, div, px, svg};
+use gpui::{App, ClickEvent, Div, SharedString, Stateful, Window, div, px};
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, badge, label_text};
+use crate::components::{ClickHandler, Panel, RowCallback, badge, chevron_slot, row_toggle};
 use crate::theme::Theme;
-
-type ChannelCallback = Rc<dyn Fn(SharedString, &mut Window, &mut App) + 'static>;
 
 #[derive(Clone)]
 pub struct DmaChannelDetail {
@@ -71,7 +69,7 @@ pub struct DmaWidget {
     expanded: HashSet<SharedString>,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
-    on_toggle_channel: Option<ChannelCallback>,
+    on_toggle_channel: Option<RowCallback>,
 }
 
 impl DmaWidget {
@@ -177,22 +175,10 @@ fn channel_row(
     theme: &Theme,
     channel: &DmaChannelView,
     expanded: bool,
-    on_toggle: Option<ChannelCallback>,
+    on_toggle: Option<RowCallback>,
 ) -> Stateful<Div> {
     let expandable = !channel.details.is_empty();
-
-    let chevron = div().flex_none().size(px(12.)).when(expandable, |d| {
-        d.child(
-            svg()
-                .path(if expanded {
-                    icon::CHEVRON_DOWN
-                } else {
-                    icon::CHEVRON_RIGHT
-                })
-                .size(px(12.))
-                .text_color(theme.text_muted),
-        )
-    });
+    let chevron = chevron_slot(theme, expandable, expanded);
 
     let enabled = channel.dma_enabled || channel.hdma_enabled;
     let name = badge(
@@ -234,11 +220,7 @@ fn channel_row(
     }
 
     if expandable && let Some(handler) = on_toggle {
-        let id = channel.id.clone();
-        row = row
-            .cursor_pointer()
-            .hover(|s| s.bg(theme.bg_panel_alt))
-            .on_click(move |_, window, cx| handler(id.clone(), window, cx));
+        row = row_toggle(row, theme, channel.id.clone(), handler);
     }
 
     row
@@ -251,14 +233,5 @@ fn detail_row(theme: &Theme, detail: &DmaChannelDetail) -> Div {
         .text_color(theme.text_secondary)
         .child(detail.value.clone());
 
-    div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .pl(px(24.))
-        .pr_1()
-        .py(px(2.))
-        .child(label_text(theme, detail.label.clone()))
-        .child(div().flex_1())
-        .child(value)
+    crate::components::detail_row(theme, detail.label.clone(), value)
 }

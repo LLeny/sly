@@ -4,16 +4,12 @@ use gpui::prelude::*;
 use gpui::{App, ClickEvent, Div, Rgba, SharedString, Window, div, px, rgb};
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, hex, label_text};
+use crate::components::{ClickHandler, Panel, empty_state, footer_row, hex, mono_text};
 use crate::theme::Theme;
 
 type SelectCallback = Rc<dyn Fn(usize, usize, &mut Window, &mut App) + 'static>;
 
-#[derive(Clone, Copy)]
-pub struct PaletteColor {
-    pub raw: u16,
-    pub rgb: (u8, u8, u8),
-}
+pub use debugger_model::PaletteColor;
 
 #[derive(Clone, Default)]
 pub struct PaletteView {
@@ -21,23 +17,10 @@ pub struct PaletteView {
     pub meta: SharedString,
 }
 
-impl From<debugger_model::PaletteColor> for PaletteColor {
-    fn from(color: debugger_model::PaletteColor) -> Self {
-        Self {
-            raw: color.raw,
-            rgb: color.rgb,
-        }
-    }
-}
-
 impl From<debugger_model::PaletteView> for PaletteView {
     fn from(view: debugger_model::PaletteView) -> Self {
         Self {
-            palettes: view
-                .palettes
-                .into_iter()
-                .map(|palette| palette.into_iter().map(Into::into).collect())
-                .collect(),
+            palettes: view.palettes,
             meta: view.meta.into(),
         }
     }
@@ -112,14 +95,10 @@ impl RenderOnce for PaletteWidget {
             .overflow_y_scroll();
 
         if self.view.palettes.is_empty() {
-            grid = grid.items_center().justify_center().child(
-                div()
-                    .px_1()
-                    .py_1()
-                    .text_xs()
-                    .text_color(t.text_dim)
-                    .child("No palette colors available"),
-            );
+            grid = grid
+                .items_center()
+                .justify_center()
+                .child(empty_state(t, "No palette colors available"));
         } else {
             for (palette_ix, palette) in self.view.palettes.iter().enumerate() {
                 let mut cells = div().id(palette_ix).flex().gap(px(2.));
@@ -192,25 +171,16 @@ fn swatch(
 
 fn detail_row(theme: &Theme, palette_ix: usize, color_ix: usize, color: &PaletteColor) -> Div {
     let (r, g, b) = color.rgb;
-    let value = div()
-        .font_family(theme.mono_font)
-        .text_xs()
-        .text_color(theme.text_secondary)
-        .child(format!(
-            "{} \u{2192} #{r:02X}{g:02X}{b:02X}",
-            hex(color.raw as u32, 16)
-        ));
 
-    div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .px_1()
-        .pt(px(6.))
-        .child(label_text(
+    footer_row(
+        theme,
+        format!("Palette {palette_ix}, color {color_ix}"),
+        mono_text(
             theme,
-            format!("Palette {palette_ix}, color {color_ix}"),
-        ))
-        .child(div().flex_1())
-        .child(value)
+            format!(
+                "{} \u{2192} #{r:02X}{g:02X}{b:02X}",
+                hex(color.raw as u32, 16)
+            ),
+        ),
+    )
 }

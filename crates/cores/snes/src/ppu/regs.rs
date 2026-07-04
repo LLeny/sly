@@ -8,10 +8,29 @@ pub(crate) const CGADD: u16 = 0x2121;
 pub(crate) const CGDATA: u16 = 0x2122;
 pub(crate) const RDCGRAM: u16 = 0x213B;
 
+// TODO
+pub(crate) const CGWSEL: u16 = 0x2130;
+pub(crate) const SETINI: u16 = 0x2133;
+
+pub(crate) const VMAIN: u16 = 0x2115;
+pub(crate) const VMADDL: u16 = 0x2116;
+pub(crate) const VMADDH: u16 = 0x2117;
+pub(crate) const VMDATAL: u16 = 0x2118;
+pub(crate) const VMDATAH: u16 = 0x2119;
+pub(crate) const RDVRAML: u16 = 0x2139;
+pub(crate) const RDVRAMH: u16 = 0x213A;
+
 register_mmio_raw! {
     CGADD => "CGADD",
     CGDATA => "CGDATA",
     RDCGRAM => "RDCGRAM",
+    VMAIN => "VMAIN",
+    VMADDL => "VMADDL",
+    VMADDH => "VMADDH",
+    VMDATAL => "VMDATAL",
+    VMDATAH => "VMDATAH",
+    RDVRAML => "RDVRAML",
+    RDVRAMH => "RDVRAMH",
 }
 
 register_mmio! {
@@ -48,6 +67,26 @@ pub enum BackgroundMode {
     Mode7 = 7,
     #[fallback]
     Invalid,
+}
+
+impl BackgroundMode {
+    pub fn layer_bpp(self) -> [Option<u8>; 4] {
+        match self {
+            Self::Mode0 => [Some(2), Some(2), Some(2), Some(2)],
+            Self::Mode1 => [Some(4), Some(4), Some(2), None],
+            Self::Mode2 => [Some(4), Some(4), None, None],
+            Self::Mode3 => [Some(8), Some(4), None, None],
+            Self::Mode4 => [Some(8), Some(2), None, None],
+            Self::Mode5 => [Some(4), Some(2), None, None],
+            Self::Mode6 => [Some(4), None, None, None],
+            Self::Mode7 => [Some(8), None, None, None],
+            Self::Invalid => [None; 4],
+        }
+    }
+
+    pub fn bpp(self, layer: usize) -> Option<u8> {
+        self.layer_bpp().get(layer).copied().flatten()
+    }
 }
 
 #[derive(BitEnum, Clone, Copy, Default)]

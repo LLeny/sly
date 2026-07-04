@@ -75,6 +75,25 @@ pub fn label_text(theme: &Theme, text: impl Into<SharedString>) -> Div {
         .child(text.into())
 }
 
+/// A compact monospace value (addresses, raw register contents).
+pub fn mono_text(theme: &Theme, text: impl Into<SharedString>) -> Div {
+    div()
+        .font_family(theme.mono_font)
+        .text_xs()
+        .text_color(theme.text_secondary)
+        .child(text.into())
+}
+
+/// A dim placeholder message for panels with nothing to show.
+pub fn empty_state(theme: &Theme, text: impl Into<SharedString>) -> Div {
+    div()
+        .px_1()
+        .py_1()
+        .text_xs()
+        .text_color(theme.text_dim)
+        .child(text.into())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CheckboxSize {
     Small,

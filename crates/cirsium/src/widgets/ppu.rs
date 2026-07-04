@@ -2,20 +2,14 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, SharedString, Stateful, Window, div, px, svg};
+use gpui::{App, ClickEvent, Div, SharedString, Stateful, Window, div, px};
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, label_text};
+use crate::components::{ClickHandler, Panel, RowCallback, chevron_slot, label_text, row_toggle};
 use crate::theme::Theme;
+use crate::widgets::field::Field;
 
-type GroupCallback = Rc<dyn Fn(SharedString, &mut Window, &mut App) + 'static>;
-
-#[derive(Clone)]
-pub struct PpuProperty {
-    pub label: SharedString,
-    pub value: SharedString,
-    pub accent: bool,
-}
+pub type PpuProperty = Field;
 
 #[derive(Clone)]
 pub struct PpuGroup {
@@ -29,16 +23,6 @@ pub struct PpuGroup {
 pub struct PpuView {
     pub properties: Vec<PpuProperty>,
     pub groups: Vec<PpuGroup>,
-}
-
-impl From<debugger_model::PpuProperty> for PpuProperty {
-    fn from(property: debugger_model::PpuProperty) -> Self {
-        Self {
-            label: property.label.into(),
-            value: property.value.into(),
-            accent: property.accent,
-        }
-    }
 }
 
 impl From<debugger_model::PpuGroup> for PpuGroup {
@@ -67,7 +51,7 @@ pub struct PpuWidget {
     expanded: HashSet<SharedString>,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
-    on_toggle_group: Option<GroupCallback>,
+    on_toggle_group: Option<RowCallback>,
 }
 
 impl PpuWidget {
@@ -149,12 +133,13 @@ impl RenderOnce for PpuWidget {
                     self.on_toggle_group.clone(),
                 ));
                 if is_expanded {
-                    list = list.children(
-                        group
-                            .properties
-                            .iter()
-                            .map(|property| self::detail_row(t, property)),
-                    );
+                    list = list.children(group.properties.iter().map(|property| {
+                        crate::components::detail_row(
+                            t,
+                            property.label.clone(),
+                            self::value_text(t, property),
+                        )
+                    }));
                 }
             }
         }
@@ -198,22 +183,9 @@ fn group_row(
     theme: &Theme,
     group: &PpuGroup,
     expanded: bool,
-    on_toggle: Option<GroupCallback>,
+    on_toggle: Option<RowCallback>,
 ) -> Stateful<Div> {
     let expandable = !group.properties.is_empty();
-
-    let chevron = div().flex_none().size(px(12.)).when(expandable, |d| {
-        d.child(
-            svg()
-                .path(if expanded {
-                    icon::CHEVRON_DOWN
-                } else {
-                    icon::CHEVRON_RIGHT
-                })
-                .size(px(12.))
-                .text_color(theme.text_muted),
-        )
-    });
 
     let name = div()
         .text_xs()
@@ -233,31 +205,14 @@ fn group_row(
         .gap_2()
         .px_1()
         .py(px(3.))
-        .child(chevron)
+        .child(chevron_slot(theme, expandable, expanded))
         .child(name)
         .child(div().flex_1())
         .child(summary);
 
     if expandable && let Some(handler) = on_toggle {
-        let id = group.id.clone();
-        row = row
-            .cursor_pointer()
-            .hover(|s| s.bg(theme.bg_panel_alt))
-            .on_click(move |_, window, cx| handler(id.clone(), window, cx));
+        row = row_toggle(row, theme, group.id.clone(), handler);
     }
 
     row
-}
-
-fn detail_row(theme: &Theme, property: &PpuProperty) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .pl(px(24.))
-        .pr_1()
-        .py(px(2.))
-        .child(label_text(theme, property.label.clone()))
-        .child(div().flex_1())
-        .child(self::value_text(theme, property))
 }

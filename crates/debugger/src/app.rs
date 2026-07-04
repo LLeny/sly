@@ -12,7 +12,7 @@ use cirsium::widgets::{
     BreakpointKind, BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView,
     CartridgeWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView,
     DmaWidget, LogWidget, MemoryWidget, MmioView, MmioWidget, PaletteView, PaletteWidget, PpuView,
-    PpuWidget, RowProvider, ViewMode,
+    PpuWidget, RowProvider, TilesetView, TilesetWidget, ViewMode,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
@@ -42,13 +42,18 @@ pub(crate) struct Debugger {
     target: Box<dyn DebugCore>,
     cartridge: CartridgeView,
     mmio_view: MmioView,
-    mmio_expanded: HashSet<SharedString>,
     dma_view: DmaView,
-    dma_expanded: HashSet<SharedString>,
     palette_view: PaletteView,
     palette_selected: Option<(usize, usize)>,
     ppu_view: PpuView,
-    ppu_expanded: HashSet<SharedString>,
+    tileset: Option<TilesetView>,
+    tileset_layers: Vec<SharedString>,
+    tileset_palette_count: usize,
+    tileset_layer: usize,
+    tileset_tick: u32,
+    tileset_palettes: HashMap<usize, usize>,
+    tileset_selected: HashMap<usize, usize>,
+    expanded: HashMap<&'static str, HashSet<SharedString>>,
     manifest: ComponentManifest,
     status: StatusView,
     panes: Vec<ProcessorPane>,
@@ -60,7 +65,7 @@ pub(crate) struct Debugger {
     log_filter_input: Entity<TextInput>,
     collapsed: HashSet<SharedString>,
     settings: Option<Point<Pixels>>,
-    workspace: Option<SharedString>,
+    workspace: SharedString,
     running: bool,
     run_task: Option<Task<()>>,
 }
@@ -111,17 +116,31 @@ impl Debugger {
 
         let manifest = target.manifest();
         manifest.validate();
+        let workspace = manifest
+            .workspaces
+            .first()
+            .map(|w| SharedString::from(w.id.clone()))
+            .unwrap_or_default();
 
         Self {
             cartridge: target.cartridge().clone().into(),
             mmio_view: target.mmio_view().into(),
-            mmio_expanded: HashSet::new(),
             dma_view: target.dma_view().into(),
-            dma_expanded: HashSet::new(),
             palette_view: target.palette_view().into(),
             palette_selected: None,
             ppu_view: target.ppu_view().into(),
-            ppu_expanded: HashSet::new(),
+            tileset: target.tileset(0, 0).map(Into::into),
+            tileset_layers: target
+                .tileset_layers()
+                .into_iter()
+                .map(SharedString::from)
+                .collect(),
+            tileset_palette_count: target.tileset_palettes(),
+            tileset_layer: 0,
+            tileset_tick: 0,
+            tileset_palettes: HashMap::new(),
+            tileset_selected: HashMap::new(),
+            expanded: HashMap::new(),
             manifest,
             status: target.status("paused").into(),
             memory: Memory::new(target.as_ref()),
@@ -134,7 +153,7 @@ impl Debugger {
             panes,
             collapsed: HashSet::new(),
             settings: None,
-            workspace: None,
+            workspace,
             running: false,
             run_task: None,
         }
@@ -146,6 +165,20 @@ impl Debugger {
         pane.call_stack = target.call_stack(&pane.id).into();
     }
 
+    fn tileset_palette(&self) -> usize {
+        self.tileset_palettes
+            .get(&self.tileset_layer)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn refresh_tileset(&mut self) {
+        self.tileset = self
+            .target
+            .tileset(self.tileset_layer, self.tileset_palette())
+            .map(Into::into);
+    }
+
     fn refresh_panes(&mut self, mode: CpuRefresh) {
         for pane in &mut self.panes {
             Self::refresh_pane_view(self.target.as_ref(), pane, mode);
@@ -154,6 +187,11 @@ impl Debugger {
         self.dma_view = self.target.dma_view().into();
         self.palette_view = self.target.palette_view().into();
         self.ppu_view = self.target.ppu_view().into();
+
+        self.tileset_tick = self.tileset_tick.wrapping_add(1);
+        if !self.running || self.tileset_tick % 15 == 0 {
+            self.refresh_tileset();
+        }
     }
 
     fn track_changes(
@@ -191,13 +229,12 @@ impl Debugger {
         cx.notify();
     }
 
-    fn toggle_dma(&mut self, id: SharedString, cx: &mut Context<Self>) {
-        Self::toggle_in(&mut self.dma_expanded, id);
-        cx.notify();
+    fn expanded_set(&self, widget: &str) -> HashSet<SharedString> {
+        self.expanded.get(widget).cloned().unwrap_or_default()
     }
 
-    fn toggle_ppu(&mut self, id: SharedString, cx: &mut Context<Self>) {
-        Self::toggle_in(&mut self.ppu_expanded, id);
+    fn toggle_expanded(&mut self, widget: &'static str, id: SharedString, cx: &mut Context<Self>) {
+        Self::toggle_in(self.expanded.entry(widget).or_default(), id);
         cx.notify();
     }
 
@@ -207,13 +244,30 @@ impl Debugger {
         cx.notify();
     }
 
-    fn set_workspace(&mut self, id: SharedString, cx: &mut Context<Self>) {
-        self.workspace = Some(id);
+    fn select_tileset_layer(&mut self, layer: usize, cx: &mut Context<Self>) {
+        self.tileset_layer = layer;
+        self.refresh_tileset();
         cx.notify();
     }
 
-    fn toggle_mmio(&mut self, id: SharedString, cx: &mut Context<Self>) {
-        Self::toggle_in(&mut self.mmio_expanded, id);
+    fn select_tileset_palette(&mut self, palette: usize, cx: &mut Context<Self>) {
+        self.tileset_palettes.insert(self.tileset_layer, palette);
+        self.refresh_tileset();
+        cx.notify();
+    }
+
+    fn select_tile(&mut self, tile: usize, cx: &mut Context<Self>) {
+        let layer = self.tileset_layer;
+        if self.tileset_selected.get(&layer) == Some(&tile) {
+            self.tileset_selected.remove(&layer);
+        } else {
+            self.tileset_selected.insert(layer, tile);
+        }
+        cx.notify();
+    }
+
+    fn set_workspace(&mut self, id: SharedString, cx: &mut Context<Self>) {
+        self.workspace = id;
         cx.notify();
     }
 
@@ -246,6 +300,7 @@ impl Debugger {
             }));
         } else {
             self.run_task = None;
+            self.refresh_tileset();
         }
 
         cx.notify();
@@ -267,6 +322,7 @@ impl Debugger {
         let keep_going = outcome == RunOutcome::Done;
         if !keep_going {
             self.running = false;
+            self.refresh_tileset();
         }
 
         self.set_state(match outcome {
@@ -646,7 +702,6 @@ fn workspace_icon(icon: WorkspaceIcon) -> &'static str {
     match icon {
         WorkspaceIcon::Cpu => icon::CPU,
         WorkspaceIcon::Video => icon::MONITOR,
-        WorkspaceIcon::Generic => icon::LIST,
     }
 }
 
@@ -699,13 +754,11 @@ impl Render for Debugger {
         let this = cx.entity();
 
         let manifest = &self.manifest;
-        let active_workspace = self.workspace.clone().unwrap_or_else(|| {
-            manifest
-                .workspaces
-                .first()
-                .map(|w| SharedString::from(w.id.clone()))
-                .unwrap_or_default()
-        });
+        let active_workspace = self.workspace.clone();
+        let visible: HashSet<&str> = manifest
+            .in_workspace(&active_workspace)
+            .map(|p| p.id.as_ref())
+            .collect();
 
         let workspace_switcher = (manifest.workspaces.len() > 1).then(|| {
             let mut switcher = Segmented::new("workspace").selected(active_workspace.clone());
@@ -756,9 +809,11 @@ impl Render for Debugger {
             .child(settings_button)
             .child(theme_toggle);
 
-        let cartridge = CartridgeWidget::new(self.cartridge.clone())
-            .collapsed(self.is_collapsed(CartridgeWidget::ID))
-            .on_toggle(cx.listener(|this, _, _, cx| this.toggle(CartridgeWidget::ID, cx)));
+        let cartridge = visible.contains(CartridgeWidget::ID).then(|| {
+            CartridgeWidget::new(self.cartridge.clone())
+                .collapsed(self.is_collapsed(CartridgeWidget::ID))
+                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(CartridgeWidget::ID, cx)))
+        });
 
         let controls_view = ControlsView {
             running: self.running,
@@ -772,82 +827,124 @@ impl Render for Debugger {
             .on_reset(cx.listener(|this, _, _, cx| this.reset(cx)));
 
         let mmio = MmioWidget::new(self.mmio_view.clone())
-            .expanded(self.mmio_expanded.clone())
+            .expanded(self.expanded_set(MmioWidget::ID))
             .collapsed(self.is_collapsed(MmioWidget::ID))
             .on_toggle(cx.listener(|this, _, _, cx| this.toggle(MmioWidget::ID, cx)))
             .on_toggle_register({
                 let this = this.clone();
-                move |id, _, cx| this.update(cx, |d, cx| d.toggle_mmio(id, cx))
+                move |id, _, cx| this.update(cx, |d, cx| d.toggle_expanded(MmioWidget::ID, id, cx))
             });
 
-        let dma = DmaWidget::new(self.dma_view.clone())
-            .expanded(self.dma_expanded.clone())
-            .collapsed(self.is_collapsed(DmaWidget::ID))
-            .on_toggle(cx.listener(|this, _, _, cx| this.toggle(DmaWidget::ID, cx)))
-            .on_toggle_channel({
-                let this = this.clone();
-                move |id, _, cx| this.update(cx, |d, cx| d.toggle_dma(id, cx))
-            });
+        let dma = visible.contains(DmaWidget::ID).then(|| {
+            DmaWidget::new(self.dma_view.clone())
+                .expanded(self.expanded_set(DmaWidget::ID))
+                .collapsed(self.is_collapsed(DmaWidget::ID))
+                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(DmaWidget::ID, cx)))
+                .on_toggle_channel({
+                    let this = this.clone();
+                    move |id, _, cx| {
+                        this.update(cx, |d, cx| d.toggle_expanded(DmaWidget::ID, id, cx))
+                    }
+                })
+        });
 
-        let palette = PaletteWidget::new(self.palette_view.clone())
-            .selected(self.palette_selected)
-            .collapsed(self.is_collapsed(PaletteWidget::ID))
-            .on_toggle(cx.listener(|this, _, _, cx| this.toggle(PaletteWidget::ID, cx)))
-            .on_select({
-                let this = this.clone();
-                move |palette, color, _, cx| {
-                    this.update(cx, |d, cx| d.select_palette_color(palette, color, cx))
-                }
-            });
+        let palette = visible.contains(PaletteWidget::ID).then(|| {
+            PaletteWidget::new(self.palette_view.clone())
+                .selected(self.palette_selected)
+                .collapsed(self.is_collapsed(PaletteWidget::ID))
+                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(PaletteWidget::ID, cx)))
+                .on_select({
+                    let this = this.clone();
+                    move |palette, color, _, cx| {
+                        this.update(cx, |d, cx| d.select_palette_color(palette, color, cx))
+                    }
+                })
+        });
 
-        let ppu = PpuWidget::new(self.ppu_view.clone())
-            .expanded(self.ppu_expanded.clone())
-            .collapsed(self.is_collapsed(PpuWidget::ID))
-            .on_toggle(cx.listener(|this, _, _, cx| this.toggle(PpuWidget::ID, cx)))
-            .on_toggle_group({
-                let this = this.clone();
-                move |id, _, cx| this.update(cx, |d, cx| d.toggle_ppu(id, cx))
-            });
+        let ppu = visible.contains(PpuWidget::ID).then(|| {
+            PpuWidget::new(self.ppu_view.clone())
+                .expanded(self.expanded_set(PpuWidget::ID))
+                .collapsed(self.is_collapsed(PpuWidget::ID))
+                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(PpuWidget::ID, cx)))
+                .on_toggle_group({
+                    let this = this.clone();
+                    move |id, _, cx| {
+                        this.update(cx, |d, cx| d.toggle_expanded(PpuWidget::ID, id, cx))
+                    }
+                })
+        });
+
+        let tileset = visible.contains(TilesetWidget::ID).then(|| {
+            TilesetWidget::new(self.tileset.clone())
+                .layers(self.tileset_layers.clone())
+                .layer(self.tileset_layer)
+                .palettes(self.tileset_palette_count)
+                .palette(self.tileset_palette())
+                .selected(self.tileset_selected.get(&self.tileset_layer).copied())
+                .collapsed(self.is_collapsed(TilesetWidget::ID))
+                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(TilesetWidget::ID, cx)))
+                .on_layer_select({
+                    let this = this.clone();
+                    move |layer, _, cx| this.update(cx, |d, cx| d.select_tileset_layer(layer, cx))
+                })
+                .on_palette_select({
+                    let this = this.clone();
+                    move |palette, _, cx| {
+                        this.update(cx, |d, cx| d.select_tileset_palette(palette, cx))
+                    }
+                })
+                .on_select({
+                    let this = this.clone();
+                    move |tile, _, cx| this.update(cx, |d, cx| d.select_tile(tile, cx))
+                })
+        });
 
         let breakpoints =
-            BreakpointsWidget::new(self.breakpoints.view(), self.breakpoints.draft_kind())
-                .collapsed(self.is_collapsed(BreakpointsWidget::ID))
-                .scrollable(true)
-                .address_input(self.bp_input.clone())
-                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(BreakpointsWidget::ID, cx)))
-                .on_add(cx.listener(|this, _, _, cx| this.bp_add(cx)))
-                .on_kind_open(
-                    cx.listener(|this, ev: &ClickEvent, _, cx| {
+            visible.contains(BreakpointsWidget::ID).then(|| {
+                BreakpointsWidget::new(self.breakpoints.view(), self.breakpoints.draft_kind())
+                    .collapsed(self.is_collapsed(BreakpointsWidget::ID))
+                    .scrollable(true)
+                    .address_input(self.bp_input.clone())
+                    .on_toggle(cx.listener(|this, _, _, cx| this.toggle(BreakpointsWidget::ID, cx)))
+                    .on_add(cx.listener(|this, _, _, cx| this.bp_add(cx)))
+                    .on_kind_open(cx.listener(|this, ev: &ClickEvent, _, cx| {
                         this.bp_open_combo(ev.position(), cx)
-                    }),
-                )
-                .on_remove({
-                    let this = this.clone();
-                    move |id, _, cx| this.update(cx, |d, cx| d.bp_remove(id, cx))
-                })
-                .on_toggle_entry({
-                    let this = this.clone();
-                    move |id, _, cx| this.update(cx, |d, cx| d.bp_toggle(id, cx))
-                });
+                    }))
+                    .on_remove({
+                        let this = this.clone();
+                        move |id, _, cx| this.update(cx, |d, cx| d.bp_remove(id, cx))
+                    })
+                    .on_toggle_entry({
+                        let this = this.clone();
+                        move |id, _, cx| this.update(cx, |d, cx| d.bp_toggle(id, cx))
+                    })
+            });
 
         let mut cpu_panels: Vec<(String, AnyElement)> = Vec::with_capacity(self.panes.len());
         let mut disasm_panels: Vec<(String, AnyElement)> = Vec::with_capacity(self.panes.len());
         let mut disasm_menus = Vec::new();
 
         for (pane_ix, pane) in self.panes.iter().enumerate() {
-            let cpu_id = SharedString::from(pane.id.arc());
-            let cpu_widget = CpuWidget::new(pane.cpu_view.clone().into())
-                .id(cpu_id.clone())
-                .title(pane.title.clone())
-                .collapsed(self.is_collapsed(&cpu_id))
-                .on_toggle({
-                    let id = cpu_id.clone();
-                    cx.listener(move |this, _, _, cx| this.toggle(id.clone(), cx))
-                });
-            cpu_panels.push((
-                pane.id.as_str().to_string(),
-                div().flex_none().child(cpu_widget).into_any_element(),
-            ));
+            if visible.contains(pane.id.as_str()) {
+                let cpu_id = SharedString::from(pane.id.arc());
+                let cpu_widget = CpuWidget::new(pane.cpu_view.clone().into())
+                    .id(cpu_id.clone())
+                    .title(pane.title.clone())
+                    .collapsed(self.is_collapsed(&cpu_id))
+                    .on_toggle({
+                        let id = cpu_id.clone();
+                        cx.listener(move |this, _, _, cx| this.toggle(id.clone(), cx))
+                    });
+                cpu_panels.push((
+                    pane.id.as_str().to_string(),
+                    div().flex_none().child(cpu_widget).into_any_element(),
+                ));
+            }
+
+            let disasm_panel_id = format!("{}.disasm", pane.id.as_str());
+            if !visible.contains(disasm_panel_id.as_str()) {
+                continue;
+            }
 
             let disasm_id = SharedString::from(format!("{}-disasm", pane.id.as_str()));
             let disasm_title = SharedString::from(format!("{} Disassembly", pane.title));
@@ -946,10 +1043,7 @@ impl Render for Debugger {
                         .child(callstack),
                 );
 
-            disasm_panels.push((
-                format!("{}.disasm", pane.id.as_str()),
-                pane_row.into_any_element(),
-            ));
+            disasm_panels.push((disasm_panel_id, pane_row.into_any_element()));
 
             if let Some(menu) = pane.disasm.menu.as_ref() {
                 let addr = menu.addr;
@@ -1242,20 +1336,33 @@ impl Render for Debugger {
 
         let mut panels: HashMap<String, AnyElement> = HashMap::new();
         panels.insert(
-            "controls".into(),
+            ControlsWidget::ID.into(),
             div().flex_none().child(controls).into_any_element(),
         );
-        panels.insert("breakpoints".into(), breakpoints.into_any_element());
-        panels.insert("dma".into(), dma.into_any_element());
-        panels.insert("palette".into(), palette.into_any_element());
-        panels.insert("ppu".into(), ppu.into_any_element());
-        panels.insert(
-            "cartridge".into(),
-            div().flex_none().child(cartridge).into_any_element(),
-        );
-        panels.insert("mmio".into(), mmio.into_any_element());
-        panels.insert("memory".into(), memory_widget.into_any_element());
-        panels.insert("log".into(), log_region.into_any_element());
+        if let Some(breakpoints) = breakpoints {
+            panels.insert(BreakpointsWidget::ID.into(), breakpoints.into_any_element());
+        }
+        if let Some(dma) = dma {
+            panels.insert(DmaWidget::ID.into(), dma.into_any_element());
+        }
+        if let Some(palette) = palette {
+            panels.insert(PaletteWidget::ID.into(), palette.into_any_element());
+        }
+        if let Some(ppu) = ppu {
+            panels.insert(PpuWidget::ID.into(), ppu.into_any_element());
+        }
+        if let Some(tileset) = tileset {
+            panels.insert(TilesetWidget::ID.into(), tileset.into_any_element());
+        }
+        if let Some(cartridge) = cartridge {
+            panels.insert(
+                CartridgeWidget::ID.into(),
+                div().flex_none().child(cartridge).into_any_element(),
+            );
+        }
+        panels.insert(MmioWidget::ID.into(), mmio.into_any_element());
+        panels.insert(MemoryWidget::ID.into(), memory_widget.into_any_element());
+        panels.insert(LogWidget::ID.into(), log_region.into_any_element());
         panels.extend(cpu_panels);
         panels.extend(disasm_panels);
 
