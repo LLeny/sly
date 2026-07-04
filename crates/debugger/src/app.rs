@@ -11,8 +11,9 @@ use cirsium::components::{
 use cirsium::widgets::{
     BreakpointKind, BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView,
     CartridgeWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView,
-    DmaWidget, LogWidget, MemoryWidget, MmioView, MmioWidget, PaletteView, PaletteWidget, PpuView,
-    PpuWidget, RowProvider, TilesetView, TilesetWidget, ViewMode,
+    DmaWidget, GridPanel, LogWidget, MemoryWidget, MmioView, MmioWidget, PaletteView,
+    PaletteWidget, PpuView, PpuWidget, RowProvider, TilemapView, TilemapWidget, TilesetLayer,
+    TilesetView, TilesetWidget, ViewMode,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
@@ -20,7 +21,7 @@ use frontend_model::{ComponentManifest, DockLocation, WorkspaceIcon};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, MouseDownEvent, Pixels, Point,
-    SharedString, Size, Task, Window, div, px,
+    RenderImage, SharedString, Size, Task, Window, div, px,
 };
 
 use crate::breakpoints::Breakpoints;
@@ -38,6 +39,47 @@ struct ProcessorPane {
     reg_changes: ChangeTracker<Arc<str>>,
 }
 
+#[derive(Default)]
+struct GridState {
+    layer: usize,
+    selected: HashMap<usize, usize>,
+    hovered: Option<usize>,
+    viewport: Size<f32>,
+}
+
+impl GridState {
+    fn selected(&self) -> Option<usize> {
+        self.selected.get(&self.layer).copied()
+    }
+
+    fn toggle_selected(&mut self, index: usize) {
+        if self.selected.get(&self.layer) == Some(&index) {
+            self.selected.remove(&self.layer);
+        } else {
+            self.selected.insert(self.layer, index);
+        }
+    }
+
+    fn set_hovered(&mut self, hovered: Option<usize>) -> bool {
+        let changed = self.hovered != hovered;
+        if changed {
+            self.hovered = hovered;
+        }
+        changed
+    }
+
+    fn set_viewport(&mut self, viewport: Size<f32>) -> bool {
+        let changed = (self.viewport.width - viewport.width).abs() > 0.5
+            || (self.viewport.height - viewport.height).abs() > 0.5;
+
+        if changed {
+            self.viewport = viewport;
+        }
+
+        changed
+    }
+}
+
 pub(crate) struct Debugger {
     target: Box<dyn DebugCore>,
     cartridge: CartridgeView,
@@ -47,12 +89,10 @@ pub(crate) struct Debugger {
     palette_selected: Option<(usize, usize)>,
     ppu_view: PpuView,
     tileset: Option<TilesetView>,
-    tileset_layers: Vec<SharedString>,
-    tileset_palette_count: usize,
-    tileset_layer: usize,
-    tileset_tick: u32,
-    tileset_palettes: HashMap<usize, usize>,
-    tileset_selected: HashMap<usize, usize>,
+    tileset_layers: Vec<TilesetLayer>,
+    tileset_ui: GridState,
+    tilemap: Option<TilemapView>,
+    tilemap_ui: GridState,
     expanded: HashMap<&'static str, HashSet<SharedString>>,
     manifest: ComponentManifest,
     status: StatusView,
@@ -133,13 +173,11 @@ impl Debugger {
             tileset_layers: target
                 .tileset_layers()
                 .into_iter()
-                .map(SharedString::from)
+                .map(Into::into)
                 .collect(),
-            tileset_palette_count: target.tileset_palettes(),
-            tileset_layer: 0,
-            tileset_tick: 0,
-            tileset_palettes: HashMap::new(),
-            tileset_selected: HashMap::new(),
+            tileset_ui: GridState::default(),
+            tilemap: target.tilemap(0).map(Into::into),
+            tilemap_ui: GridState::default(),
             expanded: HashMap::new(),
             manifest,
             status: target.status("paused").into(),
@@ -165,33 +203,72 @@ impl Debugger {
         pane.call_stack = target.call_stack(&pane.id).into();
     }
 
-    fn tileset_palette(&self) -> usize {
-        self.tileset_palettes
-            .get(&self.tileset_layer)
-            .copied()
-            .unwrap_or(0)
+    fn selected_color(&self) -> usize {
+        self.palette_selected.map_or(0, |(palette, color)| {
+            let row = self
+                .palette_view
+                .palettes
+                .get(palette)
+                .map_or(16, |row| row.len());
+            palette * row + color
+        })
     }
 
-    fn refresh_tileset(&mut self) {
+    fn drop_grid_image(cx: &mut Context<Self>, image: Option<Arc<RenderImage>>) {
+        if let Some(image) = image {
+            cx.defer(move |cx| cx.drop_image(image, None));
+        }
+    }
+
+    fn refresh_tileset(&mut self, cx: &mut Context<Self>) {
+        Self::drop_grid_image(cx, self.tileset.take().and_then(|view| view.image));
         self.tileset = self
             .target
-            .tileset(self.tileset_layer, self.tileset_palette())
+            .tileset(self.tileset_ui.layer, self.selected_color())
             .map(Into::into);
     }
 
-    fn refresh_panes(&mut self, mode: CpuRefresh) {
+    fn refresh_tilemap(&mut self, cx: &mut Context<Self>) {
+        Self::drop_grid_image(cx, self.tilemap.take().and_then(|view| view.image));
+        self.tilemap = self.target.tilemap(self.tilemap_ui.layer).map(Into::into);
+    }
+
+    fn refresh_panes(&mut self, mode: CpuRefresh, cx: &mut Context<Self>) {
         for pane in &mut self.panes {
             Self::refresh_pane_view(self.target.as_ref(), pane, mode);
         }
         self.mmio_view = self.target.mmio_view().into();
         self.dma_view = self.target.dma_view().into();
+
+        if self.video_panes_visible() {
+            self.refresh_video_panes(cx);
+        }
+    }
+
+    fn video_panes_visible(&self) -> bool {
+        const VIDEO_PANELS: [&str; 4] = [
+            PaletteWidget::ID,
+            PpuWidget::ID,
+            TilesetWidget::ID,
+            TilemapWidget::ID,
+        ];
+        self.manifest
+            .in_workspace(&self.workspace)
+            .any(|panel| VIDEO_PANELS.contains(&&*panel.id))
+    }
+
+    fn refresh_video_panes(&mut self, cx: &mut Context<Self>) {
         self.palette_view = self.target.palette_view().into();
         self.ppu_view = self.target.ppu_view().into();
+        self.tileset_layers = self
+            .target
+            .tileset_layers()
+            .into_iter()
+            .map(Into::into)
+            .collect();
 
-        self.tileset_tick = self.tileset_tick.wrapping_add(1);
-        if !self.running || self.tileset_tick % 15 == 0 {
-            self.refresh_tileset();
-        }
+        self.refresh_tileset(cx);
+        self.refresh_tilemap(cx);
     }
 
     fn track_changes(
@@ -241,33 +318,74 @@ impl Debugger {
     fn select_palette_color(&mut self, palette: usize, color: usize, cx: &mut Context<Self>) {
         let selected = Some((palette, color));
         self.palette_selected = (self.palette_selected != selected).then_some((palette, color));
+        self.refresh_tileset(cx);
         cx.notify();
     }
 
-    fn select_tileset_layer(&mut self, layer: usize, cx: &mut Context<Self>) {
-        self.tileset_layer = layer;
-        self.refresh_tileset();
-        cx.notify();
-    }
-
-    fn select_tileset_palette(&mut self, palette: usize, cx: &mut Context<Self>) {
-        self.tileset_palettes.insert(self.tileset_layer, palette);
-        self.refresh_tileset();
-        cx.notify();
-    }
-
-    fn select_tile(&mut self, tile: usize, cx: &mut Context<Self>) {
-        let layer = self.tileset_layer;
-        if self.tileset_selected.get(&layer) == Some(&tile) {
-            self.tileset_selected.remove(&layer);
-        } else {
-            self.tileset_selected.insert(layer, tile);
-        }
-        cx.notify();
+    fn wire_grid(
+        &self,
+        panel: GridPanel,
+        id: &'static str,
+        state: &GridState,
+        ui: fn(&mut Self) -> &mut GridState,
+        refresh: fn(&mut Self, &mut Context<Self>),
+        cx: &mut Context<Self>,
+    ) -> GridPanel {
+        let this = cx.entity();
+        panel
+            .layers(self.tileset_layers.clone())
+            .layer(state.layer)
+            .selected(state.selected())
+            .hovered(state.hovered)
+            .viewport(state.viewport)
+            .collapsed(self.is_collapsed(id))
+            .on_toggle(cx.listener(move |this, _, _, cx| this.toggle(id, cx)))
+            .on_layer_select({
+                let this = this.clone();
+                move |layer, _, cx| {
+                    this.update(cx, |d, cx| {
+                        ui(d).layer = layer;
+                        refresh(d, cx);
+                        cx.notify();
+                    })
+                }
+            })
+            .on_select({
+                let this = this.clone();
+                move |index, _, cx| {
+                    this.update(cx, |d, cx| {
+                        ui(d).toggle_selected(index);
+                        cx.notify();
+                    })
+                }
+            })
+            .on_hover({
+                let this = this.clone();
+                move |hovered, _, cx| {
+                    this.update(cx, |d, cx| {
+                        if ui(d).set_hovered(hovered) {
+                            cx.notify();
+                        }
+                    })
+                }
+            })
+            .on_viewport({
+                let this = this.clone();
+                move |viewport, _, cx| {
+                    this.update(cx, |d, cx| {
+                        if ui(d).set_viewport(viewport) {
+                            cx.notify();
+                        }
+                    })
+                }
+            })
     }
 
     fn set_workspace(&mut self, id: SharedString, cx: &mut Context<Self>) {
         self.workspace = id;
+        if self.video_panes_visible() {
+            self.refresh_video_panes(cx);
+        }
         cx.notify();
     }
 
@@ -300,7 +418,6 @@ impl Debugger {
             }));
         } else {
             self.run_task = None;
-            self.refresh_tileset();
         }
 
         cx.notify();
@@ -316,13 +433,12 @@ impl Debugger {
             self.target.debug_run_frame(self.breakpoints.marks())
         };
 
-        self.refresh_panes(CpuRefresh::Highlight);
+        self.refresh_panes(CpuRefresh::Highlight, cx);
         self.follow_memory();
 
         let keep_going = outcome == RunOutcome::Done;
         if !keep_going {
             self.running = false;
-            self.refresh_tileset();
         }
 
         self.set_state(match outcome {
@@ -341,7 +457,7 @@ impl Debugger {
             self.target.debug_step()
         };
 
-        self.refresh_panes(CpuRefresh::Highlight);
+        self.refresh_panes(CpuRefresh::Highlight, cx);
         self.set_state(if ok { "paused" } else { "unimplemented op" });
         self.running = false;
         self.run_task = None;
@@ -353,7 +469,7 @@ impl Debugger {
     fn reset(&mut self, cx: &mut Context<Self>) {
         self.target.reset();
 
-        self.refresh_panes(CpuRefresh::Baseline);
+        self.refresh_panes(CpuRefresh::Baseline, cx);
         self.set_state("reset");
         self.running = false;
         self.run_task = None;
@@ -875,28 +991,25 @@ impl Render for Debugger {
         });
 
         let tileset = visible.contains(TilesetWidget::ID).then(|| {
-            TilesetWidget::new(self.tileset.clone())
-                .layers(self.tileset_layers.clone())
-                .layer(self.tileset_layer)
-                .palettes(self.tileset_palette_count)
-                .palette(self.tileset_palette())
-                .selected(self.tileset_selected.get(&self.tileset_layer).copied())
-                .collapsed(self.is_collapsed(TilesetWidget::ID))
-                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(TilesetWidget::ID, cx)))
-                .on_layer_select({
-                    let this = this.clone();
-                    move |layer, _, cx| this.update(cx, |d, cx| d.select_tileset_layer(layer, cx))
-                })
-                .on_palette_select({
-                    let this = this.clone();
-                    move |palette, _, cx| {
-                        this.update(cx, |d, cx| d.select_tileset_palette(palette, cx))
-                    }
-                })
-                .on_select({
-                    let this = this.clone();
-                    move |tile, _, cx| this.update(cx, |d, cx| d.select_tile(tile, cx))
-                })
+            self.wire_grid(
+                TilesetWidget::panel(self.tileset.clone()),
+                TilesetWidget::ID,
+                &self.tileset_ui,
+                |d| &mut d.tileset_ui,
+                Self::refresh_tileset,
+                cx,
+            )
+        });
+
+        let tilemap = visible.contains(TilemapWidget::ID).then(|| {
+            self.wire_grid(
+                TilemapWidget::panel(self.tilemap.clone()),
+                TilemapWidget::ID,
+                &self.tilemap_ui,
+                |d| &mut d.tilemap_ui,
+                Self::refresh_tilemap,
+                cx,
+            )
         });
 
         let breakpoints =
@@ -1351,8 +1464,25 @@ impl Render for Debugger {
         if let Some(ppu) = ppu {
             panels.insert(PpuWidget::ID.into(), ppu.into_any_element());
         }
-        if let Some(tileset) = tileset {
-            panels.insert(TilesetWidget::ID.into(), tileset.into_any_element());
+        match (tileset, tilemap) {
+            (Some(tileset), Some(tilemap)) => {
+                let half = || div().flex().flex_col().flex_1().min_w(px(0.)).min_h(px(0.));
+                let row = div()
+                    .flex()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .gap_2()
+                    .child(half().child(tileset))
+                    .child(half().child(tilemap));
+                panels.insert(TilesetWidget::ID.into(), row.into_any_element());
+            }
+            (Some(tileset), None) => {
+                panels.insert(TilesetWidget::ID.into(), tileset.into_any_element());
+            }
+            (None, Some(tilemap)) => {
+                panels.insert(TilemapWidget::ID.into(), tilemap.into_any_element());
+            }
+            (None, None) => {}
         }
         if let Some(cartridge) = cartridge {
             panels.insert(

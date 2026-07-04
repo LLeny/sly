@@ -27,6 +27,7 @@ pub enum PanelKind {
     Palette,
     Ppu,
     Tileset,
+    Tilemap,
     Log,
 }
 

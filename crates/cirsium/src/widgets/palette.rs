@@ -85,6 +85,8 @@ impl RenderOnce for PaletteWidget {
         let theme = Theme::global(cx);
         let t = &*theme;
 
+        let active = self.selected.map(|(palette, _)| palette);
+
         let mut grid = div()
             .id("palette-grid")
             .flex()
@@ -101,7 +103,18 @@ impl RenderOnce for PaletteWidget {
                 .child(empty_state(t, "No palette colors available"));
         } else {
             for (palette_ix, palette) in self.view.palettes.iter().enumerate() {
-                let mut cells = div().id(palette_ix).flex().gap(px(2.));
+                let mut cells = div()
+                    .id(palette_ix)
+                    .flex()
+                    .gap(px(2.))
+                    .p(px(1.))
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(if active == Some(palette_ix) {
+                        t.accent
+                    } else {
+                        gpui::transparent_black()
+                    });
                 for (color_ix, color) in palette.iter().enumerate() {
                     cells = cells.child(self::swatch(
                         t,

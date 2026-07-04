@@ -8,7 +8,7 @@ use frontend_model::{
 
 use crate::model::{
     CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Highlight, MemoryRegion, MmioView,
-    PaletteView, PpuView, StatusView, Tileset,
+    PaletteView, PpuView, StatusView, Tilemap, Tileset, TilesetLayer,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -154,15 +154,15 @@ pub trait DebugCore: Core {
         PpuView::default()
     }
 
-    fn tileset_layers(&self) -> Vec<Arc<str>> {
+    fn tileset_layers(&self) -> Vec<TilesetLayer> {
         Vec::new()
     }
 
-    fn tileset_palettes(&self) -> usize {
-        0
+    fn tileset(&self, _layer: usize, _color: usize) -> Option<Tileset> {
+        None
     }
 
-    fn tileset(&self, _index: usize, _palette: usize) -> Option<Tileset> {
+    fn tilemap(&self, _layer: usize) -> Option<Tilemap> {
         None
     }
 
@@ -246,13 +246,9 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
         OnPause,
     ));
 
-    panels.push(PanelDescriptor::new(
-        "log",
-        "Log",
-        PanelKind::Log,
-        Bottom,
-        Continuous,
-    ));
+    panels.push(
+        PanelDescriptor::new("log", "Log", PanelKind::Log, Bottom, Continuous).tag(CPU_WORKSPACE),
+    );
 
     ComponentManifest {
         system: Arc::from(""),

@@ -5,7 +5,9 @@ use gpui::prelude::*;
 use gpui::{App, ClickEvent, Div, SharedString, Stateful, Window, div, px};
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, RowCallback, chevron_slot, label_text, row_toggle};
+use crate::components::{
+    ClickHandler, Panel, RowCallback, chevron_slot, empty_state, label_text, row_toggle,
+};
 use crate::theme::Theme;
 use crate::widgets::field::Field;
 
@@ -108,14 +110,10 @@ impl RenderOnce for PpuWidget {
             .overflow_y_scroll();
 
         if self.view.properties.is_empty() && self.view.groups.is_empty() {
-            list = list.items_center().justify_center().child(
-                div()
-                    .px_1()
-                    .py_1()
-                    .text_xs()
-                    .text_color(t.text_dim)
-                    .child("No data"),
-            );
+            list = list
+                .items_center()
+                .justify_center()
+                .child(empty_state(t, "No data"));
         } else {
             list = list.children(
                 self.view

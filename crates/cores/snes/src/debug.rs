@@ -7,9 +7,9 @@ use debugger_model::{
     DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind, Highlight,
     MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView,
     PanelDescriptor, PanelKind, PpuGroup, PpuProperty, PpuView, RefreshPolicy, RegisterView,
-    RunOutcome, StackFrame, StatusView, SyntaxSpec, Tileset, TilesetTile, TokenKind,
-    VIDEO_WORKSPACE, WorkspaceDescriptor, WorkspaceIcon, hex, standard_manifest,
-    strip_symbol_sigils, tokenize,
+    RunOutcome, StackFrame, StatusView, SyntaxSpec, Tilemap, TilemapEntry, Tileset, TilesetLayer,
+    TilesetTile, TokenKind, VIDEO_WORKSPACE, WorkspaceDescriptor, WorkspaceIcon, hex,
+    standard_manifest, strip_symbol_sigils, tokenize,
 };
 
 use crate::apu::{Apu, spc700};
@@ -270,16 +270,21 @@ impl DebugCore for SnesDebug {
         self::ppu_view(&self.core)
     }
 
-    fn tileset_layers(&self) -> Vec<Arc<str>> {
-        (1..=4).map(|i| format!("BG{i}").into()).collect()
+    fn tileset_layers(&self) -> Vec<TilesetLayer> {
+        (0..4)
+            .map(|i| TilesetLayer {
+                name: format!("BG{}", i + 1).into(),
+                enabled: self.core.ppu.bg_mode.bpp(i).is_some(),
+            })
+            .collect()
     }
 
-    fn tileset_palettes(&self) -> usize {
-        8
+    fn tileset(&self, layer: usize, color: usize) -> Option<Tileset> {
+        self::tileset(&self.core, layer, color)
     }
 
-    fn tileset(&self, index: usize, palette: usize) -> Option<Tileset> {
-        self::tileset(&self.core, index, palette)
+    fn tilemap(&self, layer: usize) -> Option<Tilemap> {
+        self::tilemap(&self.core, layer)
     }
 
     fn manifest(&self) -> ComponentManifest {
@@ -330,6 +335,17 @@ impl DebugCore for SnesDebug {
                 "tileset",
                 "Tileset",
                 PanelKind::Tileset,
+                DockLocation::Center,
+                RefreshPolicy::OnPause,
+            )
+            .tag(VIDEO_WORKSPACE),
+        );
+        manifest.insert_after(
+            PanelKind::Tileset,
+            PanelDescriptor::new(
+                "tilemap",
+                "Tilemap",
+                PanelKind::Tilemap,
                 DockLocation::Center,
                 RefreshPolicy::OnPause,
             )
@@ -731,7 +747,7 @@ fn mmio_field_view(field: &crate::mmio::FieldInfo, parent: u32) -> MmioFieldView
                 .variants
                 .iter()
                 .find(|(disc, _)| *disc == value as u128)
-                .map(|(_, name)| format!("{name} ({value})"))
+                .map(|(_, name)| name.to_string())
                 .unwrap_or_else(fmt_hex);
             (display, false, Vec::new())
         }
@@ -873,12 +889,14 @@ fn ppu_view(core: &Snes) -> PpuView {
                 None => "unused".to_string(),
             };
             let tileset: Arc<str> = hex(layer.tileset_addr, 16).into();
+            let tilemap: Arc<str> = hex(layer.tilemap_addr, 16).into();
 
             PpuGroup::new(
                 format!("ppu-bg{}", i + 1),
                 format!("BG{}", i + 1),
                 vec![
                     PpuProperty::new("Tileset", tileset.clone()),
+                    PpuProperty::new("Tilemap", tilemap),
                     PpuProperty::new("Tile size", tile_size),
                     PpuProperty::new("Depth", depth),
                 ],
@@ -890,20 +908,25 @@ fn ppu_view(core: &Snes) -> PpuView {
     PpuView { properties, groups }
 }
 
-fn tileset(core: &Snes, layer: usize, palette: usize) -> Option<Tileset> {
+fn bg_palette_colors(core: &Snes, layer: usize, bpp: u8, palette: usize) -> Vec<(u8, u8, u8)> {
+    let (base, count) = core.bg_palette(layer, bpp, palette);
+    (0..count)
+        .map(|i| crate::ppu::cgram::rgb(core.ppu.cgram.word((base + i) as u8)))
+        .collect()
+}
+
+fn tileset(core: &Snes, layer: usize, color: usize) -> Option<Tileset> {
     let data = core.tileset(layer)?;
 
-    let (base, count) = core.bg_palette(layer, data.bpp, palette);
-    let colors: Vec<(u8, u8, u8)> = (0..count)
-        .map(|i| crate::ppu::cgram::rgb(core.ppu.cgram.word((base + i) as u8)))
-        .collect();
+    let palette = core.bg_palette_index(layer, data.bpp, color);
+    let colors = self::bg_palette_colors(core, layer, data.bpp, palette);
 
     let tiles = data
         .tiles
         .iter()
         .enumerate()
         .map(|(i, tile)| TilesetTile {
-            addr: format!("VRAM {}", hex(data.tile_addr(i), 16)).into(),
+            addr: data.tile_addr(i),
             pixels: tile
                 .decode(data.bpp)
                 .as_flattened()
@@ -915,7 +938,70 @@ fn tileset(core: &Snes, layer: usize, palette: usize) -> Option<Tileset> {
 
     Some(Tileset {
         bpp: data.bpp,
+        tile_bytes: data.tile_bytes(),
         tiles,
+    })
+}
+
+fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {
+    let data = core.tilemap(layer)?;
+    let bpp = core.ppu.bg_mode.bpp(layer)?;
+
+    let palettes: Vec<Vec<(u8, u8, u8)>> = (0..8)
+        .map(|palette| self::bg_palette_colors(core, layer, bpp, palette))
+        .collect();
+
+    let size = data.tile_px as usize;
+
+    let mut decoded: Vec<Option<[[u8; 8]; 8]>> = vec![None; 1024];
+    let mut decode = |index: u16| {
+        let index = index & 0x3FF;
+        *decoded[index as usize]
+            .get_or_insert_with(|| core.bg_tile(layer, index).unwrap_or_default().decode(bpp))
+    };
+
+    let mut indices = vec![0u8; size * size];
+    let mut entries = Vec::with_capacity(data.entries.len());
+    for (i, entry) in data.entries.iter().enumerate() {
+        let (x, y) = (i as u32 % data.width, i as u32 / data.width);
+        let colors = &palettes[entry.palette_selection as usize];
+
+        for sub_y in 0..size / 8 {
+            for sub_x in 0..size / 8 {
+                let index = entry.tile_index + sub_x as u16 + sub_y as u16 * 16;
+                for (row, line) in decode(index).iter().enumerate() {
+                    let offset = (sub_y * 8 + row) * size + sub_x * 8;
+                    indices[offset..offset + 8].copy_from_slice(line);
+                }
+            }
+        }
+
+        let mut pixels = Vec::with_capacity(size * size);
+        for py in 0..size {
+            for px in 0..size {
+                let px = if entry.flip_h { size - 1 - px } else { px };
+                let py = if entry.flip_v { size - 1 - py } else { py };
+                pixels.push(colors[indices[py * size + px] as usize]);
+            }
+        }
+
+        entries.push(TilemapEntry {
+            addr: data.entry_addr(x, y),
+            raw: entry.raw,
+            tile_index: entry.tile_index,
+            palette: entry.palette_selection,
+            priority: entry.priority,
+            flip_h: entry.flip_h,
+            flip_v: entry.flip_v,
+            pixels,
+        });
+    }
+
+    Some(Tilemap {
+        width: data.width as usize,
+        height: data.height as usize,
+        tile_px: data.tile_px as u8,
+        entries,
     })
 }
 

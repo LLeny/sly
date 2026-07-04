@@ -11,6 +11,7 @@ struct Segment {
     key: SharedString,
     icon: SharedString,
     label: SharedString,
+    enabled: bool,
 }
 
 #[derive(IntoElement)]
@@ -41,6 +42,7 @@ impl Segmented {
             key: key.into(),
             icon: icon.into(),
             label: label.into(),
+            enabled: true,
         });
         self
     }
@@ -51,6 +53,20 @@ impl Segmented {
         label: impl Into<SharedString>,
     ) -> Self {
         self.option(key, "", label)
+    }
+
+    pub fn option_disabled(
+        mut self,
+        key: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+    ) -> Self {
+        self.options.push(Segment {
+            key: key.into(),
+            icon: SharedString::default(),
+            label: label.into(),
+            enabled: false,
+        });
+        self
     }
 
     pub fn selected(mut self, key: impl Into<SharedString>) -> Self {
@@ -82,7 +98,9 @@ impl RenderOnce for Segmented {
         for option in self.options {
             let active = option.key == self.selected;
 
-            let icon_color = if active {
+            let icon_color = if !option.enabled {
+                theme.text_dim
+            } else if active {
                 theme.on_accent
             } else {
                 theme.text_secondary
@@ -96,23 +114,30 @@ impl RenderOnce for Segmented {
                 .px_2()
                 .py(px(1.))
                 .rounded_sm()
-                .cursor_pointer()
                 .text_xs()
                 .when(!option.icon.is_empty(), |b| {
                     b.child(svg().path(option.icon).size(px(12.)).text_color(icon_color))
                 })
                 .child(option.label);
 
-            if active {
-                button = button.bg(theme.accent).text_color(theme.on_accent);
+            if !option.enabled {
+                button = button.text_color(theme.text_dim);
+            } else if active {
+                button = button
+                    .cursor_pointer()
+                    .bg(theme.accent)
+                    .text_color(theme.on_accent);
             } else {
                 let hover = theme.bg_header;
                 button = button
+                    .cursor_pointer()
                     .text_color(theme.text_secondary)
                     .hover(move |s| s.bg(hover));
             }
 
-            if let Some(handler) = self.on_select.clone() {
+            if option.enabled
+                && let Some(handler) = self.on_select.clone()
+            {
                 let key = option.key.clone();
 
                 button = button.on_click(move |_, window, cx| {

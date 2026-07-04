@@ -1,7 +1,7 @@
 use chapa::BitEnum;
 
 use crate::Snes;
-use crate::macros::{register_mmio, register_mmio_raw};
+use crate::macros::{register_mmio, register_mmio_family, register_mmio_raw};
 use crate::mmio::{MemoryMap, MmioReg};
 
 pub(crate) const CGADD: u16 = 0x2121;
@@ -105,6 +105,15 @@ pub enum TileSize {
     Size16x16 = 1,
 }
 
+impl TileSize {
+    pub fn pixels(self) -> u32 {
+        match self {
+            Self::Size8x8 => 8,
+            Self::Size16x16 => 16,
+        }
+    }
+}
+
 register_mmio! {
     /// BGMODE
     pub struct BgMode @ 0x2105 {
@@ -125,6 +134,69 @@ register_mmio! {
 
         #[bits(7)]
         pub bg4_tile_size: TileSize,
+    }
+}
+
+#[derive(BitEnum, Clone, Copy, Default)]
+pub enum TilemapCount {
+    #[fallback]
+    #[default]
+    One = 0,
+    Two = 1,
+}
+
+impl TilemapCount {
+    pub fn count(self) -> u8 {
+        match self {
+            Self::One => 1,
+            Self::Two => 2,
+        }
+    }
+}
+
+register_mmio_family! {
+    /// BGnSC
+    pub struct TilemapAddrAndSize {
+        #[bits(0)]
+        pub horizontal_tilemap_count: TilemapCount,
+
+        #[bits(1)]
+        pub vertical_tilemap_count: TilemapCount,
+
+        #[bits(2..=7)]
+        pub tilemap_addr: u8,
+    }
+    symbols {
+        0x2107 => "BG1SC",
+        0x2108 => "BG2SC",
+        0x2109 => "BG3SC",
+        0x210A => "BG4SC",
+    }
+}
+
+impl TilemapAddrAndSize {
+    pub fn address(&self) -> u32 {
+        (self.tilemap_addr() as u32) << 10
+    }
+
+    pub(crate) const START: u16 = 0x2107;
+    pub(crate) const END: u16 = 0x210A;
+
+    pub(crate) fn write<M: MemoryMap>(snes: &mut Snes<M>, addr: u16, value: u8) {
+        let reg = Self::from_raw(value);
+        let layer = &mut snes.ppu.bg_layers[(addr - Self::START) as usize];
+        layer.tilemap_addr = reg.address();
+        layer.horizontal_tilemap_count = reg.horizontal_tilemap_count();
+        layer.vertical_tilemap_count = reg.vertical_tilemap_count();
+    }
+
+    pub(crate) fn peek<M: MemoryMap>(snes: &Snes<M>, addr: u16) -> u8 {
+        let layer = &snes.ppu.bg_layers[(addr - Self::START) as usize];
+        let mut reg = Self::from_raw(0);
+        reg.set_tilemap_addr((layer.tilemap_addr >> 10) as u8);
+        reg.set_horizontal_tilemap_count(layer.horizontal_tilemap_count);
+        reg.set_vertical_tilemap_count(layer.vertical_tilemap_count);
+        reg.raw()
     }
 }
 

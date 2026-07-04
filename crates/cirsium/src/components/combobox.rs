@@ -48,7 +48,7 @@ pub fn combobox_button(
         .hover(move |s| s.bg(hover_bg).border_color(hover_border))
         .child(
             div()
-                .font_family(theme.mono_font)
+                .font_family(theme.ui_font)
                 .text_xs()
                 .text_color(theme.text_primary)
                 .child(label.into()),
@@ -106,7 +106,7 @@ where
                     .when(is_selected, |d| d.bg(accent_soft))
                     .hover(move |s| s.bg(accent_soft).text_color(accent))
                     .on_click(move |_, window, cx| on_select(id.clone(), window, cx))
-                    .child(div().font_family(theme.mono_font).child(opt.label.clone()))
+                    .child(div().font_family(theme.ui_font).child(opt.label.clone()))
                     .when(is_selected, |d| {
                         d.child(svg().path(icon::CHECK).size(px(10.)).text_color(accent))
                     })

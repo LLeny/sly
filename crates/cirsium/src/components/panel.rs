@@ -5,6 +5,8 @@ use super::ClickHandler;
 use crate::assets::icon;
 use crate::theme::Theme;
 
+const HEADER_HEIGHT: f32 = 36.;
+
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Sizing {
     #[default]
@@ -118,7 +120,6 @@ impl RenderOnce for Panel {
         );
 
         let mut right = div().flex().items_center().gap_2();
-        let has_action = self.header_action.is_some();
         if let Some(action) = self.header_action {
             right = right.child(action);
         }
@@ -137,11 +138,11 @@ impl RenderOnce for Panel {
         let mut header = div()
             .id(self.id.clone())
             .flex()
+            .flex_none()
             .items_center()
             .justify_between()
+            .h(px(HEADER_HEIGHT))
             .px_3()
-            .when(has_action, |h| h.py_1())
-            .when(!has_action, |h| h.py_2())
             .bg(t.bg_header)
             .border_b_1()
             .border_color(t.border_subtle)

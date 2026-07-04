@@ -5,7 +5,9 @@ use gpui::prelude::*;
 use gpui::{App, ClickEvent, Div, SharedString, Stateful, Window, div, px};
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, RowCallback, badge, chevron_slot, row_toggle};
+use crate::components::{
+    ClickHandler, Panel, RowCallback, badge, chevron_slot, mono_text, row_toggle,
+};
 use crate::theme::Theme;
 
 #[derive(Clone)]
@@ -227,11 +229,9 @@ fn channel_row(
 }
 
 fn detail_row(theme: &Theme, detail: &DmaChannelDetail) -> Div {
-    let value = div()
-        .font_family(theme.mono_font)
-        .text_xs()
-        .text_color(theme.text_secondary)
-        .child(detail.value.clone());
-
-    crate::components::detail_row(theme, detail.label.clone(), value)
+    crate::components::detail_row(
+        theme,
+        detail.label.clone(),
+        mono_text(theme, detail.value.clone()),
+    )
 }

@@ -11,8 +11,8 @@ pub use model::{
     CallStackView, CartridgeField, CartridgeView, CpuView, DisasmLine, DisasmToken,
     DmaChannelDetail, DmaChannelView, DmaView, Field, FlagView, FlowKind, Highlight, MemoryRegion,
     MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView, PpuGroup,
-    PpuProperty, PpuView, RegisterView, StackFrame, StatusView, Tileset, TilesetTile, TokenKind,
-    hex,
+    PpuProperty, PpuView, RegisterView, StackFrame, StatusView, Tilemap, TilemapEntry, Tileset,
+    TilesetLayer, TilesetTile, TokenKind, hex,
 };
 pub use target::{
     BreakpointKind, BreakpointMark, CPU_WORKSPACE, CpuDescriptor, CpuId, DebugCore, RunOutcome,

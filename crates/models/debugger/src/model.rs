@@ -298,14 +298,41 @@ pub struct PpuView {
 
 #[derive(Clone)]
 pub struct TilesetTile {
-    pub addr: Arc<str>,
+    pub addr: u32,
     pub pixels: Vec<(u8, u8, u8)>,
 }
 
 #[derive(Clone)]
 pub struct Tileset {
     pub bpp: u8,
+    pub tile_bytes: u32,
     pub tiles: Vec<TilesetTile>,
+}
+
+#[derive(Clone)]
+pub struct TilesetLayer {
+    pub name: Arc<str>,
+    pub enabled: bool,
+}
+
+#[derive(Clone)]
+pub struct TilemapEntry {
+    pub addr: u32,
+    pub raw: u16,
+    pub tile_index: u16,
+    pub palette: u8,
+    pub priority: bool,
+    pub flip_h: bool,
+    pub flip_v: bool,
+    pub pixels: Vec<(u8, u8, u8)>,
+}
+
+#[derive(Clone)]
+pub struct Tilemap {
+    pub width: usize,
+    pub height: usize,
+    pub tile_px: u8,
+    pub entries: Vec<TilemapEntry>,
 }
 
 #[derive(Clone, Copy)]
