@@ -7,6 +7,7 @@ pub mod cpu;
 pub mod debug;
 pub mod error;
 pub mod interrupt;
+pub mod joypad;
 mod macros;
 pub mod mmio;
 pub mod ppu;
@@ -20,6 +21,7 @@ pub use mmio::{CartridgeMap, MemoryMap, Mmio};
 use crate::apu::Apu;
 use crate::cpu::disasm::Disasm;
 use crate::interrupt::Irq;
+use crate::joypad::Joypads;
 use crate::mmio::Address;
 #[cfg(feature = "debug")]
 use crate::mmio::MemoryAccess;
@@ -47,6 +49,7 @@ pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub irq: Irq,
     pub dma: Dma,
     pub apu: Apu,
+    pub joypads: Joypads,
     pub scheduler: Scheduler<M>,
     #[cfg(feature = "debug")]
     pub executing: Component,
@@ -67,6 +70,7 @@ impl<M: MemoryMap + 'static> Snes<M> {
             irq: Irq::default(),
             dma: Dma::default(),
             apu: Apu::new(),
+            joypads: Joypads::default(),
             scheduler: Scheduler::new(tv_system),
             #[cfg(feature = "debug")]
             executing: Component::Cpu,
@@ -85,6 +89,7 @@ impl<M: MemoryMap + 'static> Snes<M> {
         self.irq = Irq::default();
         self.dma = Dma::default();
         self.apu = Apu::new();
+        self.joypads.reset();
 
         self.scheduler = Scheduler::new(tv_system);
         self.scheduler

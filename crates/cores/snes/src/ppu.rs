@@ -5,6 +5,10 @@ const HBLANK_START_CLOCK: u64 = 274 * 4;
 
 pub(crate) fn vblank_start<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
     snes.irq.set_vblank(true);
+
+    if snes.irq.joypad_autoread_enabled() {
+        snes.joypads.autoread();
+    }
 }
 
 pub(crate) fn vblank_end<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {

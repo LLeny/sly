@@ -14,6 +14,17 @@ register_mmio_raw! {
     0x2143 => "APUIO3",
 }
 
+register_mmio_raw! {
+    0x4218 => "JOY1L",
+    0x4219 => "JOY1H",
+    0x421A => "JOY2L",
+    0x421B => "JOY2H",
+    0x421C => "JOY3L",
+    0x421D => "JOY3H",
+    0x421E => "JOY4L",
+    0x421F => "JOY4H",
+}
+
 register_mmio! {
     /// NMITIMEN
     pub struct NmiTimerEnable @ 0x4200 {

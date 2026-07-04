@@ -47,6 +47,10 @@ impl Irq {
         self.nmitimen.raw()
     }
 
+    pub fn joypad_autoread_enabled(&self) -> bool {
+        self.nmitimen.joypad_autoread_enable()
+    }
+
     pub fn read_rdnmi(&mut self) -> u8 {
         let value = self.rdnmi.raw();
         self.set_vblank(false);

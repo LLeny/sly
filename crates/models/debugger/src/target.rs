@@ -142,7 +142,7 @@ pub trait DebugCore: Core {
     fn dma_view(&self) -> DmaView {
         DmaView::default()
     }
-    
+
     fn status(&self, label: &str) -> StatusView;
     fn caption(&self, label: &str) -> String;
     fn memory_regions(&self) -> Vec<MemoryRegion>;
