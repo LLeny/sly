@@ -164,17 +164,21 @@ impl<'a, M: ApuMap> Interpreter<'a, M> {
     /// Record a call frame opened by the current instruction.
     #[cfg(feature = "debug")]
     fn enter_call(&mut self, kind: CallKind, caller: u16, target: u16) {
-        self.apu.call_stack.push(CallFrame {
-            kind,
-            caller: caller as u32,
-            target: target as u32,
-        });
+        crate::callstack::push_frame(
+            &mut self.apu.call_stack,
+            CallFrame {
+                kind,
+                caller: caller as u32,
+                target: target as u32,
+                sp: self.apu.spc700.sp as u16,
+            },
+        );
     }
 
-    /// Close the innermost call frame on return.
+    /// Unwind call frames the stack pointer has moved past on return.
     #[cfg(feature = "debug")]
     fn leave_call(&mut self) {
-        self.apu.call_stack.pop();
+        crate::callstack::unwind(&mut self.apu.call_stack, self.apu.spc700.sp as u16);
     }
 
     fn branch(&mut self, disp: i8) {

@@ -11,8 +11,8 @@ mod symbol;
 pub use access::{AccessTracker, MemoryAccess};
 
 use crate::mmio::regs::{
-    APU_IO_END, APU_IO_START, DmaTransferStart, HdmaTransferEnable, NmiTimerEnable,
-    VblankFlagCpuVersion,
+    APU_IO_END, APU_IO_START, DmaTransferStart, HdmaTransferEnable, HvStatusJoypadBusy,
+    NmiTimerEnable, VblankFlagCpuVersion,
 };
 use crate::{Cartridge, Snes};
 
@@ -188,6 +188,7 @@ impl<M: MemoryMap> Snes<M> {
         match reg {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::read(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::read(self),
+            HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::read(self),
             DmaTransferStart::ADDRESS => DmaTransferStart::read(self),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::read(self),
             APU_IO_START..=APU_IO_END => self.apu.cpu_read_port((reg - APU_IO_START) as usize),
@@ -205,6 +206,7 @@ impl<M: MemoryMap> Snes<M> {
         match reg {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::write(self, value),
+            HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::write(self, value),
             DmaTransferStart::ADDRESS => DmaTransferStart::write(self, value),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::write(self, value),
             APU_IO_START..=APU_IO_END => self
@@ -229,6 +231,7 @@ impl<M: MemoryMap> Snes<M> {
         match reg {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::peek(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::peek(self),
+            HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::peek(self),
             DmaTransferStart::ADDRESS => DmaTransferStart::peek(self),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::peek(self),
             APU_IO_START..=APU_IO_END => self.apu.cpu_read_port((reg - APU_IO_START) as usize),

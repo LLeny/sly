@@ -70,8 +70,15 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
     }
 
     /// The committed NIA (program bank, offset) after the op has run.
-    pub(crate) fn next(&self) -> (u8, u16) {
+    fn next(&self) -> (u8, u16) {
         (self.next_bank, self.next_pc)
+    }
+
+    pub(crate) fn commit(self) {
+        self.snes.cpu.program_bank = self.next_bank;
+        self.snes.cpu.pc = self.next_pc;
+        self.snes.cpu.normalize_emulation();
+        self.snes.cpu.narrow_index();
     }
 
     /// Le juice.
@@ -606,17 +613,21 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
     /// Record a call frame opened by the current instruction.
     #[cfg(feature = "debug")]
     fn enter_call(&mut self, kind: CallKind, caller: u32, target: u32) {
-        self.snes.cpu.call_stack.push(CallFrame {
-            kind,
-            caller,
-            target,
-        });
+        crate::callstack::push_frame(
+            &mut self.snes.cpu.call_stack,
+            CallFrame {
+                kind,
+                caller,
+                target,
+                sp: self.snes.cpu.stack_pointer,
+            },
+        );
     }
 
-    /// Close the innermost call frame on return.
+    /// Unwind call frames the stack pointer has moved past on return.
     #[cfg(feature = "debug")]
     fn leave_call(&mut self) {
-        self.snes.cpu.call_stack.pop();
+        crate::callstack::unwind(&mut self.snes.cpu.call_stack, self.snes.cpu.stack_pointer);
     }
 
     /// Push a `u8` or `u16` onto the stack, high byte first.

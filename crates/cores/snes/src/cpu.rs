@@ -188,20 +188,16 @@ pub fn step<M: MemoryMap>(snes: &mut Snes<M>) {
 
     let mut vm = Interpreter::new(&mut *snes, len);
     vm.exec(mnemonic, form, arg);
-    let (next_bank, next_pc) = vm.next();
+    vm.commit();
 
     #[cfg(feature = "debug")]
     snes.mmu.access.pause();
-
-    snes.cpu.program_bank = next_bank;
-    snes.cpu.pc = next_pc;
-    snes.cpu.normalize_emulation();
-    snes.cpu.narrow_index();
 }
 
 pub(crate) fn service_nmi<M: MemoryMap>(snes: &mut Snes<M>) {
     let mut vm = Interpreter::new(snes, 0);
     vm.service_interrupt(0xFFEA, 0xFFFA);
+    vm.commit();
 }
 
 #[chapa::bitfield(u8, order = lsb0)]

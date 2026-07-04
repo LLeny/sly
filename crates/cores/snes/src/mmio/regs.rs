@@ -85,6 +85,20 @@ register_mmio! {
 }
 
 register_mmio! {
+    /// HVBJOY
+    pub struct HvStatusJoypadBusy @ 0x4212 {
+        #[bits(0)]
+        pub joypad_autoread_busy: bool,
+
+        #[bits(6)]
+        pub hblank: bool,
+
+        #[bits(7)]
+        pub vblank: bool,
+    }
+}
+
+register_mmio! {
     /// RDNMI
     pub struct VblankFlagCpuVersion @ 0x4210 {
         #[bits(0..=3)]
@@ -126,6 +140,18 @@ impl MmioReg for DmaTransferStart {
 
     fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
         snes.dma.mdmaen.raw()
+    }
+}
+
+impl MmioReg for HvStatusJoypadBusy {
+    fn write<M: MemoryMap>(_snes: &mut Snes<M>, _value: u8) {}
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        // TODO
+        let mut value = Self::default();
+        value.set_vblank(crate::ppu::in_vblank(&snes.scheduler));
+        value.set_hblank(crate::ppu::in_hblank(&snes.scheduler));
+        value.raw()
     }
 }
 

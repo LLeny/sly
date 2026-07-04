@@ -318,6 +318,8 @@ fn caption(label: &str, snes: &Snes) -> String {
     )
 }
 
+const MAX_VIEW_FRAMES: usize = 64;
+
 fn call_stack_view(
     frames: &[CallFrame],
     pc: u32,
@@ -331,12 +333,21 @@ fn call_stack_view(
         caller: Arc::from(""),
     }];
 
-    for f in frames.iter().rev() {
+    for f in frames.iter().rev().take(MAX_VIEW_FRAMES) {
         rows.push(StackFrame {
             kind: f.kind.tag().into(),
             location: fmt(f.target).into(),
             symbol: symbol(f.target).into(),
             caller: format!("from {}", fmt(f.caller)).into(),
+        });
+    }
+
+    if frames.len() > MAX_VIEW_FRAMES {
+        rows.push(StackFrame {
+            kind: "…".into(),
+            location: Arc::from(""),
+            symbol: format!("{} older frames", frames.len() - MAX_VIEW_FRAMES).into(),
+            caller: Arc::from(""),
         });
     }
 
