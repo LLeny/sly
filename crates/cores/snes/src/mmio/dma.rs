@@ -1,5 +1,6 @@
-use crate::mmio::OPEN_BUS;
+use crate::Snes;
 use crate::mmio::regs::{DmaChannelParameters, HdmaTransferEnable, MdmaTransferStart};
+use crate::mmio::{MemoryMap, OPEN_BUS};
 
 pub const CHANNEL_COUNT: usize = 8;
 pub const CHANNEL_REGS_START: u16 = 0x4300;
@@ -75,4 +76,18 @@ impl Dma {
     pub fn channel_index(addr: u16) -> usize {
         ((addr >> 4) & 0x7) as usize
     }
+}
+
+pub(crate) fn start_mdma(snes: &mut Snes<impl MemoryMap>) {
+    for index in 0..CHANNEL_COUNT {
+        if snes.dma.mdmaen.raw() & (1 << index) != 0 {
+            run_dma_channel(snes, index);
+        }
+    }
+
+    snes.dma.mdmaen = MdmaTransferStart::from_raw(0);
+}
+
+fn run_dma_channel(snes: &mut Snes<impl MemoryMap>, index: usize) {
+    let channel = &snes.dma.channels[index];
 }

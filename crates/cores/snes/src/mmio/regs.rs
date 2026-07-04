@@ -196,6 +196,7 @@ impl MmioReg for MdmaTransferStart {
             channel7 = snes.dma.mdmaen.channel7(),
             "MDMA transfer start"
         );
+        super::dma::start_mdma(snes);
     }
 
     fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
