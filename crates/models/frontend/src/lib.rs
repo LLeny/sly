@@ -23,6 +23,7 @@ pub enum PanelKind {
     Disassembly { cpu: Arc<str> },
     Memory,
     Mmio,
+    Dma,
     Log,
 }
 

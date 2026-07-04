@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use core_model::Core;
 use debugger_model::{
-    BreakpointKind, BreakpointMark, CallStackView, CartridgeField, CartridgeView, CpuDescriptor,
-    CpuId, CpuView, DebugCore, DisasmLine, DisasmToken, FlagView, FlowKind, Highlight,
-    MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, RegisterView, RunOutcome,
-    StackFrame, StatusView, SyntaxSpec, TokenKind, hex, strip_symbol_sigils, tokenize,
+    BreakpointKind, BreakpointMark, CallStackView, CartridgeField, CartridgeView,
+    ComponentManifest, CpuDescriptor, CpuId, CpuView, DebugCore, DisasmLine, DisasmToken,
+    DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind, Highlight,
+    MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PanelDescriptor, PanelKind,
+    RefreshPolicy, RegisterView, RunOutcome, StackFrame, StatusView, SyntaxSpec, TokenKind, hex,
+    standard_manifest, strip_symbol_sigils, tokenize,
 };
 
 use crate::apu::{Apu, spc700};
@@ -236,6 +238,30 @@ impl DebugCore for SnesDebug {
 
     fn mmio_view(&self) -> MmioView {
         self::mmio_view(&self.core)
+    }
+
+    fn dma_view(&self) -> DmaView {
+        self::dma_view(&self.core)
+    }
+
+    fn manifest(&self) -> ComponentManifest {
+        let mut manifest = standard_manifest(&self.cpus());
+        let after_breakpoints = manifest
+            .panels
+            .iter()
+            .position(|p| p.kind == PanelKind::Breakpoints)
+            .map_or(manifest.panels.len(), |ix| ix + 1);
+        manifest.panels.insert(
+            after_breakpoints,
+            PanelDescriptor::new(
+                "dma",
+                "DMA",
+                PanelKind::Dma,
+                DockLocation::Left,
+                RefreshPolicy::OnPause,
+            ),
+        );
+        manifest
     }
 
     fn status(&self, label: &str) -> StatusView {
@@ -646,6 +672,99 @@ fn mmio_field_view(field: &crate::mmio::FieldInfo, parent: u32) -> MmioFieldView
         is_bool,
         children,
     }
+}
+
+fn dma_view(core: &Snes) -> DmaView {
+    use crate::mmio::dma::transfer_pattern_offsets;
+    use crate::mmio::regs::{AddressAdjustMode, Direction};
+
+    let mdmaen = core.dma.mdmaen.raw();
+    let hdmaen = core.dma.hdmaen.raw();
+
+    let channels = core
+        .dma
+        .channels
+        .iter()
+        .enumerate()
+        .map(|(i, ch)| {
+            let b_port = crate::mmio::dma::B_BUS_BASE | ch.b_bus_addr as u16;
+            let a_side = format!("${:?}", Address::from(ch.a_bus_addr.raw()));
+            let b_side = hex(b_port as u32, 16);
+            let b_bus = match crate::mmio::symbol(b_port) {
+                Some(name) => format!("{b_side} {name}"),
+                None => b_side.clone(),
+            };
+            let (source, dest) = match ch.params.direction() {
+                Direction::AToB => (a_side, b_side),
+                Direction::BToA => (b_side, a_side),
+            };
+
+            let pattern = ch.params.transfer_pattern();
+            let offsets = transfer_pattern_offsets(pattern)
+                .iter()
+                .map(|offset| format!("+{offset}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let step = match ch.params.address_adjust_mode() {
+                AddressAdjustMode::Increment => "increment",
+                AddressAdjustMode::Decrement => "decrement",
+                AddressAdjustMode::Fixed => "fixed",
+            };
+
+            let line = ch.line_counter;
+            let details = vec![
+                DmaChannelDetail::new("B-bus", b_bus),
+                DmaChannelDetail::new("Pattern", format!("{} ({offsets})", pattern as u8)),
+                DmaChannelDetail::new("Step", step),
+                DmaChannelDetail::new(
+                    "HDMA mode",
+                    if ch.params.indirect() {
+                        "indirect"
+                    } else {
+                        "direct"
+                    },
+                ),
+                DmaChannelDetail::new(
+                    "HDMA table",
+                    format!(
+                        "${:?}",
+                        Address::new(ch.a_bus_addr.table_bank(), ch.table_addr)
+                    ),
+                ),
+                DmaChannelDetail::new(
+                    "HDMA lines",
+                    format!(
+                        "{}{}",
+                        line.line_count(),
+                        if line.repeat() { " (repeat)" } else { "" }
+                    ),
+                ),
+                DmaChannelDetail::new(
+                    "Indirect address",
+                    format!(
+                        "${:?}",
+                        Address::new(
+                            ch.byte_count.indirect_bank(),
+                            ch.byte_count.indirect_offset()
+                        )
+                    ),
+                ),
+            ];
+
+            DmaChannelView {
+                id: format!("dma-{i}").into(),
+                name: format!("{i}").into(),
+                dma_enabled: mdmaen & (1 << i) != 0,
+                hdma_enabled: hdmaen & (1 << i) != 0,
+                source: source.into(),
+                dest: dest.into(),
+                count: hex(ch.byte_count.amount() as u32, 16).into(),
+                details,
+            }
+        })
+        .collect();
+
+    DmaView { channels }
 }
 
 fn mmio_view(core: &Snes) -> MmioView {

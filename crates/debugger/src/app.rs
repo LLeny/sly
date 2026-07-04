@@ -10,8 +10,8 @@ use cirsium::components::{
 };
 use cirsium::widgets::{
     BreakpointKind, BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView,
-    CartridgeWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, LogWidget,
-    MemoryWidget, MmioView, MmioWidget, RowProvider, ViewMode,
+    CartridgeWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView,
+    DmaWidget, LogWidget, MemoryWidget, MmioView, MmioWidget, RowProvider, ViewMode,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
@@ -42,6 +42,8 @@ pub(crate) struct Debugger {
     cartridge: CartridgeView,
     mmio_view: MmioView,
     mmio_expanded: HashSet<SharedString>,
+    dma_view: DmaView,
+    dma_expanded: HashSet<SharedString>,
     status: StatusView,
     panes: Vec<ProcessorPane>,
     memory: Memory,
@@ -104,6 +106,8 @@ impl Debugger {
             cartridge: target.cartridge().clone().into(),
             mmio_view: target.mmio_view().into(),
             mmio_expanded: HashSet::new(),
+            dma_view: target.dma_view().into(),
+            dma_expanded: HashSet::new(),
             status: target.status("paused").into(),
             memory: Memory::new(target.as_ref()),
             breakpoints: Breakpoints::default(),
@@ -131,6 +135,7 @@ impl Debugger {
             Self::refresh_pane_view(self.target.as_ref(), pane, mode);
         }
         self.mmio_view = self.target.mmio_view().into();
+        self.dma_view = self.target.dma_view().into();
     }
 
     fn track_changes(
@@ -157,18 +162,24 @@ impl Debugger {
         self.collapsed.contains(id)
     }
 
-    fn toggle(&mut self, id: impl Into<SharedString>, cx: &mut Context<Self>) {
-        let id = id.into();
-        if !self.collapsed.remove(&id) {
-            self.collapsed.insert(id);
+    fn toggle_in(set: &mut HashSet<SharedString>, id: SharedString) {
+        if !set.remove(&id) {
+            set.insert(id);
         }
+    }
+
+    fn toggle(&mut self, id: impl Into<SharedString>, cx: &mut Context<Self>) {
+        Self::toggle_in(&mut self.collapsed, id.into());
+        cx.notify();
+    }
+
+    fn toggle_dma(&mut self, id: SharedString, cx: &mut Context<Self>) {
+        Self::toggle_in(&mut self.dma_expanded, id);
         cx.notify();
     }
 
     fn toggle_mmio(&mut self, id: SharedString, cx: &mut Context<Self>) {
-        if !self.mmio_expanded.remove(&id) {
-            self.mmio_expanded.insert(id);
-        }
+        Self::toggle_in(&mut self.mmio_expanded, id);
         cx.notify();
     }
 
@@ -694,6 +705,15 @@ impl Render for Debugger {
                 move |id, _, cx| this.update(cx, |d, cx| d.toggle_mmio(id, cx))
             });
 
+        let dma = DmaWidget::new(self.dma_view.clone())
+            .expanded(self.dma_expanded.clone())
+            .collapsed(self.is_collapsed(DmaWidget::ID))
+            .on_toggle(cx.listener(|this, _, _, cx| this.toggle(DmaWidget::ID, cx)))
+            .on_toggle_channel({
+                let this = this.clone();
+                move |id, _, cx| this.update(cx, |d, cx| d.toggle_dma(id, cx))
+            });
+
         let breakpoints =
             BreakpointsWidget::new(self.breakpoints.view(), self.breakpoints.draft_kind())
                 .collapsed(self.is_collapsed(BreakpointsWidget::ID))
@@ -1132,6 +1152,7 @@ impl Render for Debugger {
             div().flex_none().child(controls).into_any_element(),
         );
         panels.insert("breakpoints".into(), breakpoints.into_any_element());
+        panels.insert("dma".into(), dma.into_any_element());
         panels.insert(
             "cartridge".into(),
             div().flex_none().child(cartridge).into_any_element(),

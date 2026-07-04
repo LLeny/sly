@@ -4,6 +4,7 @@ pub mod cartridge;
 pub mod controls;
 pub mod cpu;
 pub mod disassembly;
+pub mod dma;
 pub mod log;
 pub mod memory;
 pub mod mmio;
@@ -19,6 +20,7 @@ pub use cpu::{CpuView, CpuWidget, FlagView, RegisterView};
 pub use disassembly::{
     DisasmLine, DisasmToken, DisassemblyView, DisassemblyWidget, TokenKind, ViewMode,
 };
+pub use dma::{DmaChannelDetail, DmaChannelView, DmaView, DmaWidget};
 pub use log::{LogEntry, LogLevel, LogView, LogWidget, short_target};
 pub use memory::{MemoryCell, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};
 pub use mmio::{MmioFieldView, MmioGroup, MmioRegisterView, MmioView, MmioWidget};

@@ -226,6 +226,38 @@ pub struct MmioView {
 }
 
 #[derive(Clone)]
+pub struct DmaChannelDetail {
+    pub label: Arc<str>,
+    pub value: Arc<str>,
+}
+
+impl DmaChannelDetail {
+    pub fn new(label: impl Into<Arc<str>>, value: impl Into<Arc<str>>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct DmaChannelView {
+    pub id: Arc<str>,
+    pub name: Arc<str>,
+    pub dma_enabled: bool,
+    pub hdma_enabled: bool,
+    pub source: Arc<str>,
+    pub dest: Arc<str>,
+    pub count: Arc<str>,
+    pub details: Vec<DmaChannelDetail>,
+}
+
+#[derive(Clone, Default)]
+pub struct DmaView {
+    pub channels: Vec<DmaChannelView>,
+}
+
+#[derive(Clone)]
 pub struct MemoryRegion {
     pub id: Arc<str>,
     pub name: Arc<str>,

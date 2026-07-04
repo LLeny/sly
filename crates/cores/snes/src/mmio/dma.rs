@@ -9,6 +9,8 @@ pub const CHANNEL_COUNT: usize = 8;
 pub const CHANNEL_REGS_START: u16 = 0x4300;
 pub const CHANNEL_REGS_END: u16 = 0x437F;
 
+pub(crate) const B_BUS_BASE: u16 = 0x2100;
+
 #[derive(Clone, Copy)]
 pub struct DmaChannel {
     pub params: DmaChannelParameters,
@@ -103,7 +105,7 @@ pub(crate) fn start_mdma(snes: &mut Snes<impl MemoryMap>) {
     snes.dma.mdmaen = MdmaTransferStart::from_raw(0);
 }
 
-fn transfer_pattern_offsets(pattern: TransferPattern) -> &'static [u8] {
+pub(crate) fn transfer_pattern_offsets(pattern: TransferPattern) -> &'static [u8] {
     match pattern {
         TransferPattern::Pattern0 => &[0],
         TransferPattern::Pattern1 => &[0, 1],
@@ -115,8 +117,6 @@ fn transfer_pattern_offsets(pattern: TransferPattern) -> &'static [u8] {
 }
 
 fn run_dma_channel(snes: &mut Snes<impl MemoryMap>, index: usize) {
-    const B_BUS_BASE: u16 = 0x2100;
-
     let mut channel = snes.dma.channels[index];
 
     let pattern = transfer_pattern_offsets(channel.params.transfer_pattern());

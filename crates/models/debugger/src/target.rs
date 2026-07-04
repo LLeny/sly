@@ -4,7 +4,7 @@ use core_model::Core;
 use frontend_model::{ComponentManifest, DockLocation, PanelDescriptor, PanelKind, RefreshPolicy};
 
 use crate::model::{
-    CallStackView, CartridgeView, CpuView, DisasmLine, Highlight, MemoryRegion, MmioView,
+    CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Highlight, MemoryRegion, MmioView,
     StatusView,
 };
 
@@ -138,6 +138,11 @@ pub trait DebugCore: Core {
 
     fn cartridge(&self) -> &CartridgeView;
     fn mmio_view(&self) -> MmioView;
+
+    fn dma_view(&self) -> DmaView {
+        DmaView::default()
+    }
+    
     fn status(&self, label: &str) -> StatusView;
     fn caption(&self, label: &str) -> String;
     fn memory_regions(&self) -> Vec<MemoryRegion>;
