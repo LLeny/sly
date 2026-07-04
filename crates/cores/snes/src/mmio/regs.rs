@@ -84,11 +84,35 @@ register_mmio! {
     }
 }
 
-mmio_passthrough!(NmiTimerEnable => irq.nmitimen);
+register_mmio! {
+    /// RDNMI
+    pub struct VblankFlagCpuVersion @ 0x4210 {
+        #[bits(0..=3)]
+        pub cpu_version: u8,
+
+        #[bits(7)]
+        pub vblank: bool,
+    }
+}
+
 mmio_passthrough!(HdmaTransferEnable => dma.hdmaen);
 
+impl MmioReg for NmiTimerEnable {
+    fn read<M: MemoryMap>(snes: &mut Snes<M>) -> u8 {
+        snes.irq.nmitimen_raw()
+    }
+
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
+        snes.irq.write_nmitimen(value);
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        snes.irq.nmitimen_raw()
+    }
+}
+
 impl MmioReg for DmaTransferStart {
-    fn read<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+    fn read<M: MemoryMap>(snes: &mut Snes<M>) -> u8 {
         snes.dma.mdmaen.raw()
     }
 
@@ -102,5 +126,17 @@ impl MmioReg for DmaTransferStart {
 
     fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
         snes.dma.mdmaen.raw()
+    }
+}
+
+impl MmioReg for VblankFlagCpuVersion {
+    fn read<M: MemoryMap>(snes: &mut Snes<M>) -> u8 {
+        snes.irq.read_rdnmi()
+    }
+
+    fn write<M: MemoryMap>(_snes: &mut Snes<M>, _value: u8) {}
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        snes.irq.rdnmi_raw()
     }
 }

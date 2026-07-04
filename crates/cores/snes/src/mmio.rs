@@ -12,6 +12,7 @@ pub use access::{AccessTracker, MemoryAccess};
 
 use crate::mmio::regs::{
     APU_IO_END, APU_IO_START, DmaTransferStart, HdmaTransferEnable, NmiTimerEnable,
+    VblankFlagCpuVersion,
 };
 use crate::{Cartridge, Snes};
 
@@ -90,15 +91,27 @@ impl<M: MemoryMap> Mmio<M> {
 }
 
 impl<M: MemoryMap> Snes<M> {
-    pub fn read16(&self, addr: Address) -> u16 {
+    pub fn read16(&mut self, addr: Address) -> u16 {
         let lo = self.read8(addr) as u16;
         let hi = self.read8(addr.wrapping_add(1)) as u16;
         lo | (hi << 8)
     }
 
-    pub fn read24(&self, addr: Address) -> u32 {
+    pub fn read24(&mut self, addr: Address) -> u32 {
         let lo = self.read16(addr) as u32;
         let hi = self.read8(addr.wrapping_add(2)) as u32;
+        lo | (hi << 16)
+    }
+
+    pub fn peek16(&self, addr: Address) -> u16 {
+        let lo = self.peek8(addr) as u16;
+        let hi = self.peek8(addr.wrapping_add(1)) as u16;
+        lo | (hi << 8)
+    }
+
+    pub fn peek24(&self, addr: Address) -> u32 {
+        let lo = self.peek16(addr) as u32;
+        let hi = self.peek8(addr.wrapping_add(2)) as u32;
         lo | (hi << 16)
     }
 
@@ -115,7 +128,7 @@ impl<M: MemoryMap> Snes<M> {
         }
     }
 
-    pub fn read8(&self, addr: Address) -> u8 {
+    pub fn read8(&mut self, addr: Address) -> u8 {
         let space = self.mmu.map(addr);
 
         #[cfg(feature = "debug")]
@@ -171,9 +184,10 @@ impl<M: MemoryMap> Snes<M> {
         }
     }
 
-    fn read_io(&self, reg: u16) -> u8 {
+    fn read_io(&mut self, reg: u16) -> u8 {
         match reg {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::read(self),
+            VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::read(self),
             DmaTransferStart::ADDRESS => DmaTransferStart::read(self),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::read(self),
             APU_IO_START..=APU_IO_END => self.apu.cpu_read_port((reg - APU_IO_START) as usize),
@@ -190,6 +204,7 @@ impl<M: MemoryMap> Snes<M> {
     fn write_io(&mut self, reg: u16, value: u8) {
         match reg {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
+            VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::write(self, value),
             DmaTransferStart::ADDRESS => DmaTransferStart::write(self, value),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::write(self, value),
             APU_IO_START..=APU_IO_END => self
@@ -213,6 +228,7 @@ impl<M: MemoryMap> Snes<M> {
     fn peek_io(&self, reg: u16) -> u8 {
         match reg {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::peek(self),
+            VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::peek(self),
             DmaTransferStart::ADDRESS => DmaTransferStart::peek(self),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::peek(self),
             APU_IO_START..=APU_IO_END => self.apu.cpu_read_port((reg - APU_IO_START) as usize),

@@ -89,17 +89,11 @@ impl Cpu {
 pub(crate) struct CodeReader<'a, M: MemoryMap> {
     pub snes: &'a Snes<M>,
     pub bank: u8,
-    pub peek: bool,
 }
 
 impl<M: MemoryMap> decoder::DisasmCtx for CodeReader<'_, M> {
     fn read_u8(&self, addr: u64) -> u8 {
-        let addr = Address::new(self.bank, addr as u16);
-        if self.peek {
-            self.snes.peek8(addr)
-        } else {
-            self.snes.read8(addr)
-        }
+        self.snes.peek8(Address::new(self.bank, addr as u16))
     }
 
     fn symbol(&self, addr: u64) -> Option<(String, u64)> {
@@ -159,16 +153,17 @@ pub fn effective_address<M: MemoryMap>(snes: &Snes<M>, pc: u16) -> Option<Addres
         return None;
     }
 
-    let reader = CodeReader {
-        snes,
-        bank,
-        peek: true,
-    };
+    let reader = CodeReader { snes, bank };
     let arg = operand::fetch_arg(inst, mnemonic, form, pc as u64, &reader);
     addressing::resolve(snes, form, arg).map(|(lo, _)| lo)
 }
 
 pub fn step<M: MemoryMap>(snes: &mut Snes<M>) {
+    if snes.irq.take_nmi() {
+        self::service_nmi(snes);
+        return;
+    }
+
     let (bank, pc, combo) = {
         let cpu = &snes.cpu;
         (cpu.program_bank, cpu.pc, self::mode_selectors(cpu))
@@ -184,11 +179,7 @@ pub fn step<M: MemoryMap>(snes: &mut Snes<M>) {
     let len = decoder::stream_len_of(combo, id);
 
     let arg = {
-        let reader = CodeReader {
-            snes: &*snes,
-            bank,
-            peek: false,
-        };
+        let reader = CodeReader { snes: &*snes, bank };
         operand::fetch_arg(inst, mnemonic, form, pc as u64, &reader)
     };
 
@@ -206,6 +197,11 @@ pub fn step<M: MemoryMap>(snes: &mut Snes<M>) {
     snes.cpu.pc = next_pc;
     snes.cpu.normalize_emulation();
     snes.cpu.narrow_index();
+}
+
+pub(crate) fn service_nmi<M: MemoryMap>(snes: &mut Snes<M>) {
+    let mut vm = Interpreter::new(snes, 0);
+    vm.service_interrupt(0xFFEA, 0xFFFA);
 }
 
 #[chapa::bitfield(u8, order = lsb0)]

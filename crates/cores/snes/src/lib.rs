@@ -18,7 +18,6 @@ pub use error::SnesError;
 pub use mmio::{CartridgeMap, MemoryMap, Mmio};
 
 use crate::apu::Apu;
-use crate::cartridge::TvSystem;
 use crate::cpu::disasm::Disasm;
 use crate::interrupt::Irq;
 use crate::mmio::Address;
@@ -90,14 +89,13 @@ impl<M: MemoryMap + 'static> Snes<M> {
         self.scheduler = Scheduler::new(tv_system);
         self.scheduler
             .schedule_periodic(apu::SNES_CYCLES_PER_SPC700_CYCLE, scheduler::spc700_tick);
-        self.scheduler.schedule_periodic(
-            if tv_system == TvSystem::Ntsc {
-                scheduler::MASTER_CLOCKS_PER_FRAME_NTSC
-            } else {
-                scheduler::MASTER_CLOCKS_PER_FRAME_PAL
-            },
-            ppu::vblank_tick,
+        self.scheduler.schedule_periodic_at(
+            scheduler::VBLANK_START_SCANLINE * scheduler::MASTER_CLOCKS_PER_SCANLINE,
+            self.scheduler.cycles_per_frame(),
+            ppu::vblank_start,
         );
+        self.scheduler
+            .schedule_periodic(self.scheduler.cycles_per_frame(), ppu::vblank_end);
 
         // TODO: Could schedule these when enabled?
         self.scheduler

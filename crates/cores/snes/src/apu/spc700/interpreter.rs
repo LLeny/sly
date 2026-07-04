@@ -792,7 +792,7 @@ impl<'a, M: ApuMap> Interpreter<'a, M> {
         self.apu.spc700.psw = psw;
 
         self.next_pc = self.read16(0xFFDE);
-        
+
         #[cfg(feature = "debug")]
         self.enter_call(CallKind::Interrupt, self.apu.spc700.pc, self.next_pc);
     }

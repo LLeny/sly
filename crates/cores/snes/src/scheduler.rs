@@ -5,13 +5,17 @@ use crate::Snes;
 use crate::cartridge::TvSystem;
 use crate::mmio::{CartridgeMap, MemoryMap};
 
-const MASTER_CLOCKS_PER_SCANLINE: u64 = 1364;
+pub(crate) const MASTER_CLOCKS_PER_SCANLINE: u64 = 1364;
 
 const SCANLINES_PER_FRAME_NTSC: u64 = 262;
 const SCANLINES_PER_FRAME_PAL: u64 = 312;
 
-pub(crate) const MASTER_CLOCKS_PER_FRAME_NTSC: u64 = MASTER_CLOCKS_PER_SCANLINE * SCANLINES_PER_FRAME_NTSC;
-pub(crate) const MASTER_CLOCKS_PER_FRAME_PAL: u64 = MASTER_CLOCKS_PER_SCANLINE * SCANLINES_PER_FRAME_PAL;
+pub(crate) const VBLANK_START_SCANLINE: u64 = 225;
+
+pub(crate) const MASTER_CLOCKS_PER_FRAME_NTSC: u64 =
+    MASTER_CLOCKS_PER_SCANLINE * SCANLINES_PER_FRAME_NTSC;
+pub(crate) const MASTER_CLOCKS_PER_FRAME_PAL: u64 =
+    MASTER_CLOCKS_PER_SCANLINE * SCANLINES_PER_FRAME_PAL;
 
 pub type Callback<M = CartridgeMap> = fn(&mut Snes<M>, u64);
 
@@ -103,8 +107,12 @@ impl<M: MemoryMap> Scheduler<M> {
     }
 
     pub fn schedule_periodic(&mut self, period: u64, callback: Callback<M>) {
+        self.schedule_periodic_at(period, period, callback);
+    }
+
+    pub fn schedule_periodic_at(&mut self, first: u64, period: u64, callback: Callback<M>) {
         self.events.push(Reverse(Event {
-            deadline: self.cycles + period,
+            deadline: self.cycles + first,
             period: Some(period),
             callback,
         }));

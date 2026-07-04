@@ -539,7 +539,7 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
         resolve(self.snes, form, arg).expect("form without a memory operand")
     }
 
-    fn read_value(&self, lo: Address, hi: Address, wide: bool) -> u16 {
+    fn read_value(&mut self, lo: Address, hi: Address, wide: bool) -> u16 {
         let low = self.snes.read8(lo) as u16;
         if wide {
             low | ((self.snes.read8(hi) as u16) << 8)
@@ -555,7 +555,7 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
         }
     }
 
-    fn operand(&self, form: Form, arg: Arg, wide: bool) -> u16 {
+    fn operand(&mut self, form: Form, arg: Arg, wide: bool) -> u16 {
         match arg {
             Arg::Imm(v) => v,
             _ => {
@@ -593,7 +593,7 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
     }
 
     /// Resolve the (abs,x) indirect target within the program bank.
-    fn indexed_indirect(&self, addr: u16) -> u16 {
+    fn indexed_indirect(&mut self, addr: u16) -> u16 {
         let bank = self.snes.cpu.program_bank;
         let ptr = addr.wrapping_add(self.snes.cpu.index_x);
         self.snes.read16(Address::new(bank, ptr))
@@ -653,7 +653,7 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
         }
     }
 
-    fn service_interrupt(&mut self, native_vector: u16, emu_vector: u16) {
+    pub(crate) fn service_interrupt(&mut self, native_vector: u16, emu_vector: u16) {
         let (program_bank, return_pc) = self.next();
         let emulation = self.snes.cpu.emulation;
 

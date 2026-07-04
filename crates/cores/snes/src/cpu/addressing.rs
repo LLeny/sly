@@ -26,8 +26,8 @@ pub(crate) fn resolve<M: MemoryMap>(
         };
         Address::new(0, offset)
     };
-    let dptr16 = |dp: u8, index: u16| snes.read16(direct(dp, index));
-    let dptr24 = |dp: u8| snes.read24(direct(dp, 0));
+    let dptr16 = |dp: u8, index: u16| snes.peek16(direct(dp, index));
+    let dptr24 = |dp: u8| snes.peek24(direct(dp, 0));
 
     let lo = match (form, arg) {
         (F::Dp, Arg::Dp(dp)) => direct(dp, 0),
@@ -46,7 +46,7 @@ pub(crate) fn resolve<M: MemoryMap>(
         (F::Sr, Arg::Sr(sr)) => Address::new(0, sp.wrapping_add(sr as u16)),
         (F::Isy, Arg::Sr(sr)) => {
             let ptr = Address::new(0, sp.wrapping_add(sr as u16));
-            abs_idx(snes.read16(ptr), y)
+            abs_idx(snes.peek16(ptr), y)
         }
         _ => return None,
     };

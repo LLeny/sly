@@ -45,7 +45,6 @@ pub fn disassemble_at<M: MemoryMap>(snes: &Snes<M>, pc: u16) -> Disasm {
     let reader = CodeReader {
         snes,
         bank: snes.cpu.program_bank,
-        peek: true,
     };
     let addr = pc as u64;
     let combo = super::mode_selectors(&snes.cpu);
