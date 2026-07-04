@@ -5,11 +5,13 @@ use crate::Snes;
 use crate::cartridge::TvSystem;
 use crate::mmio::{CartridgeMap, MemoryMap};
 
-const MASTER_CLOCK_NTSC: u32 = 21_477_272;
-const MASTER_CLOCK_PAL: u32 = 21_281_370;
+const MASTER_CLOCKS_PER_SCANLINE: u64 = 1364;
 
-const CYCLES_PER_FRAME_NTSC: u64 = MASTER_CLOCK_NTSC as u64 / 60;
-const CYCLES_PER_FRAME_PAL: u64 = MASTER_CLOCK_PAL as u64 / 50;
+const SCANLINES_PER_FRAME_NTSC: u64 = 262;
+const SCANLINES_PER_FRAME_PAL: u64 = 312;
+
+pub(crate) const MASTER_CLOCKS_PER_FRAME_NTSC: u64 = MASTER_CLOCKS_PER_SCANLINE * SCANLINES_PER_FRAME_NTSC;
+pub(crate) const MASTER_CLOCKS_PER_FRAME_PAL: u64 = MASTER_CLOCKS_PER_SCANLINE * SCANLINES_PER_FRAME_PAL;
 
 pub type Callback<M = CartridgeMap> = fn(&mut Snes<M>, u64);
 
@@ -48,8 +50,8 @@ pub struct Scheduler<M: MemoryMap = CartridgeMap> {
 impl<M: MemoryMap> Scheduler<M> {
     pub fn new(region: TvSystem) -> Self {
         let cycles_per_frame = match region {
-            TvSystem::Ntsc => CYCLES_PER_FRAME_NTSC,
-            TvSystem::Pal => CYCLES_PER_FRAME_PAL,
+            TvSystem::Ntsc => MASTER_CLOCKS_PER_FRAME_NTSC,
+            TvSystem::Pal => MASTER_CLOCKS_PER_FRAME_PAL,
         };
 
         Self {
