@@ -8,7 +8,7 @@ use frontend_model::{
 
 use crate::model::{
     CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Highlight, MemoryRegion, MmioView,
-    PaletteView, StatusView,
+    PaletteView, PpuView, StatusView,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -148,6 +148,10 @@ pub trait DebugCore: Core {
 
     fn palette_view(&self) -> PaletteView {
         PaletteView::default()
+    }
+
+    fn ppu_view(&self) -> PpuView {
+        PpuView::default()
     }
 
     fn status(&self, label: &str) -> StatusView;

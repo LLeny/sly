@@ -25,6 +25,7 @@ pub enum PanelKind {
     Mmio,
     Dma,
     Palette,
+    Ppu,
     Log,
 }
 
@@ -111,6 +112,15 @@ impl ComponentManifest {
             .iter()
             .position(|p| p.kind == anchor)
             .map_or(self.panels.len(), |ix| ix + 1);
+        self.panels.insert(ix, panel);
+    }
+
+    pub fn insert_before(&mut self, anchor: PanelKind, panel: PanelDescriptor) {
+        let ix = self
+            .panels
+            .iter()
+            .position(|p| p.kind == anchor)
+            .unwrap_or(self.panels.len());
         self.panels.insert(ix, panel);
     }
 

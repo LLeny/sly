@@ -257,6 +257,62 @@ pub struct DmaView {
     pub channels: Vec<DmaChannelView>,
 }
 
+#[derive(Clone)]
+pub struct PpuProperty {
+    pub label: Arc<str>,
+    pub value: Arc<str>,
+    pub accent: bool,
+}
+
+impl PpuProperty {
+    pub fn new(label: impl Into<Arc<str>>, value: impl Into<Arc<str>>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            accent: false,
+        }
+    }
+
+    pub fn accented(mut self) -> Self {
+        self.accent = true;
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct PpuGroup {
+    pub id: Arc<str>,
+    pub name: Arc<str>,
+    pub summary: Arc<str>,
+    pub properties: Vec<PpuProperty>,
+}
+
+impl PpuGroup {
+    pub fn new(
+        id: impl Into<Arc<str>>,
+        name: impl Into<Arc<str>>,
+        properties: Vec<PpuProperty>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            summary: Arc::from(""),
+            properties,
+        }
+    }
+
+    pub fn summary(mut self, summary: impl Into<Arc<str>>) -> Self {
+        self.summary = summary.into();
+        self
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct PpuView {
+    pub properties: Vec<PpuProperty>,
+    pub groups: Vec<PpuGroup>,
+}
+
 #[derive(Clone, Copy)]
 pub struct PaletteColor {
     pub raw: u16,

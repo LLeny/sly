@@ -6,9 +6,9 @@ use debugger_model::{
     ComponentManifest, CpuDescriptor, CpuId, CpuView, DebugCore, DisasmLine, DisasmToken,
     DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind, Highlight,
     MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView,
-    PanelDescriptor, PanelKind, RefreshPolicy, RegisterView, RunOutcome, StackFrame, StatusView,
-    SyntaxSpec, TokenKind, VIDEO_WORKSPACE, WorkspaceDescriptor, WorkspaceIcon, hex,
-    standard_manifest, strip_symbol_sigils, tokenize,
+    PanelDescriptor, PanelKind, PpuGroup, PpuProperty, PpuView, RefreshPolicy, RegisterView,
+    RunOutcome, StackFrame, StatusView, SyntaxSpec, TokenKind, VIDEO_WORKSPACE,
+    WorkspaceDescriptor, WorkspaceIcon, hex, standard_manifest, strip_symbol_sigils, tokenize,
 };
 
 use crate::apu::{Apu, spc700};
@@ -265,6 +265,10 @@ impl DebugCore for SnesDebug {
         }
     }
 
+    fn ppu_view(&self) -> PpuView {
+        self::ppu_view(&self.core)
+    }
+
     fn manifest(&self) -> ComponentManifest {
         let mut manifest = standard_manifest(&self.cpus());
         manifest.workspaces.push(WorkspaceDescriptor::new(
@@ -292,6 +296,17 @@ impl DebugCore for SnesDebug {
                 "Palettes",
                 PanelKind::Palette,
                 DockLocation::Left,
+                RefreshPolicy::OnPause,
+            )
+            .tag(VIDEO_WORKSPACE),
+        );
+        manifest.insert_before(
+            PanelKind::Mmio,
+            PanelDescriptor::new(
+                "ppu",
+                "PPU",
+                PanelKind::Ppu,
+                DockLocation::Right,
                 RefreshPolicy::OnPause,
             )
             .tag(VIDEO_WORKSPACE),
@@ -800,6 +815,56 @@ fn dma_view(core: &Snes) -> DmaView {
         .collect();
 
     DmaView { channels }
+}
+
+fn ppu_view(core: &Snes) -> PpuView {
+    use crate::ppu::regs::{BackgroundMode, Priority, TileSize};
+
+    let mode = match core.ppu.bg_mode {
+        BackgroundMode::Mode0 => "Mode 0",
+        BackgroundMode::Mode1 => "Mode 1",
+        BackgroundMode::Mode2 => "Mode 2",
+        BackgroundMode::Mode3 => "Mode 3",
+        BackgroundMode::Mode4 => "Mode 4",
+        BackgroundMode::Mode5 => "Mode 5",
+        BackgroundMode::Mode6 => "Mode 6",
+        BackgroundMode::Mode7 => "Mode 7",
+        BackgroundMode::Invalid => "Invalid",
+    };
+    let bg3_priority = match core.ppu.bg3_priority {
+        Priority::Normal => "normal",
+        Priority::High => "high",
+    };
+
+    let properties = vec![
+        PpuProperty::new("BG mode", mode).accented(),
+        PpuProperty::new("BG3 priority", bg3_priority),
+    ];
+
+    let groups = core
+        .ppu
+        .bg_layers
+        .iter()
+        .enumerate()
+        .map(|(i, layer)| {
+            let tile_size = match layer.tile_size {
+                TileSize::Size8x8 => "8x8",
+                TileSize::Size16x16 => "16x16",
+            };
+
+            PpuGroup::new(
+                format!("ppu-bg{}", i + 1),
+                format!("BG{}", i + 1),
+                vec![
+                    PpuProperty::new("Tileset", hex(layer.tileset_addr, 16)),
+                    PpuProperty::new("Tile size", tile_size),
+                ],
+            )
+            .summary(hex(layer.tileset_addr, 16))
+        })
+        .collect();
+
+    PpuView { properties, groups }
 }
 
 fn mmio_view(core: &Snes) -> MmioView {

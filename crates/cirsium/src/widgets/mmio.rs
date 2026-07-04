@@ -287,7 +287,7 @@ fn field_rows(theme: &Theme, fields: &[MmioFieldView], depth: usize) -> Vec<Div>
 }
 
 fn field_row(theme: &Theme, field: &MmioFieldView, depth: usize) -> Div {
-    let indent = px(16. + depth as f32 * 12.);
+    let indent = px(24. + depth as f32 * 12.);
 
     let bit_label = div()
         .font_family(theme.mono_font)

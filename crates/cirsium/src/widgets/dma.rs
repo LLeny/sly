@@ -255,7 +255,7 @@ fn detail_row(theme: &Theme, detail: &DmaChannelDetail) -> Div {
         .flex()
         .items_center()
         .gap_2()
-        .pl(px(16.))
+        .pl(px(24.))
         .pr_1()
         .py(px(2.))
         .child(label_text(theme, detail.label.clone()))

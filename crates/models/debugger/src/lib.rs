@@ -10,8 +10,8 @@ pub use frontend_model::{
 pub use model::{
     CallStackView, CartridgeField, CartridgeView, CpuView, DisasmLine, DisasmToken,
     DmaChannelDetail, DmaChannelView, DmaView, FlagView, FlowKind, Highlight, MemoryRegion,
-    MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView, RegisterView,
-    StackFrame, StatusView, TokenKind, hex,
+    MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView, PpuGroup,
+    PpuProperty, PpuView, RegisterView, StackFrame, StatusView, TokenKind, hex,
 };
 pub use target::{
     BreakpointKind, BreakpointMark, CPU_WORKSPACE, CpuDescriptor, CpuId, DebugCore, RunOutcome,

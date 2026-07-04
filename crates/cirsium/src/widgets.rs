@@ -9,6 +9,7 @@ pub mod log;
 pub mod memory;
 pub mod mmio;
 pub mod palette;
+pub mod ppu;
 
 pub use breakpoints::{
     BreakpointEntry, BreakpointKind, BreakpointsView, BreakpointsWidget, breakpoint_color,
@@ -26,3 +27,4 @@ pub use log::{LogEntry, LogLevel, LogView, LogWidget, short_target};
 pub use memory::{MemoryCell, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};
 pub use mmio::{MmioFieldView, MmioGroup, MmioRegisterView, MmioView, MmioWidget};
 pub use palette::{PaletteColor, PaletteView, PaletteWidget};
+pub use ppu::{PpuGroup, PpuProperty, PpuView, PpuWidget};

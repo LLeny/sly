@@ -1,9 +1,10 @@
-mod bg;
+pub(crate) mod bg;
 pub mod cgram;
 pub(crate) mod regs;
 pub mod tile;
 
 use crate::ppu::cgram::Cgram;
+use crate::ppu::regs::{BackgroundMode, Priority};
 use crate::ppu::tile::Tile;
 use crate::scheduler::{MASTER_CLOCKS_PER_SCANLINE, Scheduler, VBLANK_START_SCANLINE};
 use crate::{MemoryMap, Snes};
@@ -12,7 +13,9 @@ const HBLANK_START_CLOCK: u64 = 274 * 4;
 
 pub struct Ppu {
     pub(crate) cgram: Cgram,
-    bg_layers: [bg::BackgroundLayer; 4],
+    pub(crate) bg_layers: [bg::BackgroundLayer; 4],
+    pub(crate) bg_mode: BackgroundMode,
+    pub(crate) bg3_priority: Priority,
 }
 
 impl Ppu {
@@ -20,6 +23,8 @@ impl Ppu {
         Self {
             cgram: Cgram::new(),
             bg_layers: [bg::BackgroundLayer::default(); 4],
+            bg_mode: BackgroundMode::Mode0,
+            bg3_priority: Priority::Normal,
         }
     }
 }

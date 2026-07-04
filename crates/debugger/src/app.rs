@@ -11,8 +11,8 @@ use cirsium::components::{
 use cirsium::widgets::{
     BreakpointKind, BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView,
     CartridgeWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView,
-    DmaWidget, LogWidget, MemoryWidget, MmioView, MmioWidget, PaletteView, PaletteWidget,
-    RowProvider, ViewMode,
+    DmaWidget, LogWidget, MemoryWidget, MmioView, MmioWidget, PaletteView, PaletteWidget, PpuView,
+    PpuWidget, RowProvider, ViewMode,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
@@ -47,6 +47,8 @@ pub(crate) struct Debugger {
     dma_expanded: HashSet<SharedString>,
     palette_view: PaletteView,
     palette_selected: Option<(usize, usize)>,
+    ppu_view: PpuView,
+    ppu_expanded: HashSet<SharedString>,
     manifest: ComponentManifest,
     status: StatusView,
     panes: Vec<ProcessorPane>,
@@ -118,6 +120,8 @@ impl Debugger {
             dma_expanded: HashSet::new(),
             palette_view: target.palette_view().into(),
             palette_selected: None,
+            ppu_view: target.ppu_view().into(),
+            ppu_expanded: HashSet::new(),
             manifest,
             status: target.status("paused").into(),
             memory: Memory::new(target.as_ref()),
@@ -149,6 +153,7 @@ impl Debugger {
         self.mmio_view = self.target.mmio_view().into();
         self.dma_view = self.target.dma_view().into();
         self.palette_view = self.target.palette_view().into();
+        self.ppu_view = self.target.ppu_view().into();
     }
 
     fn track_changes(
@@ -188,6 +193,11 @@ impl Debugger {
 
     fn toggle_dma(&mut self, id: SharedString, cx: &mut Context<Self>) {
         Self::toggle_in(&mut self.dma_expanded, id);
+        cx.notify();
+    }
+
+    fn toggle_ppu(&mut self, id: SharedString, cx: &mut Context<Self>) {
+        Self::toggle_in(&mut self.ppu_expanded, id);
         cx.notify();
     }
 
@@ -790,6 +800,15 @@ impl Render for Debugger {
                 }
             });
 
+        let ppu = PpuWidget::new(self.ppu_view.clone())
+            .expanded(self.ppu_expanded.clone())
+            .collapsed(self.is_collapsed(PpuWidget::ID))
+            .on_toggle(cx.listener(|this, _, _, cx| this.toggle(PpuWidget::ID, cx)))
+            .on_toggle_group({
+                let this = this.clone();
+                move |id, _, cx| this.update(cx, |d, cx| d.toggle_ppu(id, cx))
+            });
+
         let breakpoints =
             BreakpointsWidget::new(self.breakpoints.view(), self.breakpoints.draft_kind())
                 .collapsed(self.is_collapsed(BreakpointsWidget::ID))
@@ -1229,6 +1248,7 @@ impl Render for Debugger {
         panels.insert("breakpoints".into(), breakpoints.into_any_element());
         panels.insert("dma".into(), dma.into_any_element());
         panels.insert("palette".into(), palette.into_any_element());
+        panels.insert("ppu".into(), ppu.into_any_element());
         panels.insert(
             "cartridge".into(),
             div().flex_none().child(cartridge).into_any_element(),

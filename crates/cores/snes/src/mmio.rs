@@ -16,7 +16,7 @@ use crate::mmio::regs::{
     APU_IO_END, APU_IO_START, HdmaTransferEnable, HvStatusJoypadBusy, MdmaTransferStart,
     NmiTimerEnable, VblankFlagCpuVersion,
 };
-use crate::ppu::regs::{Bg12ChrBase, Bg34ChrBase, CGADD, CGDATA, RDCGRAM};
+use crate::ppu::regs::{Bg12ChrBase, Bg34ChrBase, BgMode, CGADD, CGDATA, RDCGRAM};
 use crate::{Cartridge, Snes};
 
 pub use addr::Address;
@@ -189,6 +189,7 @@ impl<M: MemoryMap> Snes<M> {
 
     fn read_io(&mut self, reg: u16) -> u8 {
         match reg {
+            BgMode::ADDRESS => BgMode::read(self),
             Bg12ChrBase::ADDRESS => Bg12ChrBase::read(self),
             Bg34ChrBase::ADDRESS => Bg34ChrBase::read(self),
             CGADD => self.ppu.cgram.word_addr(),
@@ -216,6 +217,7 @@ impl<M: MemoryMap> Snes<M> {
 
     fn write_io(&mut self, reg: u16, value: u8) {
         match reg {
+            BgMode::ADDRESS => BgMode::write(self, value),
             Bg12ChrBase::ADDRESS => Bg12ChrBase::write(self, value),
             Bg34ChrBase::ADDRESS => Bg34ChrBase::write(self, value),
             CGADD => self.ppu.cgram.set_addr(value),
@@ -249,6 +251,7 @@ impl<M: MemoryMap> Snes<M> {
 
     fn peek_io(&self, reg: u16) -> u8 {
         match reg {
+            BgMode::ADDRESS => BgMode::peek(self),
             Bg12ChrBase::ADDRESS => Bg12ChrBase::peek(self),
             Bg34ChrBase::ADDRESS => Bg34ChrBase::peek(self),
             CGADD => self.ppu.cgram.word_addr(),
