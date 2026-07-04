@@ -172,6 +172,99 @@ impl Default for DmaChannelParameters {
     }
 }
 
+#[chapa::bitfield(u32, order = lsb0, width = 24)]
+#[derive(Clone, Copy)]
+pub struct DmaAddress {
+    #[bits(0..=15, overlay = "mdma")]
+    pub offset: u16,
+
+    #[bits(16..=23, overlay = "mdma")]
+    pub bank: u8,
+
+    #[bits(0..=15, overlay = "hdma")]
+    pub table_offset: u16,
+
+    #[bits(16..=23, overlay = "hdma")]
+    pub table_bank: u8,
+}
+
+impl Default for DmaAddress {
+    fn default() -> Self {
+        Self::from_raw(0xFF_FFFF)
+    }
+}
+
+#[chapa::bitfield(u32, order = lsb0, width = 24)]
+#[derive(Clone, Copy)]
+pub struct DmaByteCount {
+    #[bits(0..=15, overlay = "mdma")]
+    pub amount: u16,
+
+    #[bits(0..=15, overlay = "hdma")]
+    pub indirect_offset: u16,
+
+    #[bits(16..=23, overlay = "hdma")]
+    pub indirect_bank: u8,
+}
+
+impl DmaByteCount {
+    pub fn count(&self) -> u32 {
+        let count = self.amount() as u32;
+        if count == 0 { 65536 } else { count }
+    }
+}
+
+impl Default for DmaByteCount {
+    fn default() -> Self {
+        Self::from_raw(0xFF_FFFF)
+    }
+}
+
+register_mmio_family! {
+    /// NLTRn
+    pub struct HdmaLineCounter {
+        #[bits(0..=6)]
+        pub line_count: u8,
+
+        #[bits(7)]
+        pub repeat: bool,
+    }
+    symbols {
+        0x430A => "NLTR0",
+        0x431A => "NLTR1",
+        0x432A => "NLTR2",
+        0x433A => "NLTR3",
+        0x434A => "NLTR4",
+        0x435A => "NLTR5",
+        0x436A => "NLTR6",
+        0x437A => "NLTR7",
+    }
+}
+
+impl Default for HdmaLineCounter {
+    fn default() -> Self {
+        Self::from_raw(0xFF)
+    }
+}
+
+macro_rules! register_dma_channel_symbols {
+    ($($n:literal),+ $(,)?) => {
+        $(register_mmio_raw! {
+            0x4301 + ($n << 4) => concat!("BBAD", $n),
+            0x4302 + ($n << 4) => concat!("A1T", $n, "L"),
+            0x4303 + ($n << 4) => concat!("A1T", $n, "H"),
+            0x4304 + ($n << 4) => concat!("A1B", $n),
+            0x4305 + ($n << 4) => concat!("DAS", $n, "L"),
+            0x4306 + ($n << 4) => concat!("DAS", $n, "H"),
+            0x4307 + ($n << 4) => concat!("DASB", $n),
+            0x4308 + ($n << 4) => concat!("A2A", $n, "L"),
+            0x4309 + ($n << 4) => concat!("A2A", $n, "H"),
+        })+
+    };
+}
+
+register_dma_channel_symbols!(0, 1, 2, 3, 4, 5, 6, 7);
+
 impl MmioReg for NmiTimerEnable {
     fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
         snes.irq.write_nmitimen(value);

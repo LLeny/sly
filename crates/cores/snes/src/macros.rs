@@ -63,7 +63,7 @@ macro_rules! register_mmio_family {
 }
 
 macro_rules! register_mmio_raw {
-    ($($addr:literal => $name:literal),+ $(,)?) => {
+    ($($addr:expr => $name:expr),+ $(,)?) => {
         $(
             inventory::submit! {
                 $crate::mmio::MmioSymbol { addr: $addr, name: $name, bits: 8, fields: &[] }
@@ -72,25 +72,6 @@ macro_rules! register_mmio_raw {
     };
 }
 
-macro_rules! mmio_passthrough {
-    ($name:ident => $($field:ident).+) => {
-        impl crate::mmio::MmioReg for $name {
-            fn read<M: crate::mmio::MemoryMap>(snes: &mut crate::Snes<M>) -> u8 {
-                snes.$($field).+.raw()
-            }
-
-            fn write<M: crate::mmio::MemoryMap>(snes: &mut crate::Snes<M>, value: u8) {
-                snes.$($field).+ = Self::from_raw(value);
-            }
-
-            fn peek<M: crate::mmio::MemoryMap>(snes: &crate::Snes<M>) -> u8 {
-                snes.$($field).+.raw()
-            }
-        }
-    };
-}
-
-pub(crate) use mmio_passthrough;
 pub(crate) use register_mmio;
 pub(crate) use register_mmio_family;
 pub(crate) use register_mmio_raw;
