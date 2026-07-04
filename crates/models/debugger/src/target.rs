@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
 use core_model::Core;
-use frontend_model::{ComponentManifest, DockLocation, PanelDescriptor, PanelKind, RefreshPolicy};
+use frontend_model::{
+    ComponentManifest, DockLocation, PanelDescriptor, PanelKind, RefreshPolicy,
+    WorkspaceDescriptor, WorkspaceIcon,
+};
 
 use crate::model::{
     CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Highlight, MemoryRegion, MmioView,
-    StatusView,
+    PaletteView, StatusView,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -143,6 +146,10 @@ pub trait DebugCore: Core {
         DmaView::default()
     }
 
+    fn palette_view(&self) -> PaletteView {
+        PaletteView::default()
+    }
+
     fn status(&self, label: &str) -> StatusView;
     fn caption(&self, label: &str) -> String;
     fn memory_regions(&self) -> Vec<MemoryRegion>;
@@ -154,6 +161,9 @@ pub trait DebugCore: Core {
         String::new()
     }
 }
+
+pub const CPU_WORKSPACE: &str = "cpu";
+pub const VIDEO_WORKSPACE: &str = "video";
 
 pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
     use DockLocation::{Bottom, Center, Left, Right};
@@ -167,24 +177,29 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
             PanelKind::Breakpoints,
             Left,
             OnPause,
-        ),
+        )
+        .tag(CPU_WORKSPACE),
         PanelDescriptor::new(
             "cartridge",
             "Cartridge",
             PanelKind::Cartridge,
             Left,
             OnPause,
-        ),
+        )
+        .tag(CPU_WORKSPACE),
     ];
 
     for c in cpus {
-        panels.push(PanelDescriptor::new(
-            format!("{}.disasm", c.id.as_str()),
-            format!("{} Disassembly", c.title),
-            PanelKind::Disassembly { cpu: c.id.arc() },
-            Center,
-            OnPause,
-        ));
+        panels.push(
+            PanelDescriptor::new(
+                format!("{}.disasm", c.id.as_str()),
+                format!("{} Disassembly", c.title),
+                PanelKind::Disassembly { cpu: c.id.arc() },
+                Center,
+                OnPause,
+            )
+            .tag(CPU_WORKSPACE),
+        );
     }
     panels.push(PanelDescriptor::new(
         "memory",
@@ -195,13 +210,16 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
     ));
 
     for c in cpus {
-        panels.push(PanelDescriptor::new(
-            c.id.as_str(),
-            c.title.as_ref(),
-            PanelKind::Registers { cpu: c.id.arc() },
-            Right,
-            OnPause,
-        ));
+        panels.push(
+            PanelDescriptor::new(
+                c.id.as_str(),
+                c.title.as_ref(),
+                PanelKind::Registers { cpu: c.id.arc() },
+                Right,
+                OnPause,
+            )
+            .tag(CPU_WORKSPACE),
+        );
     }
 
     panels.push(PanelDescriptor::new(
@@ -222,6 +240,11 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
 
     ComponentManifest {
         system: Arc::from(""),
+        workspaces: vec![WorkspaceDescriptor::new(
+            CPU_WORKSPACE,
+            "CPU",
+            WorkspaceIcon::Cpu,
+        )],
         panels,
     }
 }

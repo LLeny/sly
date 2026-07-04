@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use core_model::Core;
 use debugger_model::{
-    BreakpointKind, BreakpointMark, CallStackView, CartridgeField, CartridgeView,
+    BreakpointKind, BreakpointMark, CPU_WORKSPACE, CallStackView, CartridgeField, CartridgeView,
     ComponentManifest, CpuDescriptor, CpuId, CpuView, DebugCore, DisasmLine, DisasmToken,
     DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind, Highlight,
-    MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PanelDescriptor, PanelKind,
-    RefreshPolicy, RegisterView, RunOutcome, StackFrame, StatusView, SyntaxSpec, TokenKind, hex,
+    MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView,
+    PanelDescriptor, PanelKind, RefreshPolicy, RegisterView, RunOutcome, StackFrame, StatusView,
+    SyntaxSpec, TokenKind, VIDEO_WORKSPACE, WorkspaceDescriptor, WorkspaceIcon, hex,
     standard_manifest, strip_symbol_sigils, tokenize,
 };
 
@@ -244,22 +245,56 @@ impl DebugCore for SnesDebug {
         self::dma_view(&self.core)
     }
 
+    fn palette_view(&self) -> PaletteView {
+        let palettes = (0..16)
+            .map(|p| {
+                self.core
+                    .palette(p)
+                    .into_iter()
+                    .map(|word| PaletteColor {
+                        raw: word,
+                        rgb: crate::ppu::cgram::rgb(word),
+                    })
+                    .collect()
+            })
+            .collect();
+
+        PaletteView {
+            palettes,
+            meta: format!("CGADD {}", hex(self.core.ppu.cgram.word_addr() as u32, 8)).into(),
+        }
+    }
+
     fn manifest(&self) -> ComponentManifest {
         let mut manifest = standard_manifest(&self.cpus());
-        let after_breakpoints = manifest
-            .panels
-            .iter()
-            .position(|p| p.kind == PanelKind::Breakpoints)
-            .map_or(manifest.panels.len(), |ix| ix + 1);
-        manifest.panels.insert(
-            after_breakpoints,
+        manifest.workspaces.push(WorkspaceDescriptor::new(
+            VIDEO_WORKSPACE,
+            "PPU",
+            WorkspaceIcon::Video,
+        ));
+
+        manifest.insert_after(
+            PanelKind::Breakpoints,
             PanelDescriptor::new(
                 "dma",
                 "DMA",
                 PanelKind::Dma,
                 DockLocation::Left,
                 RefreshPolicy::OnPause,
-            ),
+            )
+            .tag(CPU_WORKSPACE)
+            .tag(VIDEO_WORKSPACE),
+        );
+        manifest.insert_after(
+            PanelKind::Dma,
+            PanelDescriptor::new(
+                "palette",
+                "Palettes",
+                PanelKind::Palette,
+                DockLocation::Left,
+                RefreshPolicy::OnPause,
+            )
+            .tag(VIDEO_WORKSPACE),
         );
         manifest
     }

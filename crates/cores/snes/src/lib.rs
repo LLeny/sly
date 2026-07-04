@@ -26,6 +26,7 @@ use crate::mmio::Address;
 #[cfg(feature = "debug")]
 use crate::mmio::MemoryAccess;
 use crate::mmio::dma::Dma;
+use crate::ppu::Ppu;
 use crate::scheduler::Scheduler;
 
 pub const CYCLES_PER_STEP: u64 = 30; // TODO: CYCLE ACCURACY
@@ -49,6 +50,7 @@ pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub irq: Irq,
     pub dma: Dma,
     pub apu: Apu,
+    pub ppu: Ppu,
     pub joypads: Joypads,
     pub scheduler: Scheduler<M>,
     #[cfg(feature = "debug")]
@@ -70,6 +72,7 @@ impl<M: MemoryMap + 'static> Snes<M> {
             irq: Irq::default(),
             dma: Dma::default(),
             apu: Apu::new(),
+            ppu: Ppu::new(),
             joypads: Joypads::default(),
             scheduler: Scheduler::new(tv_system),
             #[cfg(feature = "debug")]
@@ -89,6 +92,7 @@ impl<M: MemoryMap + 'static> Snes<M> {
         self.irq = Irq::default();
         self.dma = Dma::default();
         self.apu = Apu::new();
+        self.ppu = Ppu::new();
         self.joypads.reset();
 
         self.scheduler = Scheduler::new(tv_system);

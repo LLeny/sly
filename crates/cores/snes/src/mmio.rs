@@ -16,6 +16,7 @@ use crate::mmio::regs::{
     APU_IO_END, APU_IO_START, HdmaTransferEnable, HvStatusJoypadBusy, MdmaTransferStart,
     NmiTimerEnable, VblankFlagCpuVersion,
 };
+use crate::ppu::regs::{Bg12ChrBase, Bg34ChrBase, CGADD, CGDATA, RDCGRAM};
 use crate::{Cartridge, Snes};
 
 pub use addr::Address;
@@ -188,6 +189,11 @@ impl<M: MemoryMap> Snes<M> {
 
     fn read_io(&mut self, reg: u16) -> u8 {
         match reg {
+            Bg12ChrBase::ADDRESS => Bg12ChrBase::read(self),
+            Bg34ChrBase::ADDRESS => Bg34ChrBase::read(self),
+            CGADD => self.ppu.cgram.word_addr(),
+            CGDATA => self.ppu.cgram.peek_data(),
+            RDCGRAM => self.ppu.cgram.read_data(),
             NmiTimerEnable::ADDRESS => NmiTimerEnable::read(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::read(self),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::read(self),
@@ -210,6 +216,11 @@ impl<M: MemoryMap> Snes<M> {
 
     fn write_io(&mut self, reg: u16, value: u8) {
         match reg {
+            Bg12ChrBase::ADDRESS => Bg12ChrBase::write(self, value),
+            Bg34ChrBase::ADDRESS => Bg34ChrBase::write(self, value),
+            CGADD => self.ppu.cgram.set_addr(value),
+            CGDATA => self.ppu.cgram.write_data(value),
+            RDCGRAM => {}
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::write(self, value),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::write(self, value),
@@ -238,6 +249,10 @@ impl<M: MemoryMap> Snes<M> {
 
     fn peek_io(&self, reg: u16) -> u8 {
         match reg {
+            Bg12ChrBase::ADDRESS => Bg12ChrBase::peek(self),
+            Bg34ChrBase::ADDRESS => Bg34ChrBase::peek(self),
+            CGADD => self.ppu.cgram.word_addr(),
+            CGDATA | RDCGRAM => self.ppu.cgram.peek_data(),
             NmiTimerEnable::ADDRESS => NmiTimerEnable::peek(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::peek(self),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::peek(self),

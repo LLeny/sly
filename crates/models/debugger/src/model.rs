@@ -257,6 +257,18 @@ pub struct DmaView {
     pub channels: Vec<DmaChannelView>,
 }
 
+#[derive(Clone, Copy)]
+pub struct PaletteColor {
+    pub raw: u16,
+    pub rgb: (u8, u8, u8),
+}
+
+#[derive(Clone, Default)]
+pub struct PaletteView {
+    pub palettes: Vec<Vec<PaletteColor>>,
+    pub meta: Arc<str>,
+}
+
 #[derive(Clone)]
 pub struct MemoryRegion {
     pub id: Arc<str>,

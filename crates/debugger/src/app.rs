@@ -5,17 +5,18 @@ use std::time::Duration;
 
 use cirsium::assets::icon;
 use cirsium::components::{
-    CheckboxSize, MenuItem, StatusView, TextInput, TextInputEvent, checkbox, combobox_menu,
-    context_menu, field_button, icon_button, popover, status_bar, title_bar,
+    CheckboxSize, MenuItem, Segmented, StatusView, TextInput, TextInputEvent, checkbox,
+    combobox_menu, context_menu, field_button, icon_button, popover, status_bar, title_bar,
 };
 use cirsium::widgets::{
     BreakpointKind, BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView,
     CartridgeWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView,
-    DmaWidget, LogWidget, MemoryWidget, MmioView, MmioWidget, RowProvider, ViewMode,
+    DmaWidget, LogWidget, MemoryWidget, MmioView, MmioWidget, PaletteView, PaletteWidget,
+    RowProvider, ViewMode,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
-use frontend_model::DockLocation;
+use frontend_model::{ComponentManifest, DockLocation, WorkspaceIcon};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, MouseDownEvent, Pixels, Point,
@@ -44,6 +45,9 @@ pub(crate) struct Debugger {
     mmio_expanded: HashSet<SharedString>,
     dma_view: DmaView,
     dma_expanded: HashSet<SharedString>,
+    palette_view: PaletteView,
+    palette_selected: Option<(usize, usize)>,
+    manifest: ComponentManifest,
     status: StatusView,
     panes: Vec<ProcessorPane>,
     memory: Memory,
@@ -54,6 +58,7 @@ pub(crate) struct Debugger {
     log_filter_input: Entity<TextInput>,
     collapsed: HashSet<SharedString>,
     settings: Option<Point<Pixels>>,
+    workspace: Option<SharedString>,
     running: bool,
     run_task: Option<Task<()>>,
 }
@@ -102,12 +107,18 @@ impl Debugger {
         cx.subscribe(&log_filter_input, Self::on_log_filter_event)
             .detach();
 
+        let manifest = target.manifest();
+        manifest.validate();
+
         Self {
             cartridge: target.cartridge().clone().into(),
             mmio_view: target.mmio_view().into(),
             mmio_expanded: HashSet::new(),
             dma_view: target.dma_view().into(),
             dma_expanded: HashSet::new(),
+            palette_view: target.palette_view().into(),
+            palette_selected: None,
+            manifest,
             status: target.status("paused").into(),
             memory: Memory::new(target.as_ref()),
             breakpoints: Breakpoints::default(),
@@ -119,6 +130,7 @@ impl Debugger {
             panes,
             collapsed: HashSet::new(),
             settings: None,
+            workspace: None,
             running: false,
             run_task: None,
         }
@@ -136,6 +148,7 @@ impl Debugger {
         }
         self.mmio_view = self.target.mmio_view().into();
         self.dma_view = self.target.dma_view().into();
+        self.palette_view = self.target.palette_view().into();
     }
 
     fn track_changes(
@@ -175,6 +188,17 @@ impl Debugger {
 
     fn toggle_dma(&mut self, id: SharedString, cx: &mut Context<Self>) {
         Self::toggle_in(&mut self.dma_expanded, id);
+        cx.notify();
+    }
+
+    fn select_palette_color(&mut self, palette: usize, color: usize, cx: &mut Context<Self>) {
+        let selected = Some((palette, color));
+        self.palette_selected = (self.palette_selected != selected).then_some((palette, color));
+        cx.notify();
+    }
+
+    fn set_workspace(&mut self, id: SharedString, cx: &mut Context<Self>) {
+        self.workspace = Some(id);
         cx.notify();
     }
 
@@ -608,6 +632,14 @@ impl Debugger {
     }
 }
 
+fn workspace_icon(icon: WorkspaceIcon) -> &'static str {
+    match icon {
+        WorkspaceIcon::Cpu => icon::CPU,
+        WorkspaceIcon::Video => icon::MONITOR,
+        WorkspaceIcon::Generic => icon::LIST,
+    }
+}
+
 type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
 
 struct SilencedPanics(Option<PanicHook>);
@@ -654,6 +686,37 @@ impl Render for Debugger {
             window.request_animation_frame();
         }
 
+        let this = cx.entity();
+
+        let manifest = &self.manifest;
+        let active_workspace = self.workspace.clone().unwrap_or_else(|| {
+            manifest
+                .workspaces
+                .first()
+                .map(|w| SharedString::from(w.id.clone()))
+                .unwrap_or_default()
+        });
+
+        let workspace_switcher = (manifest.workspaces.len() > 1).then(|| {
+            let mut switcher = Segmented::new("workspace").selected(active_workspace.clone());
+
+            for ws in &manifest.workspaces {
+                switcher = switcher.option(
+                    SharedString::from(ws.id.clone()),
+                    self::workspace_icon(ws.icon),
+                    SharedString::from(ws.title.clone()),
+                );
+            }
+
+            switcher.on_select({
+                let this = this.clone();
+                move |id, _, cx| {
+                    let id = SharedString::from(id.to_string());
+                    this.update(cx, |d, cx| d.set_workspace(id, cx));
+                }
+            })
+        });
+
         let settings_button = icon_button(
             t,
             "settings",
@@ -676,6 +739,10 @@ impl Render for Debugger {
             .flex()
             .items_center()
             .h_full()
+            .children(
+                workspace_switcher
+                    .map(|switcher| div().flex().items_center().pr_2().child(switcher)),
+            )
             .child(settings_button)
             .child(theme_toggle);
 
@@ -694,8 +761,6 @@ impl Render for Debugger {
             .on_step(cx.listener(|this, _, _, cx| this.step(cx)))
             .on_reset(cx.listener(|this, _, _, cx| this.reset(cx)));
 
-        let this = cx.entity();
-
         let mmio = MmioWidget::new(self.mmio_view.clone())
             .expanded(self.mmio_expanded.clone())
             .collapsed(self.is_collapsed(MmioWidget::ID))
@@ -712,6 +777,17 @@ impl Render for Debugger {
             .on_toggle_channel({
                 let this = this.clone();
                 move |id, _, cx| this.update(cx, |d, cx| d.toggle_dma(id, cx))
+            });
+
+        let palette = PaletteWidget::new(self.palette_view.clone())
+            .selected(self.palette_selected)
+            .collapsed(self.is_collapsed(PaletteWidget::ID))
+            .on_toggle(cx.listener(|this, _, _, cx| this.toggle(PaletteWidget::ID, cx)))
+            .on_select({
+                let this = this.clone();
+                move |palette, color, _, cx| {
+                    this.update(cx, |d, cx| d.select_palette_color(palette, color, cx))
+                }
             });
 
         let breakpoints =
@@ -1145,7 +1221,6 @@ impl Render for Debugger {
             )
         });
 
-        let manifest = self.target.manifest();
         let mut panels: HashMap<String, AnyElement> = HashMap::new();
         panels.insert(
             "controls".into(),
@@ -1153,6 +1228,7 @@ impl Render for Debugger {
         );
         panels.insert("breakpoints".into(), breakpoints.into_any_element());
         panels.insert("dma".into(), dma.into_any_element());
+        panels.insert("palette".into(), palette.into_any_element());
         panels.insert(
             "cartridge".into(),
             div().flex_none().child(cartridge).into_any_element(),
@@ -1165,7 +1241,7 @@ impl Render for Debugger {
 
         let mut take = |location: DockLocation| -> Vec<AnyElement> {
             manifest
-                .in_location(location)
+                .in_location(&active_workspace, location)
                 .filter_map(|panel| panels.remove(panel.id.as_ref()))
                 .collect()
         };
