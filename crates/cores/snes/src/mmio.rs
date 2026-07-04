@@ -10,8 +10,9 @@ mod symbol;
 #[cfg(feature = "debug")]
 pub use access::{AccessTracker, MemoryAccess};
 
+use crate::mmio::dma::{CHANNEL_REGS_END, CHANNEL_REGS_START, Dma};
 use crate::mmio::regs::{
-    APU_IO_END, APU_IO_START, DmaTransferStart, HdmaTransferEnable, HvStatusJoypadBusy,
+    APU_IO_END, APU_IO_START, HdmaTransferEnable, HvStatusJoypadBusy, MdmaTransferStart,
     NmiTimerEnable, VblankFlagCpuVersion,
 };
 use crate::{Cartridge, Snes};
@@ -189,8 +190,11 @@ impl<M: MemoryMap> Snes<M> {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::read(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::read(self),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::read(self),
-            DmaTransferStart::ADDRESS => DmaTransferStart::read(self),
+            MdmaTransferStart::ADDRESS => MdmaTransferStart::read(self),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::read(self),
+            CHANNEL_REGS_START..=CHANNEL_REGS_END => {
+                self.dma.channels[Dma::channel_index(reg)].read(reg)
+            }
             APU_IO_START..=APU_IO_END => self.apu.cpu_read_port((reg - APU_IO_START) as usize),
             _ => {
                 tracing::error!(
@@ -207,8 +211,11 @@ impl<M: MemoryMap> Snes<M> {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::write(self, value),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::write(self, value),
-            DmaTransferStart::ADDRESS => DmaTransferStart::write(self, value),
+            MdmaTransferStart::ADDRESS => MdmaTransferStart::write(self, value),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::write(self, value),
+            CHANNEL_REGS_START..=CHANNEL_REGS_END => {
+                self.dma.channels[Dma::channel_index(reg)].write(reg, value)
+            }
             APU_IO_START..=APU_IO_END => self
                 .apu
                 .cpu_write_port((reg - APU_IO_START) as usize, value),
@@ -232,8 +239,11 @@ impl<M: MemoryMap> Snes<M> {
             NmiTimerEnable::ADDRESS => NmiTimerEnable::peek(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::peek(self),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::peek(self),
-            DmaTransferStart::ADDRESS => DmaTransferStart::peek(self),
+            MdmaTransferStart::ADDRESS => MdmaTransferStart::peek(self),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::peek(self),
+            CHANNEL_REGS_START..=CHANNEL_REGS_END => {
+                self.dma.channels[Dma::channel_index(reg)].read(reg)
+            }
             APU_IO_START..=APU_IO_END => self.apu.cpu_read_port((reg - APU_IO_START) as usize),
             _ => OPEN_BUS,
         }

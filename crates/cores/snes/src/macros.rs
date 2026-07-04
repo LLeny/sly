@@ -38,6 +38,30 @@ macro_rules! register_mmio {
     };
 }
 
+macro_rules! register_mmio_family {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident { $($body:tt)* }
+        symbols { $($addr:literal => $sym:literal),+ $(,)? }
+    ) => {
+        #[chapa::bitfield(u8, order = lsb0)]
+        #[derive(Clone, Copy)]
+        $(#[$meta])*
+        $vis struct $name { $($body)* }
+
+        $(
+            inventory::submit! {
+                $crate::mmio::MmioSymbol {
+                    addr: $addr,
+                    name: $sym,
+                    bits: (::core::mem::size_of::<$name>() * 8) as u8,
+                    fields: $name::FIELDS,
+                }
+            }
+        )+
+    };
+}
+
 macro_rules! register_mmio_raw {
     ($($addr:literal => $name:literal),+ $(,)?) => {
         $(
@@ -68,4 +92,5 @@ macro_rules! mmio_passthrough {
 
 pub(crate) use mmio_passthrough;
 pub(crate) use register_mmio;
+pub(crate) use register_mmio_family;
 pub(crate) use register_mmio_raw;

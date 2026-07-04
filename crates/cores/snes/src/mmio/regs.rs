@@ -1,5 +1,7 @@
+use chapa::BitEnum;
+
 use crate::Snes;
-use crate::macros::{mmio_passthrough, register_mmio, register_mmio_raw};
+use crate::macros::{register_mmio, register_mmio_family, register_mmio_raw};
 use crate::mmio::{MemoryMap, MmioReg};
 
 pub const APU_IO_START: u16 = 0x2140;
@@ -28,7 +30,7 @@ register_mmio! {
 
 register_mmio! {
     /// MDMAEN
-    pub struct DmaTransferStart @ 0x420B {
+    pub struct MdmaTransferStart @ 0x420B {
         #[bits(0)]
         pub channel0: bool,
 
@@ -109,13 +111,68 @@ register_mmio! {
     }
 }
 
-mmio_passthrough!(HdmaTransferEnable => dma.hdmaen);
+#[derive(BitEnum, Clone, Copy)]
+pub enum TransferPattern {
+    #[fallback]
+    Pattern0 = 0,
+    Pattern1 = 1,
+    Pattern2 = 2,
+    Pattern3 = 3,
+    Pattern4 = 4,
+    Pattern5 = 5,
+    Pattern6 = 6,
+    Pattern7 = 7,
+}
+
+#[derive(BitEnum, Clone, Copy)]
+pub enum AddressAdjustMode {
+    Increment = 0,
+    Decrement = 2,
+    #[fallback]
+    Fixed = 1, // includes 3
+}
+
+#[derive(BitEnum, Clone, Copy)]
+pub enum Direction {
+    #[fallback]
+    AToB = 0,
+    BToA = 1,
+}
+
+register_mmio_family! {
+    /// DMAPn
+    pub struct DmaChannelParameters {
+        #[bits(0..=2)]
+        pub transfer_pattern: TransferPattern,
+
+        #[bits(3..=4)]
+        pub address_adjust_mode: AddressAdjustMode,
+
+        #[bits(6)]
+        pub indirect: bool,
+
+        #[bits(7)]
+        pub direction: Direction,
+    }
+    symbols {
+        0x4300 => "DMAP0",
+        0x4310 => "DMAP1",
+        0x4320 => "DMAP2",
+        0x4330 => "DMAP3",
+        0x4340 => "DMAP4",
+        0x4350 => "DMAP5",
+        0x4360 => "DMAP6",
+        0x4370 => "DMAP7",
+    }
+}
+
+impl Default for DmaChannelParameters {
+    fn default() -> Self {
+        Self::from_raw(0xFF)
+    }
+}
 
 impl MmioReg for NmiTimerEnable {
-    fn read<M: MemoryMap>(snes: &mut Snes<M>) -> u8 {
-        snes.irq.nmitimen_raw()
-    }
-
     fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
         snes.irq.write_nmitimen(value);
     }
@@ -125,21 +182,45 @@ impl MmioReg for NmiTimerEnable {
     }
 }
 
-impl MmioReg for DmaTransferStart {
-    fn read<M: MemoryMap>(snes: &mut Snes<M>) -> u8 {
-        snes.dma.mdmaen.raw()
-    }
-
+impl MmioReg for MdmaTransferStart {
     fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
         snes.dma.mdmaen = Self::from_raw(value);
-        tracing::error!(
-            value = format!("{:02X}", value),
-            "MDMA start not implemented"
+        tracing::trace!(
+            channel0 = snes.dma.mdmaen.channel0(),
+            channel1 = snes.dma.mdmaen.channel1(),
+            channel2 = snes.dma.mdmaen.channel2(),
+            channel3 = snes.dma.mdmaen.channel3(),
+            channel4 = snes.dma.mdmaen.channel4(),
+            channel5 = snes.dma.mdmaen.channel5(),
+            channel6 = snes.dma.mdmaen.channel6(),
+            channel7 = snes.dma.mdmaen.channel7(),
+            "MDMA transfer start"
         );
     }
 
     fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
         snes.dma.mdmaen.raw()
+    }
+}
+
+impl MmioReg for HdmaTransferEnable {
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
+        snes.dma.hdmaen = Self::from_raw(value);
+        tracing::trace!(
+            channel0 = snes.dma.hdmaen.channel0(),
+            channel1 = snes.dma.hdmaen.channel1(),
+            channel2 = snes.dma.hdmaen.channel2(),
+            channel3 = snes.dma.hdmaen.channel3(),
+            channel4 = snes.dma.hdmaen.channel4(),
+            channel5 = snes.dma.hdmaen.channel5(),
+            channel6 = snes.dma.hdmaen.channel6(),
+            channel7 = snes.dma.hdmaen.channel7(),
+            "HDMA transfer enable"
+        );
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        snes.dma.hdmaen.raw()
     }
 }
 
