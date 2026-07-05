@@ -1001,9 +1001,7 @@ impl Render for Debugger {
             .then(|| {
                 FramebufferWidget::new(self.framebuffer.clone())
                     .collapsed(self.is_collapsed(FramebufferWidget::ID))
-                    .on_toggle(
-                        cx.listener(|this, _, _, cx| this.toggle(FramebufferWidget::ID, cx)),
-                    )
+                    .on_toggle(cx.listener(|this, _, _, cx| this.toggle(FramebufferWidget::ID, cx)))
             })
             .map(|widget| widget.into_any_element());
 
@@ -1589,7 +1587,7 @@ impl Render for Debugger {
             );
         }
         panels.insert(MmioWidget::ID.into(), mmio.into_any_element());
-        
+
         if let Some(sprites) = sprites {
             let element = match framebuffer.take() {
                 Some(screen) => self::half_row(sprites.into_any_element(), screen),

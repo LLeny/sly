@@ -10,7 +10,7 @@ mod symbol;
 #[cfg(feature = "debug")]
 pub use access::{AccessTracker, MemoryAccess};
 
-use crate::joypad::{JOYPAD_IO_END, JOYPAD_IO_START};
+use crate::joypad::{JOYPAD_IO_END, JOYPAD_IO_START, JOYSER0, JOYSER1, JOYSER1_ALWAYS_SET};
 use crate::mmio::dma::{CHANNEL_REGS_END, CHANNEL_REGS_START, Dma};
 use crate::mmio::regs::{
     APU_IO_END, APU_IO_START, HdmaTransferEnable, HvStatusJoypadBusy, MdmaTransferStart,
@@ -225,6 +225,8 @@ impl<M: MemoryMap> Snes<M> {
             }
             APU_IO_START..=APU_IO_END => self.apu.cpu_read_port((reg - APU_IO_START) as usize),
             JOYPAD_IO_START..=JOYPAD_IO_END => self.joypads.read(reg),
+            JOYSER0 => 0,
+            JOYSER1 => JOYSER1_ALWAYS_SET,
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),
@@ -289,6 +291,7 @@ impl<M: MemoryMap> Snes<M> {
             APU_IO_START..=APU_IO_END => self
                 .apu
                 .cpu_write_port((reg - APU_IO_START) as usize, value),
+            JOYSER0 => {}
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),
@@ -336,6 +339,8 @@ impl<M: MemoryMap> Snes<M> {
             }
             APU_IO_START..=APU_IO_END => self.apu.cpu_read_port((reg - APU_IO_START) as usize),
             JOYPAD_IO_START..=JOYPAD_IO_END => self.joypads.read(reg),
+            JOYSER0 => 0,
+            JOYSER1 => JOYSER1_ALWAYS_SET,
             _ => OPEN_BUS,
         }
     }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, ObjectFit, RenderImage, Window, div, img, px};
+use gpui::{App, ClickEvent, ImageFiltering, ObjectFit, RenderImage, Window, div, img, px};
 
 use crate::assets::icon;
 use crate::components::{ClickHandler, Panel, empty_state};
@@ -76,7 +76,12 @@ impl RenderOnce for FramebufferWidget {
             .justify_center()
             .overflow_hidden();
         let body = match self.view.as_ref().and_then(|view| view.image.clone()) {
-            Some(image) => body.child(img(image).size_full().object_fit(ObjectFit::Contain)),
+            Some(image) => body.child(
+                img(image)
+                    .size_full()
+                    .object_fit(ObjectFit::Contain)
+                    .image_filtering(ImageFiltering::Nearest),
+            ),
             None => body.child(empty_state(t, "No frame")),
         };
 

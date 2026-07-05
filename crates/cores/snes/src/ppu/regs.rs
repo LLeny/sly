@@ -431,7 +431,7 @@ register_mmio! {
 
         #[bits(5..=7)]
         pub sprite_size: SpriteSize,
-    }    
+    }
 }
 
 impl SpriteSizeAndTileBase {

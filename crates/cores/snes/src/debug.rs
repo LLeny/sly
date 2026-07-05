@@ -996,11 +996,11 @@ fn object_pixels(
                 for (px, &color) in line.iter().enumerate() {
                     let mut x = tx * 8 + px;
                     let mut y = ty * 8 + py;
-                    
+
                     if flip_h {
                         x = width - 1 - x;
                     }
-                    
+
                     if flip_v {
                         y = height - 1 - y;
                     }
@@ -1039,9 +1039,10 @@ fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {
         let (x, y) = (i as u32 % data.width, i as u32 / data.width);
         let colors = &palettes[entry.palette_selection as usize];
 
-        let pixels = self::object_pixels(size, size, entry.flip_h, entry.flip_v, colors, |tx, ty| {
-            decode(entry.tile_index + tx as u16 + ty as u16 * 16)
-        });
+        let pixels =
+            self::object_pixels(size, size, entry.flip_h, entry.flip_v, colors, |tx, ty| {
+                decode(entry.tile_index + tx as u16 + ty as u16 * 16)
+            });
 
         entries.push(TilemapEntry {
             addr: data.entry_addr(x, y),

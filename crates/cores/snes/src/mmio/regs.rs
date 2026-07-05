@@ -15,6 +15,8 @@ register_mmio_raw! {
 }
 
 register_mmio_raw! {
+    0x4016 => "JOYSER0",
+    0x4017 => "JOYSER1",
     0x4218 => "JOY1L",
     0x4219 => "JOY1H",
     0x421A => "JOY2L",

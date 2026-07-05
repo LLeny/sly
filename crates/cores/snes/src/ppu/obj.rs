@@ -13,7 +13,7 @@ impl ObjLayer {
         if tile & 0x100 != 0 {
             addr += 0x1000 + self.name_offset;
         }
-        
+
         (addr + (tile as u32 & 0xFF) * 16) & 0x7FFF
     }
 }

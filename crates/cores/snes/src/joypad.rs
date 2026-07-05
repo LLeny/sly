@@ -1,3 +1,8 @@
+pub const JOYSER0: u16 = 0x4016;
+pub const JOYSER1: u16 = 0x4017;
+
+pub const JOYSER1_ALWAYS_SET: u8 = 0b0001_1100;
+
 pub const JOYPAD_IO_START: u16 = 0x4218;
 pub const JOYPAD_IO_END: u16 = 0x421F;
 

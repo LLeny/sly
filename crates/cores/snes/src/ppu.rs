@@ -5,6 +5,7 @@ pub(crate) mod latch;
 pub mod oam;
 pub(crate) mod obj;
 pub(crate) mod regs;
+mod render;
 pub mod tile;
 pub mod vram;
 
@@ -60,218 +61,6 @@ impl Ppu {
         }
     }
 
-    pub fn render_scanline(&mut self, scanline: usize) {
-        let mut line = [None; SCREEN_WIDTH as usize];
-        let obj = if self.main_screen.obj() {
-            self.render_obj_scanline(scanline as u32)
-        } else {
-            [None; SCREEN_WIDTH as usize]
-        };
-
-        for &layer in self.layer_order() {
-            match layer {
-                Layer::Bg(layer, priority) => {
-                    if self.main_screen.bg(layer) {
-                        self.render_bg_scanline(layer, priority, scanline as u32, &mut line);
-                    }
-                }
-                Layer::Obj(priority) => {
-                    for (slot, &pixel) in line.iter_mut().zip(obj.iter()) {
-                        if slot.is_some() {
-                            continue;
-                        }
-                        if let Some((p, color)) = pixel
-                            && p == priority
-                        {
-                            *slot = Some(cgram::rgb(self.cgram.word(color)));
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut backdrop = self.cgram.word(0);
-        if self.color_math.layers.backdrop() {
-            backdrop = self.color_math.apply(backdrop);
-        }
-
-        let backdrop = cgram::rgb(backdrop);
-        let row =
-            &mut self.frame_buffer[scanline * SCREEN_WIDTH as usize..][..SCREEN_WIDTH as usize];
-        for (dst, pixel) in row.iter_mut().zip(line) {
-            *dst = pixel.unwrap_or(backdrop);
-        }
-    }
-
-    fn layer_order(&self) -> &'static [Layer] {
-        use Layer::{Bg, Obj};
-        
-        const H: bool = true;
-        const L: bool = false;
-
-        match (self.bg_mode, self.bg3_priority) {
-            (BackgroundMode::Mode0, _) => &[
-                Obj(3), Bg(0, H), Bg(1, H),
-                Obj(2), Bg(0, L), Bg(1, L),
-                Obj(1), Bg(2, H), Bg(3, H),
-                Obj(0), Bg(2, L), Bg(3, L),
-            ],
-            (BackgroundMode::Mode1, Priority::High) => &[
-                Bg(2, H),
-                Obj(3), Bg(0, H), Bg(1, H),
-                Obj(2), Bg(0, L), Bg(1, L),
-                Obj(1),
-                Obj(0), Bg(2, L),
-            ],
-            (BackgroundMode::Mode1, Priority::Normal) => &[
-                Obj(3), Bg(0, H), Bg(1, H),
-                Obj(2), Bg(0, L), Bg(1, L),
-                Obj(1), Bg(2, H),
-                Obj(0), Bg(2, L),
-            ],
-            // TODO: modes 2-7
-            _ => &[
-                Obj(3), Bg(0, H),
-                Obj(2), Bg(1, H),
-                Obj(1), Bg(0, L),
-                Obj(0), Bg(1, L),
-            ],
-        }
-    }
-
-    fn render_obj_scanline(&self, y: u32) -> [Option<(u8, u8)>; SCREEN_WIDTH as usize] {
-        let mut line = [None; SCREEN_WIDTH as usize];
-
-        // TODO: priority rotation
-        let mut in_range = [None; 32];
-        let mut count = 0;
-        for index in 0..128 {
-            let sprite = self.sprite(index);
-            if (y + 256 - sprite.y as u32) & 0xFF >= sprite.height
-                || sprite.x <= -(sprite.width as i32)
-            {
-                continue;
-            }
-            if count == in_range.len() {
-                // TODO: range over flag
-                break;
-            }
-            in_range[count] = Some(sprite);
-            count += 1;
-        }
-
-        let mut tiles = 0;
-        for sprite in in_range[..count].iter().rev().flatten() {
-            let mut row = (y + 256 - sprite.y as u32) & 0xFF;
-            if sprite.flip_v {
-                row = sprite.height - 1 - row;
-            }
-
-            for sliver in 0..sprite.width / 8 {
-                let base = sprite.x + sliver as i32 * 8;
-                if base <= -8 || base >= SCREEN_WIDTH as i32 {
-                    continue;
-                }
-                if tiles == 34 {
-                    // TODO: time over flag
-                    return line;
-                }
-                tiles += 1;
-
-                let tx = if sprite.flip_h {
-                    sprite.width / 8 - 1 - sliver
-                } else {
-                    sliver
-                };
-                let pixels = self
-                    .obj_tile(sprite.sub_tile(tx, row / 8))
-                    .decode_row(row as usize % 8, 4);
-
-                for i in 0..8u32 {
-                    let x = base + i as i32;
-                    if !(0..SCREEN_WIDTH as i32).contains(&x) {
-                        continue;
-                    }
-
-                    let px = if sprite.flip_h { 7 - i } else { i };
-                    let color = pixels[px as usize];
-                    if color != 0 {
-                        line[x as usize] =
-                            Some((sprite.priority, Self::obj_palette_addr(sprite.palette, color)));
-                    }
-                }
-            }
-        }
-
-        line
-    }
-
-    fn render_bg_scanline(
-        &self,
-        layer: usize,
-        priority: bool,
-        y: u32,
-        line: &mut [Option<(u8, u8, u8)>],
-    ) {
-        let (Some(bpp), Some(map)) = (self.bg_mode.bpp(layer), self.tilemap_header(layer)) else {
-            return;
-        };
-
-        let sy = (y + map.scroll_y) % (map.height * map.tile_px);
-        let (ty, in_y) = (sy / map.tile_px, sy % map.tile_px);
-
-        let mut cached = None;
-        let mut pixels = [0u8; 8];
-
-        let mut x = 0;
-        while x < line.len() as u32 {
-            let sx = (x + map.scroll_x) % (map.width * map.tile_px);
-            let (tx, in_x) = (sx / map.tile_px, sx % map.tile_px);
-            let run = (map.tile_px - in_x).min(line.len() as u32 - x);
-
-            let entry = TilemapEntry::from(self.vram.word(map.entry_addr(tx, ty) as u16));
-            if entry.priority != priority {
-                x += run;
-                continue;
-            }
-
-            let py = if entry.flip_v {
-                map.tile_px - 1 - in_y
-            } else {
-                in_y
-            };
-            let (base, _) = self.bg_palette(layer, bpp, entry.palette_selection as usize);
-
-            for i in 0..run {
-                let slot = &mut line[(x + i) as usize];
-                if slot.is_some() {
-                    continue;
-                }
-
-                let px = if entry.flip_h {
-                    map.tile_px - 1 - (in_x + i)
-                } else {
-                    in_x + i
-                };
-                let index = entry.tile_index + (px / 8) as u16 + (py / 8) as u16 * 16;
-                if cached != Some((index, py)) {
-                    pixels = self
-                        .bg_tile(layer, index)
-                        .unwrap_or_default()
-                        .decode_row(py as usize % 8, bpp);
-                    cached = Some((index, py));
-                }
-
-                let color = pixels[px as usize % 8];
-                if color != 0 {
-                    *slot = Some(cgram::rgb(self.cgram.word((base + color as usize) as u8)));
-                }
-            }
-
-            x += run;
-        }
-    }
-
     pub fn palette(&self, index: usize) -> [u16; 16] {
         std::array::from_fn(|i| self.cgram.word((index * 16 + i) as u8))
     }
@@ -320,7 +109,7 @@ impl Ppu {
 
     fn tilemap_header(&self, layer: usize) -> Option<TilemapData> {
         self.bg_mode.bpp(layer)?;
-        
+
         let bg = &self.bg_layers[layer];
 
         Some(TilemapData {
@@ -402,12 +191,6 @@ impl Ppu {
     }
 }
 
-#[derive(Clone, Copy)]
-enum Layer {
-    Bg(usize, bool),
-    Obj(u8),
-}
-
 pub struct TilesetData {
     pub bpp: u8,
     pub base_addr: u32,
@@ -446,6 +229,19 @@ impl From<u16> for TilemapEntry {
     }
 }
 
+impl TilemapEntry {
+    pub fn texel(&self, x: u32, y: u32, tile_px: u32) -> (u32, u32) {
+        (
+            if self.flip_h { tile_px - 1 - x } else { x },
+            if self.flip_v { tile_px - 1 - y } else { y },
+        )
+    }
+
+    pub fn char_index(&self, px: u32, py: u32) -> u16 {
+        self.tile_index + (px / 8) as u16 + (py / 8) as u16 * 16
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Sprite {
     pub x: i32,
@@ -465,6 +261,21 @@ impl Sprite {
         let col = (self.tile as u32 + tx) & 0x0F;
         let row = ((self.tile as u32 >> 4) + ty) & 0x0F;
         (self.tile & 0x100) | (row << 4) as u16 | col as u16
+    }
+
+    pub fn row(&self, y: u32) -> u32 {
+        (y + 256 - self.y as u32) & 0xFF
+    }
+
+    pub fn in_range(&self, y: u32) -> bool {
+        self.row(y) < self.height && self.x > -(self.width as i32)
+    }
+
+    pub fn texel(&self, x: u32, y: u32) -> (u32, u32) {
+        (
+            if self.flip_h { self.width - 1 - x } else { x },
+            if self.flip_v { self.height - 1 - y } else { y },
+        )
     }
 }
 

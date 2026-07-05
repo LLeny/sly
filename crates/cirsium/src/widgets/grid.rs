@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, ClickEvent, Div, Hsla, MouseMoveEvent, Pixels, Point, RenderImage, SharedString,
-    Size, Window, canvas, div, img, point, px, size,
+    App, Bounds, ClickEvent, Div, Hsla, ImageFiltering, MouseMoveEvent, Pixels, Point, RenderImage,
+    SharedString, Size, Window, canvas, div, img, point, px, size,
 };
 
 use crate::components::{
@@ -34,8 +34,6 @@ impl From<debugger_model::TilesetLayer> for TilesetLayer {
     }
 }
 
-const BLEED_BORDER: u32 = 1;
-
 pub(super) fn build_atlas<'a>(
     cols: usize,
     rows: usize,
@@ -43,16 +41,17 @@ pub(super) fn build_atlas<'a>(
     scale: u32,
     cells: impl Iterator<Item = (&'a [(u8, u8, u8)], u32, u32)>,
 ) -> Arc<RenderImage> {
-    let mut atlas = self::bordered(cols as u32 * cell_px * scale, rows as u32 * cell_px * scale);
+    let mut atlas =
+        image::RgbaImage::new(cols as u32 * cell_px * scale, rows as u32 * cell_px * scale);
 
     let mut row = vec![0u8; (cell_px * scale * 4) as usize];
     for (i, (pixels, width, height)) in cells.enumerate() {
-        let x = (i % cols) as u32 * cell_px * scale + (cell_px - width) / 2 * scale + BLEED_BORDER;
-        let y = (i / cols) as u32 * cell_px * scale + (cell_px - height) / 2 * scale + BLEED_BORDER;
+        let x = (i % cols) as u32 * cell_px * scale + (cell_px - width) / 2 * scale;
+        let y = (i / cols) as u32 * cell_px * scale + (cell_px - height) / 2 * scale;
         self::blit(&mut atlas, &mut row, x, y, pixels, width, height, scale);
     }
 
-    self::finish(atlas)
+    Arc::new(RenderImage::new(vec![image::Frame::new(atlas)]))
 }
 
 /// A single image scaled up by an integer factor (e.g. the framebuffer).
@@ -62,43 +61,10 @@ pub(super) fn build_image(
     height: u32,
     scale: u32,
 ) -> Arc<RenderImage> {
-    let mut image = self::bordered(width * scale, height * scale);
+    let mut image = image::RgbaImage::new(width * scale, height * scale);
     let mut row = vec![0u8; (width * scale * 4) as usize];
-    self::blit(
-        &mut image,
-        &mut row,
-        BLEED_BORDER,
-        BLEED_BORDER,
-        pixels,
-        width,
-        height,
-        scale,
-    );
-    self::finish(image)
-}
-
-fn bordered(width: u32, height: u32) -> image::RgbaImage {
-    image::RgbaImage::new(width + BLEED_BORDER * 2, height + BLEED_BORDER * 2)
-}
-
-fn finish(mut image: image::RgbaImage) -> Arc<RenderImage> {
-    self::replicate_border(&mut image);
+    self::blit(&mut image, &mut row, 0, 0, pixels, width, height, scale);
     Arc::new(RenderImage::new(vec![image::Frame::new(image)]))
-}
-
-fn replicate_border(image: &mut image::RgbaImage) {
-    let (w, h) = (image.width() as usize, image.height() as usize);
-    let stride = w * 4;
-    let data: &mut [u8] = image;
-
-    for y in 1..h - 1 {
-        let row = &mut data[y * stride..(y + 1) * stride];
-        row.copy_within(4..8, 0);
-        row.copy_within(stride - 8..stride - 4, stride - 4);
-    }
-
-    data.copy_within(stride..stride * 2, 0);
-    data.copy_within((h - 2) * stride..(h - 1) * stride, (h - 1) * stride);
 }
 
 fn blit(
@@ -582,7 +548,11 @@ fn image_grid(
         .flex_none()
         .w(px(cell * cols as f32))
         .h(px(cell * rows as f32))
-        .child(img(image).size_full())
+        .child(
+            img(image)
+                .size_full()
+                .image_filtering(ImageFiltering::Nearest),
+        )
         .child(track_bounds);
 
     if let Some(overlay) = overlay {
