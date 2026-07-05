@@ -60,6 +60,7 @@ impl TilesetWidget {
             tile_px: TILE_SIZE,
             count: view.addrs.len(),
             empty_message: "No tiles",
+            overlay: None,
         });
 
         let mut panel = GridPanel::new(Self::ID, "Tileset", icon::GRID, content)

@@ -7,9 +7,9 @@ use debugger_model::{
     DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind, Highlight,
     MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView,
     PanelDescriptor, PanelKind, PpuGroup, PpuProperty, PpuView, RefreshPolicy, RegisterView,
-    RunOutcome, StackFrame, StatusView, SyntaxSpec, Tilemap, TilemapEntry, Tileset, TilesetLayer,
-    TilesetTile, TokenKind, VIDEO_WORKSPACE, WorkspaceDescriptor, WorkspaceIcon, hex,
-    standard_manifest, strip_symbol_sigils, tokenize,
+    RunOutcome, StackFrame, StatusView, SyntaxSpec, Tilemap, TilemapEntry, TilemapViewport,
+    Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE, WorkspaceDescriptor,
+    WorkspaceIcon, hex, standard_manifest, strip_symbol_sigils, tokenize,
 };
 
 use crate::apu::{Apu, spc700};
@@ -1002,6 +1002,12 @@ fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {
         height: data.height as usize,
         tile_px: data.tile_px as u8,
         entries,
+        viewport: Some(TilemapViewport {
+            x: data.scroll_x,
+            y: data.scroll_y,
+            width: crate::ppu::SCREEN_WIDTH,
+            height: crate::ppu::SCREEN_HEIGHT,
+        }),
     })
 }
 

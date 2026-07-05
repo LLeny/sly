@@ -17,8 +17,8 @@ use crate::mmio::regs::{
     NmiTimerEnable, VblankFlagCpuVersion,
 };
 use crate::ppu::regs::{
-    Bg12ChrBase, Bg34ChrBase, BgMode, CGADD, CGDATA, CGWSEL, RDCGRAM, RDVRAMH, RDVRAML, SETINI,
-    TilemapAddrAndSize, VMADDH, VMADDL, VMAIN, VMDATAH, VMDATAL,
+    Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, CGWSEL, RDCGRAM, RDVRAMH,
+    RDVRAML, SETINI, TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL, VramControl,
 };
 use crate::{Cartridge, Snes};
 
@@ -201,7 +201,7 @@ impl<M: MemoryMap> Snes<M> {
             CGADD => self.ppu.cgram.word_addr(),
             CGDATA => self.ppu.cgram.peek_data(),
             RDCGRAM => self.ppu.cgram.read_data(),
-            VMAIN => self.ppu.vram.main(),
+            VramControl::ADDRESS => self.ppu.vram.control().raw(),
             VMADDL => self.ppu.vram.word_addr() as u8,
             VMADDH => (self.ppu.vram.word_addr() >> 8) as u8,
             VMDATAL => self.ppu.vram.peek_low(),
@@ -239,7 +239,7 @@ impl<M: MemoryMap> Snes<M> {
             CGADD => self.ppu.cgram.set_addr(value),
             CGDATA => self.ppu.cgram.write_data(value),
             RDCGRAM => {}
-            VMAIN => self.ppu.vram.set_main(value),
+            VramControl::ADDRESS => self.ppu.vram.set_control(value),
             VMADDL => self.ppu.vram.set_addr_low(value),
             VMADDH => self.ppu.vram.set_addr_high(value),
             VMDATAL => self.ppu.vram.write_low(value),
@@ -257,6 +257,7 @@ impl<M: MemoryMap> Snes<M> {
                     "SETINI: Mode 7 EXTBG enabled (unimplemented)"
                 );
             }
+            BgScrollOffset::START..=BgScrollOffset::END => BgScrollOffset::write(self, reg, value),
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::write(self, value),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::write(self, value),
@@ -293,7 +294,7 @@ impl<M: MemoryMap> Snes<M> {
             Bg34ChrBase::ADDRESS => Bg34ChrBase::peek(self),
             CGADD => self.ppu.cgram.word_addr(),
             CGDATA | RDCGRAM => self.ppu.cgram.peek_data(),
-            VMAIN => self.ppu.vram.main(),
+            VramControl::ADDRESS => self.ppu.vram.control().raw(),
             VMADDL => self.ppu.vram.word_addr() as u8,
             VMADDH => (self.ppu.vram.word_addr() >> 8) as u8,
             VMDATAL | RDVRAML => self.ppu.vram.peek_low(),

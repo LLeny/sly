@@ -1,10 +1,12 @@
 pub(crate) mod bg;
 pub mod cgram;
+pub(crate) mod latch;
 pub(crate) mod regs;
 pub mod tile;
 pub mod vram;
 
 use crate::ppu::cgram::Cgram;
+use crate::ppu::latch::ByteLatch;
 use crate::ppu::regs::{BackgroundMode, Priority};
 use crate::ppu::tile::Tile;
 use crate::ppu::vram::Vram;
@@ -13,12 +15,18 @@ use crate::{MemoryMap, Snes};
 
 const HBLANK_START_CLOCK: u64 = 274 * 4;
 
+// TODO
+pub const SCREEN_WIDTH: u32 = 256;
+pub const SCREEN_HEIGHT: u32 = 224;
+
 pub struct Ppu {
     pub(crate) cgram: Cgram,
     pub(crate) vram: Vram,
     pub(crate) bg_layers: [bg::BackgroundLayer; 4],
     pub(crate) bg_mode: BackgroundMode,
     pub(crate) bg3_priority: Priority,
+    pub(crate) bgofs_latch: ByteLatch,
+    pub(crate) hofs_latch: ByteLatch,
 }
 
 impl Ppu {
@@ -29,6 +37,8 @@ impl Ppu {
             bg_layers: [bg::BackgroundLayer::default(); 4],
             bg_mode: BackgroundMode::Mode0,
             bg3_priority: Priority::Normal,
+            bgofs_latch: ByteLatch::default(),
+            hofs_latch: ByteLatch::default(),
         }
     }
 }
@@ -76,6 +86,8 @@ pub struct TilemapData {
     pub width: u32,
     pub height: u32,
     pub tile_px: u32,
+    pub scroll_x: u32,
+    pub scroll_y: u32,
     pub entries: Vec<TilemapEntry>,
 }
 
@@ -126,6 +138,8 @@ impl Snes {
             width: bg.horizontal_tilemap_count.count() as u32 * 32,
             height: bg.vertical_tilemap_count.count() as u32 * 32,
             tile_px: bg.tile_size.pixels(),
+            scroll_x: bg.scroll_x(),
+            scroll_y: bg.scroll_y(),
             entries: Vec::new(),
         };
 

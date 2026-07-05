@@ -5,7 +5,7 @@ use gpui::{Div, RenderImage};
 use crate::assets::icon;
 use crate::components::{footer_row, hex, mono_text};
 use crate::theme::Theme;
-use crate::widgets::grid::{GridContent, GridPanel, build_atlas};
+use crate::widgets::grid::{GridContent, GridOverlay, GridPanel, build_atlas};
 
 #[derive(Clone)]
 pub struct TilemapEntryView {
@@ -39,6 +39,7 @@ pub struct TilemapView {
     pub tile_px: u8,
     pub entries: Arc<[TilemapEntryView]>,
     pub image: Option<Arc<RenderImage>>,
+    pub viewport: Option<GridOverlay>,
 }
 
 impl From<debugger_model::Tilemap> for TilemapView {
@@ -62,6 +63,7 @@ impl From<debugger_model::Tilemap> for TilemapView {
             tile_px: map.tile_px,
             entries: map.entries.iter().map(Into::into).collect(),
             image,
+            viewport: map.viewport.map(Into::into),
         }
     }
 }
@@ -79,6 +81,7 @@ impl TilemapWidget {
             tile_px: view.tile_px as u32,
             count: view.entries.len(),
             empty_message: "No tilemap",
+            overlay: view.viewport,
         });
 
         let mut panel = GridPanel::new(Self::ID, "Tilemap", icon::MAP, content)

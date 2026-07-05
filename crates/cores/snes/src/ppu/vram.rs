@@ -1,9 +1,11 @@
+use crate::ppu::regs::{IncrementMode, VramControl};
+
 const WORDS: usize = 0x8000;
 
 pub struct Vram {
     words: Vec<u16>,
     addr: u16,
-    main: u8,
+    control: VramControl,
     prefetch: u16,
 }
 
@@ -12,7 +14,7 @@ impl Vram {
         Self {
             words: vec![0; WORDS],
             addr: 0,
-            main: 0,
+            control: VramControl::default(),
             prefetch: 0,
         }
     }
@@ -30,16 +32,16 @@ impl Vram {
         }
     }
 
-    pub fn main(&self) -> u8 {
-        self.main
+    pub fn control(&self) -> VramControl {
+        self.control
     }
 
     pub fn word_addr(&self) -> u16 {
         self.addr
     }
 
-    pub(crate) fn set_main(&mut self, value: u8) {
-        self.main = value;
+    pub(crate) fn set_control(&mut self, value: u8) {
+        self.control = VramControl::from_raw(value);
     }
 
     pub(crate) fn set_addr_low(&mut self, value: u8) {
@@ -101,25 +103,15 @@ impl Vram {
     }
 
     fn increment_on_high(&self) -> bool {
-        self.main & 0x80 != 0
+        matches!(self.control.increment_mode(), IncrementMode::AfterHigh)
     }
 
     fn increment(&mut self) {
-        let step = match self.main & 0x3 {
-            0 => 1,
-            1 => 32,
-            _ => 128,
-        };
+        let step = self.control.increment_amount().words();
         self.addr = self.addr.wrapping_add(step);
     }
 
     fn translated(&self) -> u16 {
-        let addr = self.addr;
-        match (self.main >> 2) & 0x3 {
-            0 => addr,
-            1 => (addr & 0xFF00) | ((addr << 3) & 0x00F8) | ((addr >> 5) & 0x0007),
-            2 => (addr & 0xFE00) | ((addr << 3) & 0x01F8) | ((addr >> 6) & 0x0007),
-            _ => (addr & 0xFC00) | ((addr << 3) & 0x03F8) | ((addr >> 7) & 0x0007),
-        }
+        self.control.address_remapping().apply(self.addr)
     }
 }

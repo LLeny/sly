@@ -4,12 +4,12 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, ClickEvent, Div, MouseMoveEvent, Pixels, Point, RenderImage, SharedString, Size,
-    Window, canvas, div, img, px, size,
+    App, Bounds, ClickEvent, Div, Hsla, MouseMoveEvent, Pixels, Point, RenderImage, SharedString,
+    Size, Window, canvas, div, img, point, px, size,
 };
 
 use crate::components::{ClickHandler, Panel, Segmented, empty_state};
-use crate::theme::Theme;
+use crate::theme::{Theme, with_alpha};
 
 pub(super) type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
 pub(super) type HoverCallback = Rc<dyn Fn(Option<usize>, &mut Window, &mut App) + 'static>;
@@ -82,6 +82,48 @@ fn blit_tile(
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct GridOverlay {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl From<debugger_model::TilemapViewport> for GridOverlay {
+    fn from(viewport: debugger_model::TilemapViewport) -> Self {
+        Self {
+            x: viewport.x,
+            y: viewport.y,
+            width: viewport.width,
+            height: viewport.height,
+        }
+    }
+}
+
+impl GridOverlay {
+    fn spans(start: u32, len: u32, max: u32) -> impl Iterator<Item = (u32, u32)> {
+        let start = start % max;
+        let len = len.min(max);
+        let first = (start, len.min(max - start));
+        let wrapped = (len > max - start).then(|| (0, len - (max - start)));
+        std::iter::once(first).chain(wrapped)
+    }
+
+    fn rects(self, map_w: u32, map_h: u32, scale: f32) -> Vec<Bounds<Pixels>> {
+        let mut rects = Vec::with_capacity(4);
+        for (y, h) in Self::spans(self.y, self.height, map_h) {
+            for (x, w) in Self::spans(self.x, self.width, map_w) {
+                rects.push(Bounds {
+                    origin: point(px(x as f32 * scale), px(y as f32 * scale)),
+                    size: size(px(w as f32 * scale), px(h as f32 * scale)),
+                });
+            }
+        }
+        rects
+    }
+}
+
 pub struct GridContent {
     pub image: Option<Arc<RenderImage>>,
     pub cols: usize,
@@ -89,6 +131,7 @@ pub struct GridContent {
     pub tile_px: u32,
     pub count: usize,
     pub empty_message: &'static str,
+    pub overlay: Option<GridOverlay>,
 }
 
 #[derive(IntoElement)]
@@ -383,8 +426,10 @@ fn cell_grid(
             image,
             cols: content.cols,
             rows: content.rows,
+            tile_px: content.tile_px,
             count: content.count,
             cell,
+            overlay: content.overlay,
         },
         selected,
         hovered,
@@ -398,8 +443,10 @@ struct GridSpec {
     image: Arc<RenderImage>,
     cols: usize,
     rows: usize,
+    tile_px: u32,
     count: usize,
     cell: f32,
+    overlay: Option<GridOverlay>,
 }
 
 fn image_grid(
@@ -415,8 +462,10 @@ fn image_grid(
         image,
         cols,
         rows,
+        tile_px,
         count,
         cell,
+        overlay,
     } = spec;
 
     let bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
@@ -445,15 +494,28 @@ fn image_grid(
     .absolute()
     .inset_0();
 
-    let ring = |index: usize, color| {
+    let outline = |bounds: Bounds<Pixels>, color: Hsla| {
         div()
             .absolute()
-            .left(px((index % cols) as f32 * cell))
-            .top(px((index / cols) as f32 * cell))
-            .w(px(cell))
-            .h(px(cell))
+            .left(bounds.origin.x)
+            .top(bounds.origin.y)
+            .w(bounds.size.width)
+            .h(bounds.size.height)
             .border_1()
             .border_color(color)
+    };
+
+    let ring = |index: usize, color: Hsla| {
+        outline(
+            Bounds {
+                origin: point(
+                    px((index % cols) as f32 * cell),
+                    px((index / cols) as f32 * cell),
+                ),
+                size: size(px(cell), px(cell)),
+            },
+            color,
+        )
     };
 
     let mut grid = div()
@@ -464,6 +526,15 @@ fn image_grid(
         .h(px(cell * rows as f32))
         .child(img(image).size_full())
         .child(track_bounds);
+
+    if let Some(overlay) = overlay {
+        let (map_w, map_h) = (cols as u32 * tile_px, rows as u32 * tile_px);
+        for bounds in overlay.rects(map_w, map_h, cell / tile_px as f32) {
+            grid = grid.child(
+                outline(bounds, with_alpha(theme.accent, 0.7)).bg(with_alpha(theme.accent, 0.12)),
+            );
+        }
+    }
 
     if let Some(index) = hovered.filter(|&i| i < count && selected != Some(i)) {
         grid = grid.child(ring(index, theme.accent_hover));

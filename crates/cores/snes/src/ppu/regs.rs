@@ -12,7 +12,6 @@ pub(crate) const RDCGRAM: u16 = 0x213B;
 pub(crate) const CGWSEL: u16 = 0x2130;
 pub(crate) const SETINI: u16 = 0x2133;
 
-pub(crate) const VMAIN: u16 = 0x2115;
 pub(crate) const VMADDL: u16 = 0x2116;
 pub(crate) const VMADDH: u16 = 0x2117;
 pub(crate) const VMDATAL: u16 = 0x2118;
@@ -24,13 +23,102 @@ register_mmio_raw! {
     CGADD => "CGADD",
     CGDATA => "CGDATA",
     RDCGRAM => "RDCGRAM",
-    VMAIN => "VMAIN",
     VMADDL => "VMADDL",
     VMADDH => "VMADDH",
     VMDATAL => "VMDATAL",
     VMDATAH => "VMDATAH",
     RDVRAML => "RDVRAML",
     RDVRAMH => "RDVRAMH",
+    0x210D => "BG1HOFS",
+    0x210E => "BG1VOFS",
+    0x210F => "BG2HOFS",
+    0x2110 => "BG2VOFS",
+    0x2111 => "BG3HOFS",
+    0x2112 => "BG3VOFS",
+    0x2113 => "BG4HOFS",
+    0x2114 => "BG4VOFS",
+}
+
+pub(crate) struct BgScrollOffset;
+
+impl BgScrollOffset {
+    pub(crate) const START: u16 = 0x210D; // BG1HOFS
+    pub(crate) const END: u16 = 0x2114; // BG4VOFS
+
+    pub(crate) fn write<M: MemoryMap>(snes: &mut Snes<M>, reg: u16, value: u8) {
+        let index = (reg - Self::START) as usize;
+        let layer = &mut snes.ppu.bg_layers[index / 2];
+
+        let prev = snes.ppu.bgofs_latch.exchange(value);
+        if index % 2 == 0 {
+            let prev_h = snes.ppu.hofs_latch.exchange(value);
+            layer.hofs = (value as u16) << 8 | (prev & !7) as u16 | (prev_h & 7) as u16;
+        } else {
+            layer.vofs = (value as u16) << 8 | prev as u16;
+        }
+    }
+}
+
+#[derive(BitEnum, Clone, Copy, Default)]
+pub enum IncrementMode {
+    #[fallback]
+    #[default]
+    AfterLow = 0,
+    AfterHigh = 1,
+}
+
+#[derive(BitEnum, Clone, Copy, Default)]
+pub enum IncrementAmount {
+    #[default]
+    One = 0,
+    ThirtyTwo = 1,
+    #[fallback]
+    OneTwentyEight = 2,
+}
+
+impl IncrementAmount {
+    pub fn words(self) -> u16 {
+        match self {
+            Self::One => 1,
+            Self::ThirtyTwo => 32,
+            Self::OneTwentyEight => 128,
+        }
+    }
+}
+
+#[derive(BitEnum, Clone, Copy, Default)]
+pub enum AddressRemapping {
+    #[fallback]
+    #[default]
+    None = 0,
+    Bpp2 = 1,
+    Bpp4 = 2,
+    Bpp8 = 3,
+}
+
+impl AddressRemapping {
+    pub fn apply(self, addr: u16) -> u16 {
+        match self {
+            Self::None => addr,
+            Self::Bpp2 => (addr & 0xFF00) | ((addr << 3) & 0x00F8) | ((addr >> 5) & 0x0007),
+            Self::Bpp4 => (addr & 0xFE00) | ((addr << 3) & 0x01F8) | ((addr >> 6) & 0x0007),
+            Self::Bpp8 => (addr & 0xFC00) | ((addr << 3) & 0x03F8) | ((addr >> 7) & 0x0007),
+        }
+    }
+}
+
+register_mmio! {
+    /// VMAIN
+    pub struct VramControl @ 0x2115 {
+        #[bits(0..=1)]
+        pub increment_amount: IncrementAmount,
+
+        #[bits(2..=3)]
+        pub address_remapping: AddressRemapping,
+
+        #[bits(7)]
+        pub increment_mode: IncrementMode,
+    }
 }
 
 register_mmio! {

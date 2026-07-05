@@ -327,12 +327,21 @@ pub struct TilemapEntry {
     pub pixels: Vec<(u8, u8, u8)>,
 }
 
+#[derive(Clone, Copy)]
+pub struct TilemapViewport {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Clone)]
 pub struct Tilemap {
     pub width: usize,
     pub height: usize,
     pub tile_px: u8,
     pub entries: Vec<TilemapEntry>,
+    pub viewport: Option<TilemapViewport>,
 }
 
 #[derive(Clone, Copy)]
