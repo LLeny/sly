@@ -27,6 +27,18 @@ register_mmio_raw! {
     0x421F => "JOY4H",
 }
 
+register_mmio_raw! {
+    0x4202 => "WRMPYA",
+    0x4203 => "WRMPYB",
+    0x4204 => "WRDIVL",
+    0x4205 => "WRDIVH",
+    0x4206 => "WRDIVB",
+    0x4214 => "RDDIVL",
+    0x4215 => "RDDIVH",
+    0x4216 => "RDMPYL",
+    0x4217 => "RDMPYH",
+}
+
 register_mmio! {
     /// NMITIMEN
     pub struct NmiTimerEnable @ 0x4200 {

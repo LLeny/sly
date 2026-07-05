@@ -11,6 +11,7 @@ mod symbol;
 pub use access::{AccessTracker, MemoryAccess};
 
 use crate::joypad::{JOYPAD_IO_END, JOYPAD_IO_START, JOYSER0, JOYSER1, JOYSER1_ALWAYS_SET};
+use crate::math::{RDDIVH, RDDIVL, RDMPYH, RDMPYL, WRDIVB, WRDIVH, WRDIVL, WRMPYA, WRMPYB};
 use crate::mmio::dma::{CHANNEL_REGS_END, CHANNEL_REGS_START, Dma};
 use crate::mmio::regs::{
     APU_IO_END, APU_IO_START, HdmaTransferEnable, HvStatusJoypadBusy, MdmaTransferStart,
@@ -194,6 +195,10 @@ impl<M: MemoryMap> Snes<M> {
 
     fn read_io(&mut self, reg: u16) -> u8 {
         match reg {
+            RDDIVL => self.math.div_quotient as u8,
+            RDDIVH => (self.math.div_quotient >> 8) as u8,
+            RDMPYL => self.math.product_or_remainder as u8,
+            RDMPYH => (self.math.product_or_remainder >> 8) as u8,
             BgMode::ADDRESS => BgMode::read(self),
             TilemapAddrAndSize::START..=TilemapAddrAndSize::END => {
                 TilemapAddrAndSize::peek(self, reg)
@@ -239,6 +244,19 @@ impl<M: MemoryMap> Snes<M> {
 
     fn write_io(&mut self, reg: u16, value: u8) {
         match reg {
+            WRMPYA => self.math.mul_factor_a = value,
+            WRMPYB => {
+                self.math.mul_factor_b = value;
+                self.math.process_mul();
+            }
+            WRDIVL => self.math.div_dividend = (self.math.div_dividend & 0xFF00) | value as u16,
+            WRDIVH => {
+                self.math.div_dividend = (self.math.div_dividend & 0x00FF) | ((value as u16) << 8)
+            }
+            WRDIVB => {
+                self.math.div_divisor = value;
+                self.math.process_div();
+            }
             BgMode::ADDRESS => BgMode::write(self, value),
             TilemapAddrAndSize::START..=TilemapAddrAndSize::END => {
                 TilemapAddrAndSize::write(self, reg, value)
@@ -309,6 +327,10 @@ impl<M: MemoryMap> Snes<M> {
 
     fn peek_io(&self, reg: u16) -> u8 {
         match reg {
+            RDDIVL => self.math.div_quotient as u8,
+            RDDIVH => (self.math.div_quotient >> 8) as u8,
+            RDMPYL => self.math.product_or_remainder as u8,
+            RDMPYH => (self.math.product_or_remainder >> 8) as u8,
             BgMode::ADDRESS => BgMode::peek(self),
             TilemapAddrAndSize::START..=TilemapAddrAndSize::END => {
                 TilemapAddrAndSize::peek(self, reg)
