@@ -14,19 +14,13 @@ pub struct FramebufferView {
     pub image: Option<Arc<RenderImage>>,
 }
 
+const SCALE: u32 = 4;
+
 impl From<debugger_model::Framebuffer> for FramebufferView {
     fn from(fb: debugger_model::Framebuffer) -> Self {
         let len = fb.width as usize * fb.height as usize;
-        let image = (len > 0 && fb.pixels.len() == len).then(|| {
-            let mut data = Vec::with_capacity(len * 4);
-            for &(r, g, b) in &fb.pixels {
-                data.extend_from_slice(&[b, g, r, 0xFF]);
-            }
-
-            let frame = image::RgbaImage::from_raw(fb.width, fb.height, data)
-                .expect("framebuffer pixel count matches its dimensions");
-            Arc::new(RenderImage::new(vec![image::Frame::new(frame)]))
-        });
+        let image = (len > 0 && fb.pixels.len() == len)
+            .then(|| crate::widgets::grid::build_image(&fb.pixels, fb.width, fb.height, SCALE));
 
         Self {
             width: fb.width,

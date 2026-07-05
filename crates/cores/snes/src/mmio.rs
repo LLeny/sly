@@ -17,8 +17,10 @@ use crate::mmio::regs::{
     NmiTimerEnable, VblankFlagCpuVersion,
 };
 use crate::ppu::regs::{
-    Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, CGWSEL, RDCGRAM, RDVRAMH,
-    RDVRAML, SETINI, TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL, VramControl,
+    Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, CGWSEL, COLDATA,
+    ColorMathControl, OAMADDH, OAMADDL, OAMDATA, OAMDATAREAD, RDCGRAM, RDVRAMH, RDVRAML, SETINI,
+    SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL,
+    VramControl,
 };
 use crate::{Cartridge, Snes};
 
@@ -198,6 +200,11 @@ impl<M: MemoryMap> Snes<M> {
             }
             Bg12ChrBase::ADDRESS => Bg12ChrBase::read(self),
             Bg34ChrBase::ADDRESS => Bg34ChrBase::read(self),
+            SpriteSizeAndTileBase::ADDRESS => SpriteSizeAndTileBase::read(self),
+            OAMADDL => self.ppu.oam.word_addr() as u8,
+            OAMADDH => (self.ppu.oam.word_addr() >> 8) as u8,
+            OAMDATA => self.ppu.oam.peek_data(),
+            OAMDATAREAD => self.ppu.oam.read_data(),
             CGADD => self.ppu.cgram.word_addr(),
             CGDATA => self.ppu.cgram.peek_data(),
             RDCGRAM => self.ppu.cgram.read_data(),
@@ -236,6 +243,11 @@ impl<M: MemoryMap> Snes<M> {
             }
             Bg12ChrBase::ADDRESS => Bg12ChrBase::write(self, value),
             Bg34ChrBase::ADDRESS => Bg34ChrBase::write(self, value),
+            SpriteSizeAndTileBase::ADDRESS => SpriteSizeAndTileBase::write(self, value),
+            OAMADDL => self.ppu.oam.set_addr_low(value),
+            OAMADDH => self.ppu.oam.set_addr_high(value),
+            OAMDATA => self.ppu.oam.write_data(value),
+            OAMDATAREAD => {}
             CGADD => self.ppu.cgram.set_addr(value),
             CGDATA => self.ppu.cgram.write_data(value),
             RDCGRAM => {}
@@ -245,17 +257,25 @@ impl<M: MemoryMap> Snes<M> {
             VMDATAL => self.ppu.vram.write_low(value),
             VMDATAH => self.ppu.vram.write_high(value),
             RDVRAML | RDVRAMH => {}
-            CGWSEL if value & 0x01 != 0 => {
-                tracing::error!(
-                    value = format!("{:02X}", value),
-                    "CGWSEL: direct color mode enabled (unimplemented)"
-                );
+            TM => self.ppu.main_screen = value.into(),
+            TS => self.ppu.sub_screen = value.into(),
+            ColorMathControl::ADDRESS => ColorMathControl::write(self, value),
+            COLDATA => self.ppu.color_math.set_fixed_color(value),
+            CGWSEL => {
+                if value & 0x01 != 0 {
+                    tracing::error!(
+                        value = format!("{:02X}", value),
+                        "CGWSEL: direct color mode enabled (unimplemented)"
+                    );
+                }
             }
-            SETINI if value & 0x40 != 0 => {
-                tracing::error!(
-                    value = format!("{:02X}", value),
-                    "SETINI: Mode 7 EXTBG enabled (unimplemented)"
-                );
+            SETINI => {
+                if value & 0x40 != 0 {
+                    tracing::error!(
+                        value = format!("{:02X}", value),
+                        "SETINI: Mode 7 EXTBG enabled (unimplemented)"
+                    );
+                }
             }
             BgScrollOffset::START..=BgScrollOffset::END => BgScrollOffset::write(self, reg, value),
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
@@ -292,6 +312,10 @@ impl<M: MemoryMap> Snes<M> {
             }
             Bg12ChrBase::ADDRESS => Bg12ChrBase::peek(self),
             Bg34ChrBase::ADDRESS => Bg34ChrBase::peek(self),
+            SpriteSizeAndTileBase::ADDRESS => SpriteSizeAndTileBase::peek(self),
+            OAMADDL => self.ppu.oam.word_addr() as u8,
+            OAMADDH => (self.ppu.oam.word_addr() >> 8) as u8,
+            OAMDATA | OAMDATAREAD => self.ppu.oam.peek_data(),
             CGADD => self.ppu.cgram.word_addr(),
             CGDATA | RDCGRAM => self.ppu.cgram.peek_data(),
             VramControl::ADDRESS => self.ppu.vram.control().raw(),
@@ -299,6 +323,9 @@ impl<M: MemoryMap> Snes<M> {
             VMADDH => (self.ppu.vram.word_addr() >> 8) as u8,
             VMDATAL | RDVRAML => self.ppu.vram.peek_low(),
             VMDATAH | RDVRAMH => self.ppu.vram.peek_high(),
+            TM => self.ppu.main_screen.raw(),
+            TS => self.ppu.sub_screen.raw(),
+            ColorMathControl::ADDRESS => ColorMathControl::peek(self),
             NmiTimerEnable::ADDRESS => NmiTimerEnable::peek(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::peek(self),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::peek(self),

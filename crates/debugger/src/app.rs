@@ -12,16 +12,16 @@ use cirsium::widgets::{
     BreakpointKind, BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView,
     CartridgeWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView,
     DmaWidget, FramebufferView, FramebufferWidget, GridPanel, LogWidget, MemoryWidget, MmioView,
-    MmioWidget, PaletteView, PaletteWidget, PpuView, PpuWidget, RowProvider, TilemapView,
-    TilemapWidget, TilesetLayer, TilesetView, TilesetWidget, ViewMode,
+    MmioWidget, PaletteView, PaletteWidget, PpuView, PpuWidget, RowProvider, SpritesView,
+    SpritesWidget, TilemapView, TilemapWidget, TilesetLayer, TilesetView, TilesetWidget, ViewMode,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
-use frontend_model::{ComponentManifest, DockLocation, WorkspaceIcon};
+use frontend_model::{ComponentManifest, DockLocation, PanelKind, WorkspaceIcon};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, MouseDownEvent, Pixels, Point,
-    RenderImage, SharedString, Size, Task, Window, div, px,
+    AnyElement, App, ClickEvent, ClipboardItem, Context, Div, Entity, MouseDownEvent, Pixels,
+    Point, RenderImage, SharedString, Size, Task, Window, div, px,
 };
 
 use crate::breakpoints::Breakpoints;
@@ -93,6 +93,8 @@ pub(crate) struct Debugger {
     tileset_ui: GridState,
     tilemap: Option<TilemapView>,
     tilemap_ui: GridState,
+    sprites: Option<SpritesView>,
+    sprites_ui: GridState,
     framebuffer: Option<FramebufferView>,
     expanded: HashMap<&'static str, HashSet<SharedString>>,
     manifest: ComponentManifest,
@@ -180,6 +182,8 @@ impl Debugger {
             tileset_ui: GridState::default(),
             tilemap: target.tilemap(0).map(Into::into),
             tilemap_ui: GridState::default(),
+            sprites: target.sprites().map(Into::into),
+            sprites_ui: GridState::default(),
             framebuffer: target.framebuffer().map(Into::into),
             expanded: HashMap::new(),
             manifest,
@@ -237,6 +241,15 @@ impl Debugger {
         self.tilemap = self.target.tilemap(self.tilemap_ui.layer).map(Into::into);
     }
 
+    fn refresh_sprites(&mut self, cx: &mut Context<Self>) {
+        if self.is_collapsed(SpritesWidget::ID) {
+            return;
+        }
+
+        Self::drop_grid_image(cx, self.sprites.take().and_then(|view| view.image));
+        self.sprites = self.target.sprites().map(Into::into);
+    }
+
     fn refresh_framebuffer(&mut self, cx: &mut Context<Self>) {
         if self.is_collapsed(FramebufferWidget::ID) {
             return;
@@ -260,15 +273,16 @@ impl Debugger {
     }
 
     fn video_panes_visible(&self) -> bool {
-        const VIDEO_PANELS: [&str; 4] = [
-            PaletteWidget::ID,
-            PpuWidget::ID,
-            TilesetWidget::ID,
-            TilemapWidget::ID,
-        ];
-        self.manifest
-            .in_workspace(&self.workspace)
-            .any(|panel| VIDEO_PANELS.contains(&&*panel.id))
+        self.manifest.in_workspace(&self.workspace).any(|panel| {
+            matches!(
+                panel.kind,
+                PanelKind::Palette
+                    | PanelKind::Ppu
+                    | PanelKind::Tileset
+                    | PanelKind::Tilemap
+                    | PanelKind::Sprites
+            )
+        })
     }
 
     fn refresh_video_panes(&mut self, cx: &mut Context<Self>) {
@@ -283,6 +297,7 @@ impl Debugger {
 
         self.refresh_tileset(cx);
         self.refresh_tilemap(cx);
+        self.refresh_sprites(cx);
     }
 
     fn track_changes(
@@ -319,8 +334,12 @@ impl Debugger {
         let id = id.into();
         Self::toggle_in(&mut self.collapsed, id.clone());
 
-        if id.as_ref() == FramebufferWidget::ID && !self.collapsed.contains(&id) {
-            self.refresh_framebuffer(cx);
+        if !self.collapsed.contains(&id) {
+            match id.as_ref() {
+                FramebufferWidget::ID => self.refresh_framebuffer(cx),
+                SpritesWidget::ID => self.refresh_sprites(cx),
+                _ => {}
+            }
         }
 
         cx.notify();
@@ -353,7 +372,6 @@ impl Debugger {
     ) -> GridPanel {
         let this = cx.entity();
         panel
-            .layers(self.tileset_layers.clone())
             .layer(state.layer)
             .selected(state.selected())
             .hovered(state.hovered)
@@ -846,6 +864,34 @@ fn workspace_icon(icon: WorkspaceIcon) -> &'static str {
     }
 }
 
+fn panel_column() -> Div {
+    div().flex().flex_col().min_w(px(0.)).min_h(px(0.))
+}
+
+fn panel_row(left: AnyElement, right: Div) -> AnyElement {
+    div()
+        .flex()
+        .flex_1()
+        .min_h(px(0.))
+        .gap_2()
+        .child(panel_column().flex_1().child(left))
+        .child(right)
+        .into_any_element()
+}
+
+fn half_row(left: AnyElement, right: AnyElement) -> AnyElement {
+    self::panel_row(left, panel_column().flex_1().child(right))
+}
+
+fn with_screen(widget: AnyElement, screen: Option<AnyElement>) -> AnyElement {
+    match screen {
+        Some(screen) => {
+            self::panel_row(widget, panel_column().w(px(300.)).flex_none().child(screen))
+        }
+        None => widget,
+    }
+}
+
 type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
 
 struct SilencedPanics(Option<PanicHook>);
@@ -950,11 +996,16 @@ impl Render for Debugger {
             .child(settings_button)
             .child(theme_toggle);
 
-        let framebuffer = visible.contains(FramebufferWidget::ID).then(|| {
-            FramebufferWidget::new(self.framebuffer.clone())
-                .collapsed(self.is_collapsed(FramebufferWidget::ID))
-                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(FramebufferWidget::ID, cx)))
-        });
+        let mut framebuffer = visible
+            .contains(FramebufferWidget::ID)
+            .then(|| {
+                FramebufferWidget::new(self.framebuffer.clone())
+                    .collapsed(self.is_collapsed(FramebufferWidget::ID))
+                    .on_toggle(
+                        cx.listener(|this, _, _, cx| this.toggle(FramebufferWidget::ID, cx)),
+                    )
+            })
+            .map(|widget| widget.into_any_element());
 
         let cartridge = visible.contains(CartridgeWidget::ID).then(|| {
             CartridgeWidget::new(self.cartridge.clone())
@@ -1023,7 +1074,7 @@ impl Render for Debugger {
 
         let tileset = visible.contains(TilesetWidget::ID).then(|| {
             self.wire_grid(
-                TilesetWidget::panel(self.tileset.clone()),
+                TilesetWidget::panel(self.tileset.clone()).layers(self.tileset_layers.clone()),
                 TilesetWidget::ID,
                 &self.tileset_ui,
                 |d| &mut d.tileset_ui,
@@ -1034,11 +1085,22 @@ impl Render for Debugger {
 
         let tilemap = visible.contains(TilemapWidget::ID).then(|| {
             self.wire_grid(
-                TilemapWidget::panel(self.tilemap.clone()),
+                TilemapWidget::panel(self.tilemap.clone()).layers(self.tileset_layers.clone()),
                 TilemapWidget::ID,
                 &self.tilemap_ui,
                 |d| &mut d.tilemap_ui,
                 Self::refresh_tilemap,
+                cx,
+            )
+        });
+
+        let sprites = visible.contains(SpritesWidget::ID).then(|| {
+            self.wire_grid(
+                SpritesWidget::panel(self.sprites.clone()),
+                SpritesWidget::ID,
+                &self.sprites_ui,
+                |d| &mut d.sprites_ui,
+                Self::refresh_sprites,
                 cx,
             )
         });
@@ -1507,15 +1569,10 @@ impl Render for Debugger {
         }
         match (tileset, tilemap) {
             (Some(tileset), Some(tilemap)) => {
-                let half = || div().flex().flex_col().flex_1().min_w(px(0.)).min_h(px(0.));
-                let row = div()
-                    .flex()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .gap_2()
-                    .child(half().child(tileset))
-                    .child(half().child(tilemap));
-                panels.insert(TilesetWidget::ID.into(), row.into_any_element());
+                panels.insert(
+                    TilesetWidget::ID.into(),
+                    self::half_row(tileset.into_any_element(), tilemap.into_any_element()),
+                );
             }
             (Some(tileset), None) => {
                 panels.insert(TilesetWidget::ID.into(), tileset.into_any_element());
@@ -1532,34 +1589,18 @@ impl Render for Debugger {
             );
         }
         panels.insert(MmioWidget::ID.into(), mmio.into_any_element());
-        let memory_panel = match framebuffer {
-            Some(framebuffer) => div()
-                .flex()
-                .flex_1()
-                .min_h(px(0.))
-                .gap_2()
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .min_h(px(0.))
-                        .child(memory_widget),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .w(px(300.))
-                        .flex_none()
-                        .min_h(px(0.))
-                        .child(framebuffer),
-                )
-                .into_any_element(),
-            None => memory_widget.into_any_element(),
-        };
-        panels.insert(MemoryWidget::ID.into(), memory_panel);
+        
+        if let Some(sprites) = sprites {
+            let element = match framebuffer.take() {
+                Some(screen) => self::half_row(sprites.into_any_element(), screen),
+                None => sprites.into_any_element(),
+            };
+            panels.insert(SpritesWidget::ID.into(), element);
+        }
+        panels.insert(
+            MemoryWidget::ID.into(),
+            self::with_screen(memory_widget.into_any_element(), framebuffer),
+        );
         if let Some(log_region) = log_region {
             panels.insert(LogWidget::ID.into(), log_region.into_any_element());
         }

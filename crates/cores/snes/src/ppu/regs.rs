@@ -4,9 +4,18 @@ use crate::Snes;
 use crate::macros::{register_mmio, register_mmio_family, register_mmio_raw};
 use crate::mmio::{MemoryMap, MmioReg};
 
+pub(crate) const OAMADDL: u16 = 0x2102;
+pub(crate) const OAMADDH: u16 = 0x2103;
+pub(crate) const OAMDATA: u16 = 0x2104;
+pub(crate) const OAMDATAREAD: u16 = 0x2138;
+
 pub(crate) const CGADD: u16 = 0x2121;
 pub(crate) const CGDATA: u16 = 0x2122;
 pub(crate) const RDCGRAM: u16 = 0x213B;
+
+pub(crate) const TM: u16 = 0x212C;
+pub(crate) const TS: u16 = 0x212D;
+pub(crate) const COLDATA: u16 = 0x2132;
 
 // TODO
 pub(crate) const CGWSEL: u16 = 0x2130;
@@ -20,6 +29,10 @@ pub(crate) const RDVRAML: u16 = 0x2139;
 pub(crate) const RDVRAMH: u16 = 0x213A;
 
 register_mmio_raw! {
+    OAMADDL => "OAMADDL",
+    OAMADDH => "OAMADDH",
+    OAMDATA => "OAMDATA",
+    OAMDATAREAD => "OAMDATAREAD",
     CGADD => "CGADD",
     CGDATA => "CGDATA",
     RDCGRAM => "RDCGRAM",
@@ -29,6 +42,11 @@ register_mmio_raw! {
     VMDATAH => "VMDATAH",
     RDVRAML => "RDVRAML",
     RDVRAMH => "RDVRAMH",
+    TM => "TM",
+    TS => "TS",
+    CGWSEL => "CGWSEL",
+    COLDATA => "COLDATA",
+    SETINI => "SETINI",
     0x210D => "BG1HOFS",
     0x210E => "BG1VOFS",
     0x210F => "BG2HOFS",
@@ -284,6 +302,163 @@ impl TilemapAddrAndSize {
         reg.set_tilemap_addr((layer.tilemap_addr >> 10) as u8);
         reg.set_horizontal_tilemap_count(layer.horizontal_tilemap_count);
         reg.set_vertical_tilemap_count(layer.vertical_tilemap_count);
+        reg.raw()
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct LayerMask(u8);
+
+impl LayerMask {
+    pub fn bg(self, layer: usize) -> bool {
+        self.0 & 1 << layer != 0
+    }
+
+    pub fn obj(self) -> bool {
+        self.0 & 1 << 4 != 0
+    }
+
+    pub fn backdrop(self) -> bool {
+        self.0 & 1 << 5 != 0
+    }
+
+    pub fn raw(self) -> u8 {
+        self.0
+    }
+}
+
+impl From<u8> for LayerMask {
+    fn from(value: u8) -> Self {
+        Self(value & 0x3F)
+    }
+}
+
+#[derive(BitEnum, Clone, Copy, Default)]
+pub enum ColorMathOperation {
+    #[fallback]
+    #[default]
+    Add = 0,
+    Subtract = 1,
+}
+
+#[derive(BitEnum, Clone, Copy, Default)]
+pub enum ColorMathIntensity {
+    #[fallback]
+    #[default]
+    Full = 0,
+    Half = 1,
+}
+
+register_mmio! {
+    /// CGADSUB
+    pub struct ColorMathControl @ 0x2131 {
+        #[bits(0..=5)]
+        pub layers: u8,
+
+        #[bits(6)]
+        pub intensity: ColorMathIntensity,
+
+        #[bits(7)]
+        pub operation: ColorMathOperation,
+    }
+}
+
+impl MmioReg for ColorMathControl {
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
+        let reg = Self::from_raw(value);
+        let math = &mut snes.ppu.color_math;
+        math.layers = reg.layers().into();
+        math.intensity = reg.intensity();
+        math.operation = reg.operation();
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        let math = &snes.ppu.color_math;
+        let mut reg = Self::default();
+        reg.set_layers(math.layers.raw());
+        reg.set_intensity(math.intensity);
+        reg.set_operation(math.operation);
+        reg.raw()
+    }
+}
+
+#[derive(BitEnum, Clone, Copy, Default)]
+pub enum SpriteSize {
+    #[fallback]
+    #[default]
+    Size8x8_16x16 = 0,
+    Size8x8_32x32 = 1,
+    Size8x8_64x64 = 2,
+    Size16x16_32x32 = 3,
+    Size16x16_64x64 = 4,
+    Size32x32_64x64 = 5,
+    Size16x32_32x64 = 6,
+    Size16x32_32x32 = 7,
+}
+
+impl SpriteSize {
+    pub fn small(self) -> (u32, u32) {
+        match self {
+            Self::Size8x8_16x16 | Self::Size8x8_32x32 | Self::Size8x8_64x64 => (8, 8),
+            Self::Size16x16_32x32 | Self::Size16x16_64x64 => (16, 16),
+            Self::Size32x32_64x64 => (32, 32),
+            Self::Size16x32_32x64 | Self::Size16x32_32x32 => (16, 32),
+        }
+    }
+
+    pub fn large(self) -> (u32, u32) {
+        match self {
+            Self::Size8x8_16x16 => (16, 16),
+            Self::Size8x8_32x32 | Self::Size16x16_32x32 | Self::Size16x32_32x32 => (32, 32),
+            Self::Size8x8_64x64 | Self::Size16x16_64x64 | Self::Size32x32_64x64 => (64, 64),
+            Self::Size16x32_32x64 => (32, 64),
+        }
+    }
+
+    pub fn dimensions(self, large: bool) -> (u32, u32) {
+        if large { self.large() } else { self.small() }
+    }
+}
+
+register_mmio! {
+    /// OBJSEL
+    pub struct SpriteSizeAndTileBase @ 0x2101 {
+        #[bits(0..=2)]
+        pub name_base_addr: u8,
+
+        #[bits(3..=4)]
+        pub name_select: u8,
+
+        #[bits(5..=7)]
+        pub sprite_size: SpriteSize,
+    }    
+}
+
+impl SpriteSizeAndTileBase {
+    pub fn base_address(&self) -> u32 {
+        (self.name_base_addr() as u32) << 13
+    }
+
+    pub fn offset_address(&self) -> u32 {
+        (self.name_select() as u32) << 12
+    }
+}
+
+impl MmioReg for SpriteSizeAndTileBase {
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
+        let reg = Self::from_raw(value);
+        let obj = &mut snes.ppu.obj;
+        obj.tileset_addr = reg.base_address();
+        obj.name_offset = reg.offset_address();
+        obj.sprite_size = reg.sprite_size();
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        let obj = &snes.ppu.obj;
+        let mut reg = Self::default();
+        reg.set_name_base_addr((obj.tileset_addr >> 13) as u8);
+        reg.set_name_select((obj.name_offset >> 12) as u8);
+        reg.set_sprite_size(obj.sprite_size);
         reg.raw()
     }
 }

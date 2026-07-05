@@ -29,6 +29,7 @@ pub enum PanelKind {
     Ppu,
     Tileset,
     Tilemap,
+    Sprites,
     Log,
 }
 
@@ -122,6 +123,17 @@ impl ComponentManifest {
             .position(|p| p.kind == anchor)
             .map_or(self.panels.len(), |ix| ix + 1);
         self.panels.insert(ix, panel);
+    }
+
+    pub fn restrict(&mut self, kind: PanelKind, workspace: impl Into<Arc<str>>) {
+        if let Some(panel) = self.panels.iter_mut().find(|p| p.kind == kind) {
+            debug_assert!(
+                panel.workspaces.is_empty(),
+                "restrict() on already-tagged panel `{}`",
+                panel.id,
+            );
+            panel.workspaces.push(workspace.into());
+        }
     }
 
     pub fn insert_before(&mut self, anchor: PanelKind, panel: PanelDescriptor) {

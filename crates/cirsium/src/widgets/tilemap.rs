@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui::{Div, RenderImage};
 
 use crate::assets::icon;
-use crate::components::{footer_row, hex, mono_text};
+use crate::components::{flip_label, footer_row, hex, mono_text};
 use crate::theme::Theme;
 use crate::widgets::grid::{GridContent, GridOverlay, GridPanel, build_atlas};
 
@@ -45,7 +45,7 @@ pub struct TilemapView {
 impl From<debugger_model::Tilemap> for TilemapView {
     fn from(map: debugger_model::Tilemap) -> Self {
         let tile_px = map.tile_px as u32;
-        let scale = (512 / (map.width as u32 * tile_px).max(1)).max(1);
+        let scale = (1024 / (map.width as u32 * tile_px).max(1)).max(1);
 
         let image = (!map.entries.is_empty()).then(|| {
             build_atlas(
@@ -53,7 +53,9 @@ impl From<debugger_model::Tilemap> for TilemapView {
                 map.height,
                 tile_px,
                 scale,
-                map.entries.iter().map(|entry| entry.pixels.as_slice()),
+                map.entries
+                    .iter()
+                    .map(|entry| (entry.pixels.as_slice(), tile_px, tile_px)),
             )
         });
 
@@ -99,12 +101,7 @@ fn detail_row(theme: &Theme, view: &TilemapView, index: usize) -> Div {
     let entry = &view.entries[index];
     let (x, y) = (index % view.width, index / view.width);
 
-    let flip = match (entry.flip_h, entry.flip_v) {
-        (false, false) => "",
-        (true, false) => " · flip H",
-        (false, true) => " · flip V",
-        (true, true) => " · flip HV",
-    };
+    let flip = flip_label(entry.flip_h, entry.flip_v);
 
     footer_row(
         theme,
@@ -112,7 +109,7 @@ fn detail_row(theme: &Theme, view: &TilemapView, index: usize) -> Div {
         mono_text(
             theme,
             format!(
-                "{} · pal {} · prio {}{flip} @ VRAM {}",
+                "{} │ pal {} │ prio {}{flip} @ VRAM {}",
                 hex(entry.raw as u32, 16),
                 entry.palette,
                 entry.priority as u8,

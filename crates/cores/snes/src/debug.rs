@@ -7,8 +7,8 @@ use debugger_model::{
     DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind, Framebuffer,
     Highlight, MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor,
     PaletteView, PanelDescriptor, PanelKind, PpuGroup, PpuProperty, PpuView, RefreshPolicy,
-    RegisterView, RunOutcome, StackFrame, StatusView, SyntaxSpec, Tilemap, TilemapEntry,
-    TilemapViewport, Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE,
+    RegisterView, RunOutcome, SpriteEntry, Sprites, StackFrame, StatusView, SyntaxSpec, Tilemap,
+    TilemapEntry, TilemapViewport, Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE,
     WorkspaceDescriptor, WorkspaceIcon, hex, standard_manifest, strip_symbol_sigils, tokenize,
 };
 
@@ -288,6 +288,10 @@ impl DebugCore for SnesDebug {
         self::tilemap(&self.core, layer)
     }
 
+    fn sprites(&self) -> Option<Sprites> {
+        Some(self::sprites(&self.core))
+    }
+
     fn framebuffer(&self) -> Option<Framebuffer> {
         Some(Framebuffer {
             width: crate::ppu::SCREEN_WIDTH,
@@ -370,6 +374,21 @@ impl DebugCore for SnesDebug {
             )
             .tag(VIDEO_WORKSPACE),
         );
+        manifest.insert_after(
+            PanelKind::Tilemap,
+            PanelDescriptor::new(
+                "sprites",
+                "Sprites",
+                PanelKind::Sprites,
+                DockLocation::Center,
+                RefreshPolicy::OnPause,
+            )
+            .tag(VIDEO_WORKSPACE),
+        );
+
+        // The sprites panel takes the memory viewer's place in the PPU workspace.
+        manifest.restrict(PanelKind::Memory, CPU_WORKSPACE);
+
         manifest
     }
 
@@ -962,6 +981,38 @@ fn tileset(core: &Snes, layer: usize, color: usize) -> Option<Tileset> {
     })
 }
 
+fn object_pixels(
+    width: usize,
+    height: usize,
+    flip_h: bool,
+    flip_v: bool,
+    colors: &[(u8, u8, u8)],
+    mut tile: impl FnMut(usize, usize) -> [[u8; 8]; 8],
+) -> Vec<(u8, u8, u8)> {
+    let mut pixels = vec![(0, 0, 0); width * height];
+    for ty in 0..height / 8 {
+        for tx in 0..width / 8 {
+            for (py, line) in tile(tx, ty).iter().enumerate() {
+                for (px, &color) in line.iter().enumerate() {
+                    let mut x = tx * 8 + px;
+                    let mut y = ty * 8 + py;
+                    
+                    if flip_h {
+                        x = width - 1 - x;
+                    }
+                    
+                    if flip_v {
+                        y = height - 1 - y;
+                    }
+
+                    pixels[y * width + x] = colors[color as usize];
+                }
+            }
+        }
+    }
+    pixels
+}
+
 fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {
     let data = core.ppu.tilemap(layer)?;
     let bpp = core.ppu.bg_mode.bpp(layer)?;
@@ -983,30 +1034,14 @@ fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {
         })
     };
 
-    let mut indices = vec![0u8; size * size];
     let mut entries = Vec::with_capacity(data.entries.len());
     for (i, entry) in data.entries.iter().enumerate() {
         let (x, y) = (i as u32 % data.width, i as u32 / data.width);
         let colors = &palettes[entry.palette_selection as usize];
 
-        for sub_y in 0..size / 8 {
-            for sub_x in 0..size / 8 {
-                let index = entry.tile_index + sub_x as u16 + sub_y as u16 * 16;
-                for (row, line) in decode(index).iter().enumerate() {
-                    let offset = (sub_y * 8 + row) * size + sub_x * 8;
-                    indices[offset..offset + 8].copy_from_slice(line);
-                }
-            }
-        }
-
-        let mut pixels = Vec::with_capacity(size * size);
-        for py in 0..size {
-            for px in 0..size {
-                let px = if entry.flip_h { size - 1 - px } else { px };
-                let py = if entry.flip_v { size - 1 - py } else { py };
-                pixels.push(colors[indices[py * size + px] as usize]);
-            }
-        }
+        let pixels = self::object_pixels(size, size, entry.flip_h, entry.flip_v, colors, |tx, ty| {
+            decode(entry.tile_index + tx as u16 + ty as u16 * 16)
+        });
 
         entries.push(TilemapEntry {
             addr: data.entry_addr(x, y),
@@ -1032,6 +1067,64 @@ fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {
             height: crate::ppu::SCREEN_HEIGHT,
         }),
     })
+}
+
+fn sprites(core: &Snes) -> Sprites {
+    let palettes: Vec<Vec<(u8, u8, u8)>> = (0..8)
+        .map(|palette| {
+            let mut colors: Vec<_> = core
+                .ppu
+                .obj_palette(palette)
+                .into_iter()
+                .map(crate::ppu::cgram::rgb)
+                .collect();
+            // Color 0 is transparent; render it black.
+            colors[0] = (0, 0, 0);
+            colors
+        })
+        .collect();
+
+    let entries = core
+        .ppu
+        .sprites()
+        .into_iter()
+        .map(|sprite| {
+            let pixels = self::object_pixels(
+                sprite.width as usize,
+                sprite.height as usize,
+                sprite.flip_h,
+                sprite.flip_v,
+                &palettes[sprite.palette as usize],
+                |tx, ty| {
+                    core.ppu
+                        .obj_tile(sprite.sub_tile(tx as u32, ty as u32))
+                        .decode(4)
+                },
+            );
+
+            SpriteEntry {
+                x: sprite.x,
+                y: sprite.y,
+                width: sprite.width,
+                height: sprite.height,
+                tile: sprite.tile,
+                tile_addr: sprite.tile_addr,
+                palette: sprite.palette,
+                priority: sprite.priority,
+                flip_h: sprite.flip_h,
+                flip_v: sprite.flip_v,
+                pixels,
+            }
+        })
+        .collect();
+
+    let size = core.ppu.obj.sprite_size;
+
+    Sprites {
+        small: size.small(),
+        large: size.large(),
+        entries,
+    }
 }
 
 fn mmio_view(core: &Snes) -> MmioView {

@@ -27,6 +27,7 @@ pub mod icon {
     pub const MONITOR: &str = "icons/monitor.svg";
     pub const GRID: &str = "icons/grid-3x3.svg";
     pub const MAP: &str = "icons/map.svg";
+    pub const GHOST: &str = "icons/ghost.svg";
 
     pub const RUN: &str = "icons/play.svg";
     pub const PAUSE: &str = "icons/pause.svg";

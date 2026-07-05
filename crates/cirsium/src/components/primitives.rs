@@ -31,6 +31,15 @@ pub fn bool_chip(theme: &Theme, text: impl Into<SharedString>, on: bool) -> Div 
 
 pub use debugger_model::hex;
 
+pub fn flip_label(flip_h: bool, flip_v: bool) -> &'static str {
+    match (flip_h, flip_v) {
+        (false, false) => "",
+        (true, false) => " │ flip H",
+        (false, true) => " │ flip V",
+        (true, true) => " │ flip HV",
+    }
+}
+
 /// A thin vertical divider for statusbar segments.
 pub fn separator(theme: &Theme) -> Div {
     div().w(px(1.)).h(px(12.)).bg(theme.border_strong)

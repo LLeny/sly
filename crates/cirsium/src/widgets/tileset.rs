@@ -6,7 +6,7 @@ use crate::assets::icon;
 use crate::components::{footer_row, hex, mono_text};
 use crate::widgets::grid::{GridContent, GridPanel, build_atlas};
 
-const SCALE: u32 = 4;
+const SCALE: u32 = 8;
 
 const TILE_SIZE: u32 = 8;
 const TILES_PER_ROW: usize = 16;
@@ -34,7 +34,10 @@ impl From<debugger_model::Tileset> for TilesetView {
                 rows,
                 TILE_SIZE,
                 SCALE,
-                tileset.tiles.iter().map(|tile| tile.pixels.as_slice()),
+                tileset
+                    .tiles
+                    .iter()
+                    .map(|tile| (tile.pixels.as_slice(), TILE_SIZE, TILE_SIZE)),
             )
         });
 

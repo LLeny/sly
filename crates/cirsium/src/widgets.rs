@@ -13,6 +13,7 @@ pub mod memory;
 pub mod mmio;
 pub mod palette;
 pub mod ppu;
+pub mod sprites;
 pub mod tilemap;
 pub mod tileset;
 
@@ -35,5 +36,6 @@ pub use memory::{MemoryCell, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};
 pub use mmio::{MmioFieldView, MmioGroup, MmioRegisterView, MmioView, MmioWidget};
 pub use palette::{PaletteColor, PaletteView, PaletteWidget};
 pub use ppu::{PpuGroup, PpuProperty, PpuView, PpuWidget};
+pub use sprites::{SpritesView, SpritesWidget};
 pub use tilemap::{TilemapEntryView, TilemapView, TilemapWidget};
 pub use tileset::{TilesetView, TilesetWidget};

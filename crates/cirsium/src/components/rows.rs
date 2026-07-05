@@ -4,7 +4,7 @@ use gpui::prelude::*;
 use gpui::{App, Div, SharedString, Stateful, Window, div, px, svg};
 
 use crate::assets::icon;
-use crate::components::label_text;
+use crate::components::{empty_state, label_text};
 use crate::theme::Theme;
 
 pub type RowCallback = Rc<dyn Fn(SharedString, &mut Window, &mut App) + 'static>;
@@ -57,6 +57,8 @@ pub fn detail_row(theme: &Theme, label: impl Into<SharedString>, value: impl Int
         .child(value)
 }
 
+pub const FOOTER_ROW_H: f32 = 22.;
+
 /// A label/value row pinned under a panel's scroll area (selection details).
 pub fn footer_row(theme: &Theme, label: impl Into<SharedString>, value: impl IntoElement) -> Div {
     div()
@@ -64,8 +66,19 @@ pub fn footer_row(theme: &Theme, label: impl Into<SharedString>, value: impl Int
         .items_center()
         .gap_2()
         .px_1()
+        .h(px(FOOTER_ROW_H))
         .pt(px(6.))
         .child(label_text(theme, label))
         .child(div().flex_1())
         .child(value)
+}
+
+/// A dim prompt occupying exactly one footer row while nothing is selected.
+pub fn footer_placeholder(theme: &Theme, text: impl Into<SharedString>) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .h(px(FOOTER_ROW_H))
+        .pt(px(6.))
+        .child(empty_state(theme, text))
 }

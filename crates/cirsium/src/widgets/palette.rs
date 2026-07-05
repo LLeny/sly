@@ -4,7 +4,9 @@ use gpui::prelude::*;
 use gpui::{App, ClickEvent, Div, Rgba, SharedString, Window, div, px, rgb};
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, empty_state, footer_row, hex, mono_text};
+use crate::components::{
+    ClickHandler, Panel, empty_state, footer_placeholder, footer_row, hex, mono_text,
+};
 use crate::theme::Theme;
 
 type SelectCallback = Rc<dyn Fn(usize, usize, &mut Window, &mut App) + 'static>;
@@ -130,14 +132,20 @@ impl RenderOnce for PaletteWidget {
         }
 
         let mut body = div().flex().flex_col().flex_1().min_h(px(0.)).child(grid);
-        if let Some((palette_ix, color_ix)) = self.selected
-            && let Some(color) = self
-                .view
-                .palettes
-                .get(palette_ix)
-                .and_then(|palette| palette.get(color_ix))
-        {
-            body = body.child(self::detail_row(t, palette_ix, color_ix, color));
+        if !self.view.palettes.is_empty() {
+            let selected = self.selected.and_then(|(palette_ix, color_ix)| {
+                self.view
+                    .palettes
+                    .get(palette_ix)
+                    .and_then(|palette| palette.get(color_ix))
+                    .map(|color| (palette_ix, color_ix, color))
+            });
+            body = body.child(match selected {
+                Some((palette_ix, color_ix, color)) => {
+                    self::detail_row(t, palette_ix, color_ix, color)
+                }
+                None => footer_placeholder(t, "Select a color to inspect"),
+            });
         }
 
         let mut panel = Panel::new(Self::ID, "Palettes")

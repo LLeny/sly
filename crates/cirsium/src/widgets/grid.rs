@@ -8,7 +8,9 @@ use gpui::{
     Size, Window, canvas, div, img, point, px, size,
 };
 
-use crate::components::{ClickHandler, Panel, Segmented, empty_state};
+use crate::components::{
+    ClickHandler, FOOTER_ROW_H, Panel, Segmented, empty_state, footer_placeholder,
+};
 use crate::theme::{Theme, with_alpha};
 
 pub(super) type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
@@ -32,43 +34,92 @@ impl From<debugger_model::TilesetLayer> for TilesetLayer {
     }
 }
 
+const BLEED_BORDER: u32 = 1;
+
 pub(super) fn build_atlas<'a>(
     cols: usize,
     rows: usize,
-    tile_px: u32,
+    cell_px: u32,
     scale: u32,
-    cells: impl Iterator<Item = &'a [(u8, u8, u8)]>,
+    cells: impl Iterator<Item = (&'a [(u8, u8, u8)], u32, u32)>,
 ) -> Arc<RenderImage> {
-    let mut atlas =
-        image::RgbaImage::new(cols as u32 * tile_px * scale, rows as u32 * tile_px * scale);
+    let mut atlas = self::bordered(cols as u32 * cell_px * scale, rows as u32 * cell_px * scale);
 
-    let mut row = vec![0u8; (tile_px * scale * 4) as usize];
-    for (i, pixels) in cells.enumerate() {
-        let x = (i % cols) as u32 * tile_px * scale;
-        let y = (i / cols) as u32 * tile_px * scale;
-        self::blit_tile(&mut atlas, &mut row, x, y, pixels, tile_px, scale);
+    let mut row = vec![0u8; (cell_px * scale * 4) as usize];
+    for (i, (pixels, width, height)) in cells.enumerate() {
+        let x = (i % cols) as u32 * cell_px * scale + (cell_px - width) / 2 * scale + BLEED_BORDER;
+        let y = (i / cols) as u32 * cell_px * scale + (cell_px - height) / 2 * scale + BLEED_BORDER;
+        self::blit(&mut atlas, &mut row, x, y, pixels, width, height, scale);
     }
 
-    Arc::new(RenderImage::new(vec![image::Frame::new(atlas)]))
+    self::finish(atlas)
 }
 
-fn blit_tile(
+/// A single image scaled up by an integer factor (e.g. the framebuffer).
+pub(super) fn build_image(
+    pixels: &[(u8, u8, u8)],
+    width: u32,
+    height: u32,
+    scale: u32,
+) -> Arc<RenderImage> {
+    let mut image = self::bordered(width * scale, height * scale);
+    let mut row = vec![0u8; (width * scale * 4) as usize];
+    self::blit(
+        &mut image,
+        &mut row,
+        BLEED_BORDER,
+        BLEED_BORDER,
+        pixels,
+        width,
+        height,
+        scale,
+    );
+    self::finish(image)
+}
+
+fn bordered(width: u32, height: u32) -> image::RgbaImage {
+    image::RgbaImage::new(width + BLEED_BORDER * 2, height + BLEED_BORDER * 2)
+}
+
+fn finish(mut image: image::RgbaImage) -> Arc<RenderImage> {
+    self::replicate_border(&mut image);
+    Arc::new(RenderImage::new(vec![image::Frame::new(image)]))
+}
+
+fn replicate_border(image: &mut image::RgbaImage) {
+    let (w, h) = (image.width() as usize, image.height() as usize);
+    let stride = w * 4;
+    let data: &mut [u8] = image;
+
+    for y in 1..h - 1 {
+        let row = &mut data[y * stride..(y + 1) * stride];
+        row.copy_within(4..8, 0);
+        row.copy_within(stride - 8..stride - 4, stride - 4);
+    }
+
+    data.copy_within(stride..stride * 2, 0);
+    data.copy_within((h - 2) * stride..(h - 1) * stride, (h - 1) * stride);
+}
+
+fn blit(
     atlas: &mut image::RgbaImage,
     row: &mut [u8],
     x0: u32,
     y0: u32,
     pixels: &[(u8, u8, u8)],
-    tile_px: u32,
+    width: u32,
+    height: u32,
     scale: u32,
 ) {
-    let width = atlas.width() as usize;
+    let atlas_width = atlas.width() as usize;
     let data: &mut [u8] = atlas;
     let (x0, y0) = (x0 as usize, y0 as usize);
-    let (tile_px, scale) = (tile_px as usize, scale as usize);
+    let (width, height, scale) = (width as usize, height as usize, scale as usize);
+    let row = &mut row[..width * scale * 4];
 
-    for sy in 0..tile_px {
-        for sx in 0..tile_px {
-            let (r, g, b) = pixels[sy * tile_px + sx];
+    for sy in 0..height {
+        for sx in 0..width {
+            let (r, g, b) = pixels[sy * width + sx];
             for dx in 0..scale {
                 let o = (sx * scale + dx) * 4;
                 row[o..o + 4].copy_from_slice(&[b, g, r, 0xFF]);
@@ -76,7 +127,7 @@ fn blit_tile(
         }
 
         for dy in 0..scale {
-            let o = ((y0 + sy * scale + dy) * width + x0) * 4;
+            let o = ((y0 + sy * scale + dy) * atlas_width + x0) * 4;
             data[o..o + row.len()].copy_from_slice(row);
         }
     }
@@ -142,6 +193,7 @@ pub struct GridPanel {
     meta: Option<SharedString>,
     content: Option<GridContent>,
     detail: Option<DetailFn>,
+    detail_rows: usize,
     placeholder: &'static str,
     layers: Vec<TilesetLayer>,
     layer: usize,
@@ -170,6 +222,7 @@ impl GridPanel {
             meta: None,
             content,
             detail: None,
+            detail_rows: 1,
             placeholder: "",
             layers: Vec::new(),
             layer: 0,
@@ -192,6 +245,11 @@ impl GridPanel {
 
     pub fn detail(mut self, detail: impl Fn(&Theme, usize) -> Div + 'static) -> Self {
         self.detail = Some(Box::new(detail));
+        self
+    }
+
+    pub fn detail_rows(mut self, rows: usize) -> Self {
+        self.detail_rows = rows;
         self
     }
 
@@ -310,14 +368,14 @@ impl RenderOnce for GridPanel {
                 ));
 
                 let selected = self.selected.filter(|&index| index < content.count);
+                let slot = div()
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .h(px(FOOTER_ROW_H * self.detail_rows as f32));
                 body = body.child(match (selected, &self.detail) {
-                    (Some(index), Some(detail)) => detail(t, index),
-                    _ => div()
-                        .flex()
-                        .items_center()
-                        .px_1()
-                        .pt(px(6.))
-                        .child(empty_state(t, self.placeholder)),
+                    (Some(index), Some(detail)) => slot.child(detail(t, index)),
+                    _ => slot.child(footer_placeholder(t, self.placeholder)),
                 });
             }
         }

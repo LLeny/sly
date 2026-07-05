@@ -345,6 +345,28 @@ pub struct Tilemap {
 }
 
 #[derive(Clone)]
+pub struct SpriteEntry {
+    pub x: i32,
+    pub y: u8,
+    pub width: u32,
+    pub height: u32,
+    pub tile: u16,
+    pub tile_addr: u32,
+    pub palette: u8,
+    pub priority: u8,
+    pub flip_h: bool,
+    pub flip_v: bool,
+    pub pixels: Vec<(u8, u8, u8)>,
+}
+
+#[derive(Clone)]
+pub struct Sprites {
+    pub small: (u32, u32),
+    pub large: (u32, u32),
+    pub entries: Vec<SpriteEntry>,
+}
+
+#[derive(Clone)]
 pub struct Framebuffer {
     pub width: u32,
     pub height: u32,
