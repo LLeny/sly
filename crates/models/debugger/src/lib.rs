@@ -9,9 +9,9 @@ pub use frontend_model::{
 };
 pub use model::{
     CallStackView, CartridgeField, CartridgeView, CpuView, DisasmLine, DisasmToken,
-    DmaChannelDetail, DmaChannelView, DmaView, Field, FlagView, FlowKind, Highlight, MemoryRegion,
-    MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView, PpuGroup,
-    PpuProperty, PpuView, RegisterView, StackFrame, StatusView, Tilemap, TilemapEntry,
+    DmaChannelDetail, DmaChannelView, DmaView, Field, FlagView, FlowKind, Framebuffer, Highlight,
+    MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView,
+    PpuGroup, PpuProperty, PpuView, RegisterView, StackFrame, StatusView, Tilemap, TilemapEntry,
     TilemapViewport, Tileset, TilesetLayer, TilesetTile, TokenKind, hex,
 };
 pub use target::{

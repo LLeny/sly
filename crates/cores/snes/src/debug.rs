@@ -4,12 +4,12 @@ use core_model::Core;
 use debugger_model::{
     BreakpointKind, BreakpointMark, CPU_WORKSPACE, CallStackView, CartridgeField, CartridgeView,
     ComponentManifest, CpuDescriptor, CpuId, CpuView, DebugCore, DisasmLine, DisasmToken,
-    DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind, Highlight,
-    MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView,
-    PanelDescriptor, PanelKind, PpuGroup, PpuProperty, PpuView, RefreshPolicy, RegisterView,
-    RunOutcome, StackFrame, StatusView, SyntaxSpec, Tilemap, TilemapEntry, TilemapViewport,
-    Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE, WorkspaceDescriptor,
-    WorkspaceIcon, hex, standard_manifest, strip_symbol_sigils, tokenize,
+    DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind, Framebuffer,
+    Highlight, MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor,
+    PaletteView, PanelDescriptor, PanelKind, PpuGroup, PpuProperty, PpuView, RefreshPolicy,
+    RegisterView, RunOutcome, StackFrame, StatusView, SyntaxSpec, Tilemap, TilemapEntry,
+    TilemapViewport, Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE,
+    WorkspaceDescriptor, WorkspaceIcon, hex, standard_manifest, strip_symbol_sigils, tokenize,
 };
 
 use crate::apu::{Apu, spc700};
@@ -250,6 +250,7 @@ impl DebugCore for SnesDebug {
         let palettes = (0..16)
             .map(|p| {
                 self.core
+                    .ppu
                     .palette(p)
                     .into_iter()
                     .map(|word| PaletteColor {
@@ -287,6 +288,14 @@ impl DebugCore for SnesDebug {
         self::tilemap(&self.core, layer)
     }
 
+    fn framebuffer(&self) -> Option<Framebuffer> {
+        Some(Framebuffer {
+            width: crate::ppu::SCREEN_WIDTH,
+            height: crate::ppu::SCREEN_HEIGHT,
+            pixels: self.core.ppu.frame_buffer().to_vec(),
+        })
+    }
+
     fn manifest(&self) -> ComponentManifest {
         let mut manifest = standard_manifest(&self.cpus());
         manifest.workspaces.push(WorkspaceDescriptor::new(
@@ -295,6 +304,16 @@ impl DebugCore for SnesDebug {
             WorkspaceIcon::Video,
         ));
 
+        manifest.insert_after(
+            PanelKind::Memory,
+            PanelDescriptor::new(
+                "framebuffer",
+                "Screen",
+                PanelKind::Framebuffer,
+                DockLocation::Center,
+                RefreshPolicy::Continuous,
+            ),
+        );
         manifest.insert_after(
             PanelKind::Breakpoints,
             PanelDescriptor::new(
@@ -909,16 +928,16 @@ fn ppu_view(core: &Snes) -> PpuView {
 }
 
 fn bg_palette_colors(core: &Snes, layer: usize, bpp: u8, palette: usize) -> Vec<(u8, u8, u8)> {
-    let (base, count) = core.bg_palette(layer, bpp, palette);
+    let (base, count) = core.ppu.bg_palette(layer, bpp, palette);
     (0..count)
         .map(|i| crate::ppu::cgram::rgb(core.ppu.cgram.word((base + i) as u8)))
         .collect()
 }
 
 fn tileset(core: &Snes, layer: usize, color: usize) -> Option<Tileset> {
-    let data = core.tileset(layer)?;
+    let data = core.ppu.tileset(layer)?;
 
-    let palette = core.bg_palette_index(layer, data.bpp, color);
+    let palette = core.ppu.bg_palette_index(layer, data.bpp, color);
     let colors = self::bg_palette_colors(core, layer, data.bpp, palette);
 
     let tiles = data
@@ -944,7 +963,7 @@ fn tileset(core: &Snes, layer: usize, color: usize) -> Option<Tileset> {
 }
 
 fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {
-    let data = core.tilemap(layer)?;
+    let data = core.ppu.tilemap(layer)?;
     let bpp = core.ppu.bg_mode.bpp(layer)?;
 
     let palettes: Vec<Vec<(u8, u8, u8)>> = (0..8)
@@ -956,8 +975,12 @@ fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {
     let mut decoded: Vec<Option<[[u8; 8]; 8]>> = vec![None; 1024];
     let mut decode = |index: u16| {
         let index = index & 0x3FF;
-        *decoded[index as usize]
-            .get_or_insert_with(|| core.bg_tile(layer, index).unwrap_or_default().decode(bpp))
+        *decoded[index as usize].get_or_insert_with(|| {
+            core.ppu
+                .bg_tile(layer, index)
+                .unwrap_or_default()
+                .decode(bpp)
+        })
     };
 
     let mut indices = vec![0u8; size * size];

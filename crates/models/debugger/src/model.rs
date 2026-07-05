@@ -344,6 +344,13 @@ pub struct Tilemap {
     pub viewport: Option<TilemapViewport>,
 }
 
+#[derive(Clone)]
+pub struct Framebuffer {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<(u8, u8, u8)>,
+}
+
 #[derive(Clone, Copy)]
 pub struct PaletteColor {
     pub raw: u16,

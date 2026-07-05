@@ -24,6 +24,7 @@ pub enum PanelKind {
     Memory,
     Mmio,
     Dma,
+    Framebuffer,
     Palette,
     Ppu,
     Tileset,

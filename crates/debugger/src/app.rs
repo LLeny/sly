@@ -11,9 +11,9 @@ use cirsium::components::{
 use cirsium::widgets::{
     BreakpointKind, BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView,
     CartridgeWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView,
-    DmaWidget, GridPanel, LogWidget, MemoryWidget, MmioView, MmioWidget, PaletteView,
-    PaletteWidget, PpuView, PpuWidget, RowProvider, TilemapView, TilemapWidget, TilesetLayer,
-    TilesetView, TilesetWidget, ViewMode,
+    DmaWidget, FramebufferView, FramebufferWidget, GridPanel, LogWidget, MemoryWidget, MmioView,
+    MmioWidget, PaletteView, PaletteWidget, PpuView, PpuWidget, RowProvider, TilemapView,
+    TilemapWidget, TilesetLayer, TilesetView, TilesetWidget, ViewMode,
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
@@ -93,6 +93,7 @@ pub(crate) struct Debugger {
     tileset_ui: GridState,
     tilemap: Option<TilemapView>,
     tilemap_ui: GridState,
+    framebuffer: Option<FramebufferView>,
     expanded: HashMap<&'static str, HashSet<SharedString>>,
     manifest: ComponentManifest,
     status: StatusView,
@@ -100,6 +101,7 @@ pub(crate) struct Debugger {
     memory: Memory,
     breakpoints: Breakpoints,
     logs: Logs,
+    show_log: bool,
     jump_input: Entity<TextInput>,
     bp_input: Entity<TextInput>,
     log_filter_input: Entity<TextInput>,
@@ -178,18 +180,20 @@ impl Debugger {
             tileset_ui: GridState::default(),
             tilemap: target.tilemap(0).map(Into::into),
             tilemap_ui: GridState::default(),
+            framebuffer: target.framebuffer().map(Into::into),
             expanded: HashMap::new(),
             manifest,
             status: target.status("paused").into(),
             memory: Memory::new(target.as_ref()),
             breakpoints: Breakpoints::default(),
             logs: Logs::new(log_buffer),
+            show_log: false,
             jump_input,
             bp_input,
             log_filter_input,
             target,
             panes,
-            collapsed: HashSet::new(),
+            collapsed: HashSet::from([SharedString::from(LogWidget::ID)]),
             settings: None,
             workspace,
             running: false,
@@ -233,12 +237,22 @@ impl Debugger {
         self.tilemap = self.target.tilemap(self.tilemap_ui.layer).map(Into::into);
     }
 
+    fn refresh_framebuffer(&mut self, cx: &mut Context<Self>) {
+        if self.is_collapsed(FramebufferWidget::ID) {
+            return;
+        }
+
+        Self::drop_grid_image(cx, self.framebuffer.take().and_then(|view| view.image));
+        self.framebuffer = self.target.framebuffer().map(Into::into);
+    }
+
     fn refresh_panes(&mut self, mode: CpuRefresh, cx: &mut Context<Self>) {
         for pane in &mut self.panes {
             Self::refresh_pane_view(self.target.as_ref(), pane, mode);
         }
         self.mmio_view = self.target.mmio_view().into();
         self.dma_view = self.target.dma_view().into();
+        self.refresh_framebuffer(cx);
 
         if self.video_panes_visible() {
             self.refresh_video_panes(cx);
@@ -302,7 +316,13 @@ impl Debugger {
     }
 
     fn toggle(&mut self, id: impl Into<SharedString>, cx: &mut Context<Self>) {
-        Self::toggle_in(&mut self.collapsed, id.into());
+        let id = id.into();
+        Self::toggle_in(&mut self.collapsed, id.clone());
+
+        if id.as_ref() == FramebufferWidget::ID && !self.collapsed.contains(&id) {
+            self.refresh_framebuffer(cx);
+        }
+
         cx.notify();
     }
 
@@ -770,6 +790,11 @@ impl Debugger {
         cx.notify();
     }
 
+    fn toggle_show_log(&mut self, cx: &mut Context<Self>) {
+        self.show_log = !self.show_log;
+        cx.notify();
+    }
+
     fn on_log_filter_event(
         &mut self,
         input: Entity<TextInput>,
@@ -924,6 +949,12 @@ impl Render for Debugger {
             )
             .child(settings_button)
             .child(theme_toggle);
+
+        let framebuffer = visible.contains(FramebufferWidget::ID).then(|| {
+            FramebufferWidget::new(self.framebuffer.clone())
+                .collapsed(self.is_collapsed(FramebufferWidget::ID))
+                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(FramebufferWidget::ID, cx)))
+        });
 
         let cartridge = visible.contains(CartridgeWidget::ID).then(|| {
             CartridgeWidget::new(self.cartridge.clone())
@@ -1242,6 +1273,14 @@ impl Render for Debugger {
                 .child(div().text_xs().text_color(t.text_muted).child("LOG"))
                 .child(checkbox(
                     t,
+                    "set-log-show",
+                    self.show_log,
+                    "Show log panel",
+                    CheckboxSize::Small,
+                    cx.listener(|this, _, _, cx| this.toggle_show_log(cx)),
+                ))
+                .child(checkbox(
+                    t,
                     "set-log-dedup",
                     self.logs.dedup(),
                     "Drop repeated logs",
@@ -1395,25 +1434,27 @@ impl Render for Debugger {
             )
         });
 
-        let log_collapsed = self.is_collapsed(LogWidget::ID);
-        let log = LogWidget::new(self.logs.view(), self.logs.scroll.clone())
-            .collapsed(log_collapsed)
-            .target_label(self.logs.target_label())
-            .level_label(self.logs.level_label())
-            .message_input(self.log_filter_input.clone())
-            .on_toggle(cx.listener(|this, _, _, cx| this.toggle(LogWidget::ID, cx)))
-            .on_target_open(
-                cx.listener(|this, ev: &ClickEvent, _, cx| this.log_open_target(ev.position(), cx)),
-            )
-            .on_level_open(
-                cx.listener(|this, ev: &ClickEvent, _, cx| this.log_open_level(ev.position(), cx)),
-            )
-            .on_clear(cx.listener(|this, _, _, cx| this.clear_logs(cx)));
-        let log_region = div()
-            .flex()
-            .flex_col()
-            .when(!log_collapsed, |d| d.h(px(180.)).min_h(px(0.)))
-            .child(log);
+        let log_region = self.show_log.then(|| {
+            let log_collapsed = self.is_collapsed(LogWidget::ID);
+            let log = LogWidget::new(self.logs.view(), self.logs.scroll.clone())
+                .collapsed(log_collapsed)
+                .target_label(self.logs.target_label())
+                .level_label(self.logs.level_label())
+                .message_input(self.log_filter_input.clone())
+                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(LogWidget::ID, cx)))
+                .on_target_open(cx.listener(|this, ev: &ClickEvent, _, cx| {
+                    this.log_open_target(ev.position(), cx)
+                }))
+                .on_level_open(cx.listener(|this, ev: &ClickEvent, _, cx| {
+                    this.log_open_level(ev.position(), cx)
+                }))
+                .on_clear(cx.listener(|this, _, _, cx| this.clear_logs(cx)));
+            div()
+                .flex()
+                .flex_col()
+                .when(!log_collapsed, |d| d.h(px(180.)).min_h(px(0.)))
+                .child(log)
+        });
 
         let log_target_combo = self.logs.target_combo.map(|pos| {
             let options = self.logs.target_options();
@@ -1491,8 +1532,37 @@ impl Render for Debugger {
             );
         }
         panels.insert(MmioWidget::ID.into(), mmio.into_any_element());
-        panels.insert(MemoryWidget::ID.into(), memory_widget.into_any_element());
-        panels.insert(LogWidget::ID.into(), log_region.into_any_element());
+        let memory_panel = match framebuffer {
+            Some(framebuffer) => div()
+                .flex()
+                .flex_1()
+                .min_h(px(0.))
+                .gap_2()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .min_h(px(0.))
+                        .child(memory_widget),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .w(px(300.))
+                        .flex_none()
+                        .min_h(px(0.))
+                        .child(framebuffer),
+                )
+                .into_any_element(),
+            None => memory_widget.into_any_element(),
+        };
+        panels.insert(MemoryWidget::ID.into(), memory_panel);
+        if let Some(log_region) = log_region {
+            panels.insert(LogWidget::ID.into(), log_region.into_any_element());
+        }
         panels.extend(cpu_panels);
         panels.extend(disasm_panels);
 
@@ -1534,7 +1604,7 @@ impl Render for Debugger {
                                 div()
                                     .flex()
                                     .flex_col()
-                                    .w(px(360.))
+                                    .w(px(300.))
                                     .flex_none()
                                     .min_h(px(0.))
                                     .overflow_hidden()

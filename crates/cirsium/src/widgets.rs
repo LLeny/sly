@@ -6,6 +6,7 @@ pub mod cpu;
 pub mod disassembly;
 pub mod dma;
 pub mod field;
+pub mod framebuffer;
 pub mod grid;
 pub mod log;
 pub mod memory;
@@ -27,6 +28,7 @@ pub use disassembly::{
     DisasmLine, DisasmToken, DisassemblyView, DisassemblyWidget, TokenKind, ViewMode,
 };
 pub use dma::{DmaChannelDetail, DmaChannelView, DmaView, DmaWidget};
+pub use framebuffer::{FramebufferView, FramebufferWidget};
 pub use grid::{GridContent, GridOverlay, GridPanel, TilesetLayer};
 pub use log::{LogEntry, LogLevel, LogView, LogWidget, short_target};
 pub use memory::{MemoryCell, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};

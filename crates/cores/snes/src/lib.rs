@@ -105,6 +105,8 @@ impl<M: MemoryMap + 'static> Snes<M> {
         );
         self.scheduler
             .schedule_periodic(self.scheduler.cycles_per_frame(), ppu::vblank_end);
+        self.scheduler
+            .schedule_periodic(scheduler::MASTER_CLOCKS_PER_SCANLINE, ppu::draw_scanline);
 
         // TODO: Could schedule these when enabled?
         self.scheduler

@@ -7,8 +7,8 @@ use frontend_model::{
 };
 
 use crate::model::{
-    CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Highlight, MemoryRegion, MmioView,
-    PaletteView, PpuView, StatusView, Tilemap, Tileset, TilesetLayer,
+    CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Framebuffer, Highlight,
+    MemoryRegion, MmioView, PaletteView, PpuView, StatusView, Tilemap, Tileset, TilesetLayer,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -163,6 +163,10 @@ pub trait DebugCore: Core {
     }
 
     fn tilemap(&self, _layer: usize) -> Option<Tilemap> {
+        None
+    }
+
+    fn framebuffer(&self) -> Option<Framebuffer> {
         None
     }
 
