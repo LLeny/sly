@@ -128,7 +128,11 @@ impl RegisterView {
 }
 
 pub fn hex(value: u32, bits: u8) -> String {
-    let width = (bits as usize).div_ceil(4);
+    let mut width = (bits as usize).div_ceil(4);
+    if (value as u64) >> (width * 4) != 0 {
+        let nibbles = ((32 - value.leading_zeros()) as usize).div_ceil(4);
+        width = nibbles.next_multiple_of(2);
+    }
     format!("${value:0width$X}")
 }
 
