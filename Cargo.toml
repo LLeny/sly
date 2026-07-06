@@ -15,6 +15,8 @@ members = [
 gpui = { git = "https://github.com/ioncodes/zed", rev = "860bbce8b8ad06a0ba683d2cced22795fdcd2d7a" }
 gpui_platform = { git = "https://github.com/ioncodes/zed", rev = "860bbce8b8ad06a0ba683d2cced22795fdcd2d7a" }
 reqwest_client = { git = "https://github.com/ioncodes/zed", rev = "860bbce8b8ad06a0ba683d2cced22795fdcd2d7a" }
+tracing = { version = "0.1.44", features = ["release_max_level_off"] }
+tracing-subscriber = { version = "0.3.23", features = ["registry", "fmt", "ansi", "std", "env-filter"] }
 
 [patch.crates-io]
 async-process = { git = "https://github.com/zed-industries/async-process.git", rev = "0b6d6713570af61806e1e5cb40e0f757cb93fd9d" }
