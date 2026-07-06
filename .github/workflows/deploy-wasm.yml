@@ -23,7 +23,8 @@ jobs:
       - name: Init build submodules
         run: git submodule update --init --depth 1 submodules/chipi-spec submodules/libretro-database
 
-      - uses: dtolnay/rust-toolchain@master
+      - name: Install Rust toolchain
+        run: rustup toolchain install
 
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:

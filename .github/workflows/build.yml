@@ -15,7 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: git submodule update --init --depth 1 submodules/chipi-spec submodules/libretro-database
-      - uses: dtolnay/rust-toolchain@master
+      - name: Install Rust toolchain
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           key: web
@@ -38,7 +39,8 @@ jobs:
             cmake ninja-build \
             libwayland-dev libxkbcommon-dev libx11-dev libxi-dev libxrandr-dev libxcursor-dev \
             libxext-dev libxfixes-dev libasound2-dev libudev-dev
-      - uses: dtolnay/rust-toolchain@master
+      - name: Install Rust toolchain
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           key: native
