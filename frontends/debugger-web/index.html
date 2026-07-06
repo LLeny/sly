@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sly Debugger</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🕹️</text></svg>" />
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
@@ -19,14 +20,32 @@
             font-size: 1.1rem; opacity: 0.6;
         }
         #loading.hidden { display: none; }
+        #loading.error { opacity: 1; }
+        #loading .message { max-width: 34rem; padding: 0 1.5rem; line-height: 1.5; }
+        #loading .message h1 { font-size: 1.2rem; margin-bottom: 0.75rem; }
+        #loading .message p { font-size: 0.95rem; opacity: 0.8; margin-bottom: 0.5rem; }
+        #loading .message code { font-family: ui-monospace, monospace; background: #1e1e2e; padding: 0.1em 0.35em; border-radius: 4px; }
     </style>
 </head>
 <body>
     <div id="loading">Loading Sly Debugger...</div>
     <script type="module">
-        import init from './debugger.js';
-        await init();
-        document.getElementById('loading').classList.add('hidden');
+        const loading = document.getElementById('loading');
+
+        const adapter = 'gpu' in navigator ? await navigator.gpu.requestAdapter().catch(() => null) : null;
+        if (!adapter) {
+            loading.classList.add('error');
+            loading.innerHTML = `
+                <div class="message">
+                    <h1>No WebGPU adapter found</h1>
+                    <p>In Chrome, enabling <code>chrome://flags/#enable-unsafe-webgpu</code> and
+                    <code>chrome://flags/#enable-vulkan</code> may help.</p>
+                </div>`;
+        } else {
+            const { default: init } = await import('./debugger.js');
+            await init();
+            loading.classList.add('hidden');
+        }
     </script>
 </body>
 </html>
