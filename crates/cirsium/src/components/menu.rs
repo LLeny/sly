@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
-    Anchor, App, ClickEvent, MouseDownEvent, Pixels, Point, SharedString, Window, anchored,
-    deferred, div, px,
+    Anchor, App, ClickEvent, Div, MouseButton, MouseDownEvent, Pixels, Point, SharedString,
+    Stateful, Window, anchored, deferred, div, hsla, px,
 };
 
 use super::ClickHandler;
@@ -19,15 +19,7 @@ where
     C: IntoElement,
     D: Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
 {
-    let panel = div()
-        .id(id)
-        .occlude()
-        .bg(theme.bg_panel)
-        .border_1()
-        .border_color(theme.border_strong)
-        .rounded_md()
-        .on_mouse_down_out(on_dismiss)
-        .child(content);
+    let panel = floating_panel(theme, id, content).on_mouse_down_out(on_dismiss);
     deferred(
         anchored()
             .anchor(anchor)
@@ -44,14 +36,36 @@ pub fn popover(
     content: impl IntoElement,
     on_dismiss: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    self::overlay(
-        theme,
-        position,
-        Anchor::TopRight,
-        "popover",
-        div().p_2().child(content),
-        on_dismiss,
+    let panel = floating_panel(theme, "popover", div().p_2().child(content)).shadow_lg();
+
+    deferred(
+        div()
+            .occlude()
+            .absolute()
+            .inset_0()
+            .size_full()
+            .bg(hsla(0., 0., 0., 0.45))
+            .on_mouse_down(MouseButton::Left, on_dismiss)
+            .child(
+                anchored()
+                    .anchor(Anchor::TopRight)
+                    .position(position)
+                    .snap_to_window_with_margin(px(6.))
+                    .child(panel),
+            ),
     )
+    .priority(1)
+}
+
+fn floating_panel(theme: &Theme, id: &'static str, content: impl IntoElement) -> Stateful<Div> {
+    div()
+        .id(id)
+        .occlude()
+        .bg(theme.bg_panel)
+        .border_1()
+        .border_color(theme.border_strong)
+        .rounded_md()
+        .child(content)
 }
 
 pub struct MenuItem {

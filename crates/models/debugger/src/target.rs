@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use core_model::Core;
 use frontend_model::{
@@ -139,6 +140,10 @@ pub trait DebugCore: Core {
 
     fn debug_step(&mut self) -> bool;
     fn debug_run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome;
+
+    fn frame_interval(&self) -> Option<Duration> {
+        None
+    }
 
     fn cartridge(&self) -> &CartridgeView;
     fn mmio_view(&self) -> MmioView;

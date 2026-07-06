@@ -23,6 +23,7 @@ use gpui::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, Div, Entity, MouseDownEvent, Pixels,
     Point, RenderImage, SharedString, Size, Task, Window, div, px,
 };
+use web_time::Instant;
 
 use crate::breakpoints::Breakpoints;
 use crate::disasm::Disasm;
@@ -114,6 +115,9 @@ pub(crate) struct Debugger {
     running: bool,
     run_task: Option<Task<()>>,
 }
+
+const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+const FRAME_PACE_YIELD: Duration = Duration::from_millis(1);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CpuRefresh {
@@ -451,6 +455,24 @@ impl Debugger {
         self.status.state = self.target.caption(label).into();
     }
 
+    fn run_frame_interval(&self) -> Duration {
+        self.target
+            .frame_interval()
+            .unwrap_or(DEFAULT_FRAME_INTERVAL)
+    }
+
+    fn next_run_wait(next_frame: &mut Instant, interval: Duration) -> Duration {
+        *next_frame += interval;
+        let now = Instant::now();
+        let wait = next_frame.saturating_duration_since(now);
+        if wait.is_zero() {
+            *next_frame = now;
+            FRAME_PACE_YIELD
+        } else {
+            wait
+        }
+    }
+
     fn set_running(&mut self, running: bool, cx: &mut Context<Self>) {
         if self.running == running {
             return;
@@ -461,16 +483,23 @@ impl Debugger {
 
         if running {
             self.run_task = Some(cx.spawn(async move |this, cx| {
+                let mut next_frame = Instant::now();
                 loop {
-                    let keep_going = this
-                        .update(cx, |this, cx| this.run_frame(cx))
-                        .unwrap_or(false);
-                    if !keep_going {
+                    let interval = this
+                        .update(cx, |this, cx| {
+                            if this.run_frame(cx) {
+                                Some(this.run_frame_interval())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(None);
+                    let Some(interval) = interval else {
                         break;
-                    }
+                    };
 
                     cx.background_executor()
-                        .timer(Duration::from_millis(16))
+                        .timer(Self::next_run_wait(&mut next_frame, interval))
                         .await;
                 }
             }));

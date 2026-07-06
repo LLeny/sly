@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use core_model::Core;
 use debugger_model::{
@@ -201,6 +202,10 @@ impl DebugCore for SnesDebug {
         self.last_access = access;
         self.fault = None;
         RunOutcome::Done
+    }
+
+    fn frame_interval(&self) -> Option<Duration> {
+        Some(self::frame_interval(&self.core))
     }
 
     fn cpu_view(&self, cpu: &CpuId) -> CpuView {
@@ -470,6 +475,18 @@ fn caption(label: &str, snes: &Snes) -> String {
         "{label} @ {:02X}:{:04X}",
         snes.cpu.program_bank, snes.cpu.pc
     )
+}
+
+fn frame_interval(snes: &Snes) -> Duration {
+    const MASTER_CLOCK_HZ_NTSC: u64 = 21_477_272;
+    const MASTER_CLOCK_HZ_PAL: u64 = 21_281_370;
+
+    let clock_hz = match snes.mmu.cartridge.region().tv_system() {
+        crate::cartridge::TvSystem::Ntsc => MASTER_CLOCK_HZ_NTSC,
+        crate::cartridge::TvSystem::Pal => MASTER_CLOCK_HZ_PAL,
+    };
+    let nanos = snes.scheduler.cycles_per_frame() as u128 * 1_000_000_000 / clock_hz as u128;
+    Duration::from_nanos(nanos as u64)
 }
 
 const MAX_VIEW_FRAMES: usize = 64;
