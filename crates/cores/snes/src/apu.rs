@@ -88,8 +88,6 @@ impl<M: ApuMap> Apu<M> {
         #[cfg(feature = "debug")]
         self.access.record((MemKind::Spc, addr as u32), false);
 
-        tracing::trace!(addr = format!("{:04X}", addr), "APU read");
-
         match self.map.region(addr) {
             Region::Register => self.read_io(addr as u8),
             Region::Ipl if self.control.ipl_rom_enable() => IPL_ROM[(addr - 0xFFC0) as usize],
@@ -116,12 +114,6 @@ impl<M: ApuMap> Apu<M> {
     pub fn write(&mut self, addr: u16, value: u8) {
         #[cfg(feature = "debug")]
         self.access.record((MemKind::Spc, addr as u32), true);
-
-        tracing::trace!(
-            addr = format!("{:04X}", addr),
-            value = format!("{:02X}", value),
-            "APU write"
-        );
 
         match self.map.region(addr) {
             Region::Register => self.write_io(addr as u8, value),

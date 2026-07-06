@@ -130,6 +130,10 @@ impl Ppu {
         let mut count = 0;
 
         for index in 0..128 {
+            if !self.sprite_covers_line(index, y) {
+                continue;
+            }
+
             let sprite = self.sprite(index);
             if !sprite.in_range(y) {
                 continue;
@@ -168,9 +172,8 @@ impl Ppu {
                 tiles += 1;
 
                 let (tx, ty) = sprite.texel(sliver * 8, row);
-                let pixels = self
-                    .obj_tile(sprite.sub_tile(tx / 8, ty / 8))
-                    .decode_row(ty as usize % 8, 4);
+                let tile_base = self.obj.tile_addr(sprite.sub_tile(tx / 8, ty / 8)) * 2;
+                let pixels = self.tile_row(tile_base, ty as usize % 8, 4);
 
                 for i in 0..8u32 {
                     let x = base + i as i32;
@@ -238,10 +241,9 @@ impl Ppu {
                 let (px, py) = entry.texel(in_x + i, in_y, map.tile_px);
                 let index = entry.char_index(px, py);
                 if cached != Some((index, py)) {
-                    pixels = self
-                        .bg_tile(layer, index)
-                        .unwrap_or_default()
-                        .decode_row(py as usize % 8, bpp);
+                    let tile_base =
+                        self.bg_layers[layer].tileset_addr * 2 + index as u32 * (bpp as u32 * 8);
+                    pixels = self.tile_row(tile_base, py as usize % 8, bpp);
                     cached = Some((index, py));
                 }
 

@@ -1,0 +1,37 @@
+# syntax=docker/dockerfile:1
+
+# docker build -f docker/Dockerfile.web -t sly-web .
+# docker run --rm -p 8080:80 sly-web
+
+FROM rust:latest AS builder
+
+ARG WASM_BINDGEN_VERSION=0.2.126
+
+WORKDIR /app
+
+COPY rust-toolchain.toml .
+RUN rustup show
+
+RUN curl -sSL "https://github.com/rustwasm/wasm-bindgen/releases/download/${WASM_BINDGEN_VERSION}/wasm-bindgen-${WASM_BINDGEN_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+      | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/wasm-bindgen' \
+ && apt-get update && apt-get install -y --no-install-recommends binaryen \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo build --profile web-release --target wasm32-unknown-unknown -p debugger \
+ && wasm-bindgen target/wasm32-unknown-unknown/web-release/debugger.wasm \
+      --target web --no-typescript --out-dir /site --out-name debugger \
+ && wasm-opt -O3 \
+      --enable-reference-types --enable-bulk-memory --enable-mutable-globals \
+      --enable-sign-ext --enable-multivalue --enable-simd \
+      --enable-nontrapping-float-to-int --enable-threads \
+      -o /site/debugger_bg.wasm /site/debugger_bg.wasm \
+ && cp frontends/debugger-web/index.html /site/index.html
+
+FROM nginx:alpine
+COPY --from=builder /site /usr/share/nginx/html
+EXPOSE 80

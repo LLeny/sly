@@ -167,6 +167,31 @@ impl Ppu {
         tile
     }
 
+    pub(crate) fn tile_row(&self, base: u32, y: usize, bpp: u8) -> [u8; 8] {
+        let mut row = [0u8; 8];
+
+        for pair in 0..(bpp as usize / 2) {
+            let plane = base + (pair * 16 + y * 2) as u32;
+            let low = self.vram.byte(plane);
+            let high = self.vram.byte(plane + 1);
+
+            for (x, pixel) in row.iter_mut().enumerate() {
+                let bit0 = (low >> (7 - x)) & 1;
+                let bit1 = (high >> (7 - x)) & 1;
+                *pixel |= (bit1 << 1 | bit0) << (pair * 2);
+            }
+        }
+
+        row
+    }
+
+    pub(crate) fn sprite_covers_line(&self, index: u8, y: u32) -> bool {
+        let extra = self.oam.byte(512 + index as usize / 4) >> ((index as usize % 4) * 2);
+        let (_, height) = self.obj.sprite_size.dimensions(extra & 2 != 0);
+        let sprite_y = self.oam.byte(index as usize * 4 + 1);
+        (y + 256 - sprite_y as u32) & 0xFF < height
+    }
+
     pub fn bg_palette(&self, layer: usize, bpp: u8, palette: usize) -> (usize, usize) {
         match bpp {
             2 => {

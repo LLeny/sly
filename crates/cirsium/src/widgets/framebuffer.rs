@@ -14,7 +14,7 @@ pub struct FramebufferView {
     pub image: Option<Arc<RenderImage>>,
 }
 
-const SCALE: u32 = 4;
+const SCALE: u32 = 1;
 
 impl From<debugger_model::Framebuffer> for FramebufferView {
     fn from(fb: debugger_model::Framebuffer) -> Self {

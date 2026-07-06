@@ -41,11 +41,8 @@ impl MemoryMap for CartridgeMap {
 
 /// Translate a cartridge address to a ROM byte index per the map mode.
 fn map_rom(cartridge: &Cartridge, bank: u8, offset: u16) -> AddressSpace {
-    let rom = &cartridge.rom;
-
-    let map_mode = match cartridge.memory_map() {
-        Ok(mode) => mode.map_mode(),
-        Err(_) => return AddressSpace::Unmapped,
+    let Some(map_mode) = cartridge.map_mode() else {
+        return AddressSpace::Unmapped;
     };
 
     let rom_addr = match map_mode {
@@ -55,5 +52,8 @@ fn map_rom(cartridge: &Cartridge, bank: u8, offset: u16) -> AddressSpace {
         _ => (((bank & 0x7F) as usize) << 15) | (offset & 0x7FFF) as usize,
     };
 
-    AddressSpace::Rom(rom_addr % rom.len())
+    AddressSpace::Rom(match cartridge.rom_mask() {
+        Some(mask) => rom_addr & mask,
+        None => rom_addr % cartridge.rom.len(),
+    })
 }

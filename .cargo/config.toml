@@ -1,2 +1,9 @@
+[target.wasm32-unknown-unknown]
+rustflags = [
+  "-C", "link-args=-z stack-size=33554432",
+  "-C", "overflow-checks=false",
+  "-C", "target-feature=+bulk-memory,+multivalue,+mutable-globals,+sign-ext,+simd128",
+]
+
 [env]
 DEVELOPER_DIR = "/Applications/Xcode.app/Contents/Developer"

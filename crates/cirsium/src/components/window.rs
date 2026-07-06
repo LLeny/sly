@@ -1,22 +1,19 @@
 use gpui::prelude::*;
-use gpui::{
-    App, ClickEvent, Div, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window, div, px,
-    svg,
-};
+
+#[cfg(not(target_family = "wasm"))]
+use gpui::MouseButton;
+use gpui::{App, ClickEvent, Div, FontWeight, Hsla, SharedString, Stateful, Window, div, px, svg};
 
 #[cfg(not(target_os = "macos"))]
 use crate::assets::icon;
 use crate::theme::Theme;
 
 pub fn title_bar(theme: &Theme, title: impl Into<SharedString>, controls: impl IntoElement) -> Div {
-    let leading = div()
-        .flex_1()
-        .h_full()
-        .flex()
-        .items_center()
-        .gap_2()
-        .px_3()
-        .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move());
+    let leading = div().flex_1().h_full().flex().items_center().gap_2().px_3();
+
+    #[cfg(not(target_family = "wasm"))]
+    let leading =
+        leading.on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move());
 
     #[cfg(not(target_os = "macos"))]
     let leading = leading.child(svg().path(icon::LOGO).size(px(15.)).text_color(theme.logo));
@@ -34,7 +31,7 @@ pub fn title_bar(theme: &Theme, title: impl Into<SharedString>, controls: impl I
 
     let trailing = div().flex().items_center().h_full().child(controls);
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(all(not(target_os = "macos"), not(target_family = "wasm")))]
     let trailing = trailing
         .child(self::window_button(
             theme,

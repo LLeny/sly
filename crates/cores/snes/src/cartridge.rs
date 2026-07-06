@@ -7,12 +7,34 @@ pub const TITLE_LENGTH: usize = 21;
 pub struct Cartridge {
     pub rom: Vec<u8>,
     header_offset: usize,
+    map_mode: Option<MapMode>,
+    rom_mask: Option<usize>,
 }
 
 impl Cartridge {
     pub fn new(rom: Vec<u8>) -> Result<Self, SnesError> {
         let header_offset = Self::search_header(&rom).ok_or(SnesError::InvalidRomHeader)?;
-        Ok(Self { rom, header_offset })
+        let mut cartridge = Self {
+            rom,
+            header_offset,
+            map_mode: None,
+            rom_mask: None,
+        };
+        cartridge.map_mode = cartridge.memory_map().ok().map(|map| map.map_mode());
+        cartridge.rom_mask = cartridge
+            .rom
+            .len()
+            .is_power_of_two()
+            .then(|| cartridge.rom.len() - 1);
+        Ok(cartridge)
+    }
+
+    pub fn map_mode(&self) -> Option<MapMode> {
+        self.map_mode
+    }
+
+    pub fn rom_mask(&self) -> Option<usize> {
+        self.rom_mask
     }
 
     pub fn title(&self) -> String {

@@ -17,7 +17,7 @@ use cirsium::widgets::{
 };
 use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
 use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
-use frontend_model::{ComponentManifest, DockLocation, PanelKind, WorkspaceIcon};
+use frontend_model::{ComponentManifest, DockLocation, PanelKind, RefreshPolicy, WorkspaceIcon};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, Div, Entity, MouseDownEvent, Pixels,
@@ -109,6 +109,7 @@ pub(crate) struct Debugger {
     log_filter_input: Entity<TextInput>,
     collapsed: HashSet<SharedString>,
     settings: Option<Point<Pixels>>,
+    live_refresh: bool,
     workspace: SharedString,
     running: bool,
     run_task: Option<Task<()>>,
@@ -199,6 +200,7 @@ impl Debugger {
             panes,
             collapsed: HashSet::from([SharedString::from(LogWidget::ID)]),
             settings: None,
+            live_refresh: true,
             workspace,
             running: false,
             run_task: None,
@@ -259,45 +261,65 @@ impl Debugger {
         self.framebuffer = self.target.framebuffer().map(Into::into);
     }
 
-    fn refresh_panes(&mut self, mode: CpuRefresh, cx: &mut Context<Self>) {
-        for pane in &mut self.panes {
-            Self::refresh_pane_view(self.target.as_ref(), pane, mode);
-        }
-        self.mmio_view = self.target.mmio_view().into();
-        self.dma_view = self.target.dma_view().into();
-        self.refresh_framebuffer(cx);
-
-        if self.video_panes_visible() {
-            self.refresh_video_panes(cx);
-        }
-    }
-
-    fn video_panes_visible(&self) -> bool {
+    fn wants_refresh(&self, live: bool, kind: impl Fn(&PanelKind) -> bool) -> bool {
         self.manifest.in_workspace(&self.workspace).any(|panel| {
-            matches!(
-                panel.kind,
-                PanelKind::Palette
-                    | PanelKind::Ppu
-                    | PanelKind::Tileset
-                    | PanelKind::Tilemap
-                    | PanelKind::Sprites
-            )
+            kind(&panel.kind)
+                && (!live || self.live_refresh || panel.refresh == RefreshPolicy::Continuous)
         })
     }
 
-    fn refresh_video_panes(&mut self, cx: &mut Context<Self>) {
-        self.palette_view = self.target.palette_view().into();
-        self.ppu_view = self.target.ppu_view().into();
-        self.tileset_layers = self
-            .target
-            .tileset_layers()
-            .into_iter()
-            .map(Into::into)
-            .collect();
+    fn refresh_panes(&mut self, mode: CpuRefresh, live: bool, cx: &mut Context<Self>) {
+        for ix in 0..self.panes.len() {
+            let id = self.panes[ix].id.clone();
+            let visible = self.wants_refresh(live, |kind| {
+                matches!(
+                    kind,
+                    PanelKind::Registers { cpu } | PanelKind::Disassembly { cpu }
+                        if **cpu == *id.as_str()
+                )
+            });
 
-        self.refresh_tileset(cx);
-        self.refresh_tilemap(cx);
-        self.refresh_sprites(cx);
+            if visible {
+                Self::refresh_pane_view(self.target.as_ref(), &mut self.panes[ix], mode);
+            }
+        }
+
+        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Mmio)) {
+            self.mmio_view = self.target.mmio_view().into();
+        }
+        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Dma)) {
+            self.dma_view = self.target.dma_view().into();
+        }
+
+        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Framebuffer)) {
+            self.refresh_framebuffer(cx);
+        }
+
+        self.refresh_video_panes(live, cx);
+    }
+
+    fn refresh_video_panes(&mut self, live: bool, cx: &mut Context<Self>) {
+        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Palette)) {
+            self.palette_view = self.target.palette_view().into();
+        }
+        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Ppu)) {
+            self.ppu_view = self.target.ppu_view().into();
+        }
+        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tileset)) {
+            self.tileset_layers = self
+                .target
+                .tileset_layers()
+                .into_iter()
+                .map(Into::into)
+                .collect();
+            self.refresh_tileset(cx);
+        }
+        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tilemap)) {
+            self.refresh_tilemap(cx);
+        }
+        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Sprites)) {
+            self.refresh_sprites(cx);
+        }
     }
 
     fn track_changes(
@@ -421,9 +443,7 @@ impl Debugger {
 
     fn set_workspace(&mut self, id: SharedString, cx: &mut Context<Self>) {
         self.workspace = id;
-        if self.video_panes_visible() {
-            self.refresh_video_panes(cx);
-        }
+        self.refresh_panes(CpuRefresh::Highlight, false, cx);
         cx.notify();
     }
 
@@ -456,6 +476,7 @@ impl Debugger {
             }));
         } else {
             self.run_task = None;
+            self.refresh_panes(CpuRefresh::Highlight, false, cx);
         }
 
         cx.notify();
@@ -471,10 +492,10 @@ impl Debugger {
             self.target.debug_run_frame(self.breakpoints.marks())
         };
 
-        self.refresh_panes(CpuRefresh::Highlight, cx);
+        let keep_going = outcome == RunOutcome::Done;
+        self.refresh_panes(CpuRefresh::Highlight, keep_going, cx);
         self.follow_memory();
 
-        let keep_going = outcome == RunOutcome::Done;
         if !keep_going {
             self.running = false;
         }
@@ -495,7 +516,7 @@ impl Debugger {
             self.target.debug_step()
         };
 
-        self.refresh_panes(CpuRefresh::Highlight, cx);
+        self.refresh_panes(CpuRefresh::Highlight, false, cx);
         self.set_state(if ok { "paused" } else { "unimplemented op" });
         self.running = false;
         self.run_task = None;
@@ -507,7 +528,7 @@ impl Debugger {
     fn reset(&mut self, cx: &mut Context<Self>) {
         self.target.reset();
 
-        self.refresh_panes(CpuRefresh::Baseline, cx);
+        self.refresh_panes(CpuRefresh::Baseline, false, cx);
         self.set_state("reset");
         self.running = false;
         self.run_task = None;
@@ -810,6 +831,11 @@ impl Debugger {
 
     fn toggle_show_log(&mut self, cx: &mut Context<Self>) {
         self.show_log = !self.show_log;
+        cx.notify();
+    }
+
+    fn toggle_live_refresh(&mut self, cx: &mut Context<Self>) {
+        self.live_refresh = !self.live_refresh;
         cx.notify();
     }
 
@@ -1329,6 +1355,15 @@ impl Render for Debugger {
                     "Show bytes",
                     CheckboxSize::Small,
                     cx.listener(|this, _, _, cx| this.toggle_bytes(cx)),
+                ))
+                .child(div().text_xs().text_color(t.text_muted).child("PANELS"))
+                .child(checkbox(
+                    t,
+                    "set-live-refresh",
+                    self.live_refresh,
+                    "Live refresh while running",
+                    CheckboxSize::Small,
+                    cx.listener(|this, _, _, cx| this.toggle_live_refresh(cx)),
                 ))
                 .child(div().text_xs().text_color(t.text_muted).child("LOG"))
                 .child(checkbox(
