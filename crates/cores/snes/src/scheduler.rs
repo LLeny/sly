@@ -123,11 +123,15 @@ impl<M: MemoryMap> Scheduler<M> {
     }
 }
 
-pub(crate) fn spc700_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
+pub(crate) fn spc700_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: u64) {
     #[cfg(feature = "debug")]
     {
         snes.executing = crate::Component::Spc;
     }
 
-    crate::apu::spc700::step(&mut snes.apu);
+    let cycles = crate::apu::spc700::step(&mut snes.apu);
+    snes.scheduler.schedule_event(
+        deadline + cycles * crate::apu::SNES_CYCLES_PER_SPC700_CYCLE,
+        self::spc700_tick,
+    );
 }

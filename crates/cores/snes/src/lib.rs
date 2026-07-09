@@ -31,8 +31,6 @@ use crate::mmio::dma::Dma;
 use crate::ppu::Ppu;
 use crate::scheduler::Scheduler;
 
-pub const CYCLES_PER_STEP: u64 = 30; // TODO: CYCLE ACCURACY
-
 #[cfg(feature = "debug")]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Component {
@@ -101,7 +99,7 @@ impl<M: MemoryMap + 'static> Snes<M> {
 
         self.scheduler = Scheduler::new(tv_system);
         self.scheduler
-            .schedule_periodic(apu::SNES_CYCLES_PER_SPC700_CYCLE, scheduler::spc700_tick);
+            .schedule_event(apu::SNES_CYCLES_PER_SPC700_CYCLE, scheduler::spc700_tick);
         self.scheduler.schedule_periodic_at(
             scheduler::VBLANK_START_SCANLINE * scheduler::MASTER_CLOCKS_PER_SCANLINE,
             self.scheduler.cycles_per_frame(),
@@ -136,9 +134,10 @@ impl<M: MemoryMap + 'static> Snes<M> {
             self.executing = Component::Cpu;
         }
 
+        let clocks_before = self.mmu.clocks;
         cpu::step(self);
 
-        self.scheduler.advance_by(CYCLES_PER_STEP);
+        self.scheduler.advance_by(self.mmu.clocks - clocks_before);
         while let Some((deadline, callback)) = self.scheduler.pop_current_event() {
             callback(self, deadline);
         }
