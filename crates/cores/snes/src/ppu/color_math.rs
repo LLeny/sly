@@ -1,4 +1,7 @@
-use crate::ppu::regs::{ColorMathIntensity, ColorMathOperation, LayerMask};
+use crate::ppu::cgram::{CHANNEL_MASK, CHANNEL_SHIFTS};
+use crate::ppu::regs::{
+    ColorMathAddend, ColorMathIntensity, ColorMathOperation, ColorSource, LayerMask, WindowRegion,
+};
 
 #[derive(Default)]
 pub struct ColorMath {
@@ -6,34 +9,39 @@ pub struct ColorMath {
     pub intensity: ColorMathIntensity,
     pub operation: ColorMathOperation,
     pub fixed_color: u16,
+    pub color_source: ColorSource,
+    pub addend: ColorMathAddend,
+    pub sub_screen_region: WindowRegion,
+    pub main_screen_region: WindowRegion,
 }
 
 impl ColorMath {
     pub(crate) fn set_fixed_color(&mut self, value: u8) {
-        let intensity = (value & 0x1F) as u16;
-        for (channel, shift) in [(0x20, 0u16), (0x40, 5), (0x80, 10)] {
-            if value & channel != 0 {
-                self.fixed_color = self.fixed_color & !(0x1F << shift) | intensity << shift;
+        let intensity = value as u16 & CHANNEL_MASK;
+
+        for (select, shift) in [0x20, 0x40, 0x80].into_iter().zip(CHANNEL_SHIFTS) {
+            if value & select != 0 {
+                self.fixed_color = self.fixed_color & !(CHANNEL_MASK << shift) | intensity << shift;
             }
         }
     }
 
-    pub(crate) fn apply(&self, color: u16) -> u16 {
+    pub(crate) fn apply(&self, color: u16, addend: u16, halve: bool) -> u16 {
         let mut result = 0;
 
-        for shift in [0u16, 5, 10] {
-            let main = color >> shift & 0x1F;
-            let fixed = self.fixed_color >> shift & 0x1F;
+        for shift in CHANNEL_SHIFTS {
+            let main = color >> shift & CHANNEL_MASK;
+            let addend = addend >> shift & CHANNEL_MASK;
 
             let mut channel = match self.operation {
-                ColorMathOperation::Add => main + fixed,
-                ColorMathOperation::Subtract => main.saturating_sub(fixed),
+                ColorMathOperation::Add => main + addend,
+                ColorMathOperation::Subtract => main.saturating_sub(addend),
             };
-            if let ColorMathIntensity::Half = self.intensity {
+            if halve {
                 channel /= 2;
             }
 
-            result |= channel.min(31) << shift;
+            result |= channel.min(CHANNEL_MASK) << shift;
         }
 
         result

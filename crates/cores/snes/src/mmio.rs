@@ -18,8 +18,8 @@ use crate::mmio::regs::{
     NmiTimerEnable, VblankFlagCpuVersion,
 };
 use crate::ppu::regs::{
-    Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, CGWSEL, COLDATA,
-    ColorMathControl, OAMADDH, OAMADDL, OAMDATA, OAMDATAREAD, RDCGRAM, RDVRAMH, RDVRAML, SETINI,
+    Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, COLDATA, ColorMathControl,
+    ColorMathSelect, OAMADDH, OAMADDL, OAMDATA, OAMDATAREAD, RDCGRAM, RDVRAMH, RDVRAML, SETINI,
     SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL,
     VramControl,
 };
@@ -296,14 +296,7 @@ impl<M: MemoryMap> Snes<M> {
             TS => self.ppu.sub_screen = value.into(),
             ColorMathControl::ADDRESS => ColorMathControl::write(self, value),
             COLDATA => self.ppu.color_math.set_fixed_color(value),
-            CGWSEL => {
-                if value & 0x01 != 0 {
-                    tracing::error!(
-                        value = format!("{:02X}", value),
-                        "CGWSEL: direct color mode enabled (unimplemented)"
-                    );
-                }
-            }
+            ColorMathSelect::ADDRESS => ColorMathSelect::write(self, value),
             SETINI => {
                 if value & 0x40 != 0 {
                     tracing::error!(
@@ -367,6 +360,7 @@ impl<M: MemoryMap> Snes<M> {
             VMDATAH | RDVRAMH => self.ppu.vram.peek_high(),
             TM => self.ppu.main_screen.raw(),
             TS => self.ppu.sub_screen.raw(),
+            ColorMathSelect::ADDRESS => ColorMathSelect::peek(self),
             ColorMathControl::ADDRESS => ColorMathControl::peek(self),
             NmiTimerEnable::ADDRESS => NmiTimerEnable::peek(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::peek(self),

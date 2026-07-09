@@ -18,7 +18,6 @@ pub(crate) const TS: u16 = 0x212D;
 pub(crate) const COLDATA: u16 = 0x2132;
 
 // TODO
-pub(crate) const CGWSEL: u16 = 0x2130;
 pub(crate) const SETINI: u16 = 0x2133;
 
 pub(crate) const VMADDL: u16 = 0x2116;
@@ -44,7 +43,6 @@ register_mmio_raw! {
     RDVRAMH => "RDVRAMH",
     TM => "TM",
     TS => "TS",
-    CGWSEL => "CGWSEL",
     COLDATA => "COLDATA",
     SETINI => "SETINI",
     0x210D => "BG1HOFS",
@@ -310,16 +308,19 @@ impl TilemapAddrAndSize {
 pub struct LayerMask(u8);
 
 impl LayerMask {
+    pub const OBJ: u8 = 4;
+    pub const BACKDROP: u8 = 5;
+
+    pub fn layer(self, index: u8) -> bool {
+        self.0 & 1 << index != 0
+    }
+
     pub fn bg(self, layer: usize) -> bool {
-        self.0 & 1 << layer != 0
+        self.layer(layer as u8)
     }
 
     pub fn obj(self) -> bool {
-        self.0 & 1 << 4 != 0
-    }
-
-    pub fn backdrop(self) -> bool {
-        self.0 & 1 << 5 != 0
+        self.layer(Self::OBJ)
     }
 
     pub fn raw(self) -> u8 {
@@ -347,6 +348,81 @@ pub enum ColorMathIntensity {
     #[default]
     Full = 0,
     Half = 1,
+}
+
+#[derive(BitEnum, Clone, Copy, Default)]
+pub enum ColorSource {
+    #[fallback]
+    #[default]
+    Palette = 0,
+    Direct = 1,
+}
+
+#[derive(BitEnum, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ColorMathAddend {
+    #[fallback]
+    #[default]
+    FixedColor = 0,
+    SubScreen = 1,
+}
+
+#[derive(BitEnum, Clone, Copy, Default)]
+pub enum WindowRegion {
+    #[fallback]
+    #[default]
+    Nowhere = 0,
+    OutsideWindow = 1,
+    InsideWindow = 2,
+    Everywhere = 3,
+}
+
+impl WindowRegion {
+    pub fn contains(self, in_window: bool) -> bool {
+        match self {
+            Self::Nowhere => false,
+            Self::OutsideWindow => !in_window,
+            Self::InsideWindow => in_window,
+            Self::Everywhere => true,
+        }
+    }
+}
+
+register_mmio! {
+    /// CGWSEL
+    pub struct ColorMathSelect @ 0x2130 {
+        #[bits(0)]
+        pub color_source: ColorSource,
+
+        #[bits(1)]
+        pub addend: ColorMathAddend,
+
+        #[bits(4..=5)]
+        pub sub_screen_region: WindowRegion,
+
+        #[bits(6..=7)]
+        pub main_screen_region: WindowRegion,
+    }
+}
+
+impl MmioReg for ColorMathSelect {
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
+        let reg = Self::from_raw(value);
+        let math = &mut snes.ppu.color_math;
+        math.color_source = reg.color_source();
+        math.addend = reg.addend();
+        math.sub_screen_region = reg.sub_screen_region();
+        math.main_screen_region = reg.main_screen_region();
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        let math = &snes.ppu.color_math;
+        let mut reg = Self::default();
+        reg.set_color_source(math.color_source);
+        reg.set_addend(math.addend);
+        reg.set_sub_screen_region(math.sub_screen_region);
+        reg.set_main_screen_region(math.main_screen_region);
+        reg.raw()
+    }
 }
 
 register_mmio! {

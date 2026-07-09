@@ -1,14 +1,19 @@
-use crate::ppu::regs::{BackgroundMode, Priority};
+use crate::ppu::regs::{
+    BackgroundMode, ColorMathAddend, ColorMathIntensity, ColorSource, LayerMask, Priority,
+};
 use crate::ppu::{Ppu, SCREEN_WIDTH, Sprite, TilemapEntry, cgram};
 
 #[derive(Clone, Copy)]
 struct Pixel {
-    addr: u8,
+    word: u16,
     layer: u8,
+    math: bool,
 }
 
-const OBJ: u8 = 4;
-const BACKDROP: u8 = 5;
+const OBJ: u8 = LayerMask::OBJ;
+const BACKDROP: u8 = LayerMask::BACKDROP;
+
+const FIRST_MATH_OBJ_PALETTE: u8 = 4;
 
 type Line = [Option<Pixel>; SCREEN_WIDTH as usize];
 type ObjLine = [Option<(u8, u8)>; SCREEN_WIDTH as usize];
@@ -22,41 +27,78 @@ enum Layer {
 impl Ppu {
     pub fn render_scanline(&mut self, scanline: usize) {
         let y = scanline as u32;
-        let mut line: Line = [None; SCREEN_WIDTH as usize];
-        let obj = if self.main_screen.obj() {
+        let obj = if self.main_screen.obj() || self.sub_screen.obj() {
             self.obj_line(y)
         } else {
             [None; SCREEN_WIDTH as usize]
         };
 
+        let main = self.composite(self.main_screen, &obj, y);
+        let sub = if self.color_math.addend == ColorMathAddend::SubScreen
+            && self.color_math.layers.raw() != 0
+        {
+            Some(self.composite(self.sub_screen, &obj, y))
+        } else {
+            None
+        };
+
+        self.resolve(scanline, &main, sub.as_ref());
+    }
+
+    fn composite(&self, screen: LayerMask, obj: &ObjLine, y: u32) -> Line {
+        let mut line: Line = [None; SCREEN_WIDTH as usize];
+
         for &layer in self.layer_order() {
             match layer {
                 Layer::Bg(bg, priority) => {
-                    if self.main_screen.bg(bg) {
+                    if screen.bg(bg) {
                         self.draw_bg(bg, priority, y, &mut line);
                     }
                 }
-                Layer::Obj(priority) => Self::draw_obj(priority, &obj, &mut line),
+                Layer::Obj(priority) => {
+                    if screen.obj() {
+                        self.draw_obj(priority, obj, &mut line);
+                    }
+                }
             }
         }
 
-        self.resolve(scanline, &line);
+        line
     }
 
-    // TODO
-    fn resolve(&mut self, scanline: usize, line: &Line) {
+    fn resolve(&mut self, scanline: usize, main: &Line, sub: Option<&Line>) {
+        let math = &self.color_math;
+
+        // TODO: windows
+        let in_window = false;
+        let force_black = math.main_screen_region.contains(in_window);
+        let math_masked = math.sub_screen_region.contains(in_window);
+
+        let backdrop = Pixel {
+            word: self.cgram.word(0),
+            layer: BACKDROP,
+            math: true,
+        };
+
         let row =
             &mut self.frame_buffer[scanline * SCREEN_WIDTH as usize..][..SCREEN_WIDTH as usize];
 
-        for (dst, pixel) in row.iter_mut().zip(line) {
-            let pixel = pixel.unwrap_or(Pixel {
-                addr: 0,
-                layer: BACKDROP,
-            });
+        for (x, (dst, pixel)) in row.iter_mut().zip(main).enumerate() {
+            let pixel = pixel.unwrap_or(backdrop);
+            let mut word = if force_black { 0 } else { pixel.word };
 
-            let mut word = self.cgram.word(pixel.addr);
-            if pixel.layer == BACKDROP && self.color_math.layers.backdrop() {
-                word = self.color_math.apply(word);
+            if pixel.math && math.layers.layer(pixel.layer) && !math_masked {
+                let (addend, transparent_sub) = match (math.addend, sub) {
+                    (ColorMathAddend::SubScreen, Some(line)) => match line[x] {
+                        Some(sub_pixel) => (sub_pixel.word, false),
+                        None => (math.fixed_color, true),
+                    },
+                    _ => (math.fixed_color, false),
+                };
+                let halve = matches!(math.intensity, ColorMathIntensity::Half)
+                    && !force_black
+                    && !transparent_sub;
+                word = math.apply(word, addend, halve);
             }
 
             *dst = cgram::rgb(word);
@@ -196,13 +238,17 @@ impl Ppu {
         line
     }
 
-    fn draw_obj(priority: u8, obj: &ObjLine, line: &mut Line) {
+    fn draw_obj(&self, priority: u8, obj: &ObjLine, line: &mut Line) {
         for (slot, &pixel) in line.iter_mut().zip(obj) {
             if slot.is_none()
                 && let Some((p, addr)) = pixel
                 && p == priority
             {
-                *slot = Some(Pixel { addr, layer: OBJ });
+                *slot = Some(Pixel {
+                    word: self.cgram.word(addr),
+                    layer: OBJ,
+                    math: addr >= Self::obj_palette_addr(FIRST_MATH_OBJ_PALETTE, 0),
+                });
             }
         }
     }
@@ -212,6 +258,7 @@ impl Ppu {
             return;
         };
 
+        let direct = bpp == 8 && matches!(self.color_math.color_source, ColorSource::Direct);
         let sy = (y + map.scroll_y) % (map.height * map.tile_px);
         let (ty, in_y) = (sy / map.tile_px, sy % map.tile_px);
 
@@ -249,9 +296,16 @@ impl Ppu {
 
                 let color = pixels[px as usize % 8];
                 if color != 0 {
+                    let word = if direct {
+                        cgram::direct_color(entry.palette_selection, color)
+                    } else {
+                        self.cgram.word((base + color as usize) as u8)
+                    };
+
                     *slot = Some(Pixel {
-                        addr: (base + color as usize) as u8,
+                        word,
                         layer: layer as u8,
+                        math: true,
                     });
                 }
             }
