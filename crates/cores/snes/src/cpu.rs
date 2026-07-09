@@ -3,6 +3,7 @@ mod decoder;
 pub mod disasm;
 mod interpreter;
 mod operand;
+mod timing;
 
 pub use disasm::disassemble_at;
 
@@ -123,6 +124,24 @@ pub(crate) struct Decoded {
     pub form: decoder::Form,
 }
 
+/// Whether a branch with `mnemonic` redirects under the given flags.
+pub(crate) fn branch_taken(flags: &Flags, mnemonic: decoder::Mnemonic) -> bool {
+    use decoder::Mnemonic as M;
+
+    match mnemonic {
+        M::Bra | M::Brl => true,
+        M::Beq => flags.zero(),
+        M::Bne => !flags.zero(),
+        M::Bcs => flags.carry(),
+        M::Bcc => !flags.carry(),
+        M::Bmi => flags.negative(),
+        M::Bpl => !flags.negative(),
+        M::Bvs => flags.overflow(),
+        M::Bvc => !flags.overflow(),
+        _ => unreachable!("branch mnemonic"),
+    }
+}
+
 /// Resolve an opcode byte to its instruction, id, mnemonic and form.
 pub(crate) fn decode(opcode: u8, combo: usize) -> Decoded {
     let inst = decoder::Instruction(opcode);
@@ -158,10 +177,12 @@ pub fn effective_address<M: MemoryMap>(snes: &Snes<M>, pc: u16) -> Option<Addres
     addressing::resolve(snes, form, arg).map(|(lo, _)| lo)
 }
 
-pub fn step<M: MemoryMap>(snes: &mut Snes<M>) {
+/// Execute one instruction and return the CPU cycles it took.
+pub fn step<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
     if snes.irq.take_nmi() {
+        let cycles = timing::interrupt_cycles(&snes.cpu);
         self::service_nmi(snes);
-        return;
+        return cycles;
     }
 
     let (bank, pc, combo) = {
@@ -183,6 +204,8 @@ pub fn step<M: MemoryMap>(snes: &mut Snes<M>) {
         operand::fetch_arg(inst, mnemonic, form, pc as u64, &reader)
     };
 
+    let cycles = timing::cycles(snes, mnemonic, form, arg);
+
     #[cfg(feature = "debug")]
     snes.mmu.access.resume();
 
@@ -192,6 +215,8 @@ pub fn step<M: MemoryMap>(snes: &mut Snes<M>) {
 
     #[cfg(feature = "debug")]
     snes.mmu.access.pause();
+
+    cycles
 }
 
 pub(crate) fn service_nmi<M: MemoryMap>(snes: &mut Snes<M>) {

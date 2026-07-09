@@ -3,6 +3,17 @@ use super::operand::Arg;
 use crate::Snes;
 use crate::mmio::{Address, MemoryMap};
 
+pub(super) fn direct<M: MemoryMap>(snes: &Snes<M>, dp: u8, index: u16) -> Address {
+    let d = snes.cpu.direct_page;
+    let sum = (dp as u16).wrapping_add(index);
+    let offset = if snes.cpu.emulation && d & 0x00ff == 0 {
+        (d & 0xff00) | (sum & 0x00ff)
+    } else {
+        d.wrapping_add(sum)
+    };
+    Address::new(0, offset)
+}
+
 pub(crate) fn resolve<M: MemoryMap>(
     snes: &Snes<M>,
     form: Form,
@@ -16,16 +27,7 @@ pub(crate) fn resolve<M: MemoryMap>(
     let abs_idx = |addr: u16, idx: u16| {
         Address::from_24bit(Address::new(dbr, addr).as_24bit().wrapping_add(idx as u32))
     };
-    let direct = |dp: u8, index: u16| {
-        let d = snes.cpu.direct_page;
-        let sum = (dp as u16).wrapping_add(index);
-        let offset = if snes.cpu.emulation && d & 0x00ff == 0 {
-            (d & 0xff00) | (sum & 0x00ff)
-        } else {
-            d.wrapping_add(sum)
-        };
-        Address::new(0, offset)
-    };
+    let direct = |dp: u8, index: u16| self::direct(snes, dp, index);
     let dptr16 = |dp: u8, index: u16| snes.peek16(direct(dp, index));
     let dptr24 = |dp: u8| snes.peek24(direct(dp, 0));
 

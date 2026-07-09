@@ -162,15 +162,14 @@ fn print_op(opcode: u8, report: &OpReport) {
             let name_w = bad.iter().map(|f| f.name.len()).max().unwrap_or(0);
 
             for field in bad {
-                let width = field.bytes as usize * 2 + 2;
-                let got = format!("{:#0width$X}", field.got);
+                let got = field.render(field.got);
 
                 println!(
                     "        {:<name_w$}  {} {} {}",
                     field.name,
                     format!("{got:<6}").red(),
                     "vs".dimmed(),
-                    format!("{:#0width$X}", field.want).green(),
+                    field.render(field.want).green(),
                 );
             }
         }

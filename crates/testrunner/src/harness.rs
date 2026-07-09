@@ -3,6 +3,7 @@ use std::path::Path;
 
 use anyhow::Context;
 use serde::Deserialize;
+use serde::de::IgnoredAny;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Regs {
@@ -62,13 +63,26 @@ pub struct Test {
     pub initial: State,
     #[serde(rename = "final")]
     pub expected: State,
+    pub cycles: Option<Vec<IgnoredAny>>,
+}
+
+impl Test {
+    fn expected_cycles(&self) -> Option<u64> {
+        self.cycles.as_ref().map(|cycles| cycles.len() as u64)
+    }
 }
 
 pub trait TestCore {
     fn load(&mut self, initial: &State);
-    fn step(&mut self);
+    fn step(&mut self) -> u64;
     fn regs(&self) -> Regs;
     fn peek(&self, addr: u32) -> u8;
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Notation {
+    Hex { bytes: u8 },
+    Dec,
 }
 
 #[derive(Debug)]
@@ -76,12 +90,19 @@ pub struct Field {
     pub name: String,
     pub got: u64,
     pub want: u64,
-    pub bytes: u8,
+    notation: Notation,
 }
 
 impl Field {
     pub fn matched(&self) -> bool {
         self.got == self.want
+    }
+
+    pub fn render(&self, value: u64) -> String {
+        match self.notation {
+            Notation::Hex { bytes } => format!("{value:#0width$X}", width = bytes as usize * 2 + 2),
+            Notation::Dec => value.to_string(),
+        }
     }
 }
 
@@ -118,18 +139,18 @@ pub fn run_file(
     for test in tests.iter().take(limit.unwrap_or(usize::MAX)) {
         core.load(&test.initial);
 
-        let ran = panic::catch_unwind(AssertUnwindSafe(|| core.step())).is_ok();
-        if !ran {
+        let Ok(cycles) = panic::catch_unwind(AssertUnwindSafe(|| core.step())) else {
             let outcome = Outcome::Panicked {
                 test: test.name.clone(),
             };
             return Ok(OpReport { passed, outcome });
-        }
+        };
 
-        if self::state_matches(core, &test.expected) {
+        let cycles_ok = test.expected_cycles().is_none_or(|want| cycles == want);
+        if self::state_matches(core, &test.expected) && cycles_ok {
             passed += 1;
         } else {
-            let fields = self::compare(core, &test.expected);
+            let fields = self::compare(core, test, cycles);
             let outcome = Outcome::Failed {
                 test: test.name.clone(),
                 fields,
@@ -148,7 +169,8 @@ fn state_matches(core: &dyn TestCore, want: &State) -> bool {
     core.regs() == want.regs() && want.ram.iter().all(|&(addr, val)| core.peek(addr) == val)
 }
 
-fn compare(core: &dyn TestCore, want: &State) -> Vec<Field> {
+fn compare(core: &dyn TestCore, test: &Test, cycles: u64) -> Vec<Field> {
+    let want = &test.expected;
     let got = core.regs();
     let expect = want.regs();
 
@@ -156,7 +178,7 @@ fn compare(core: &dyn TestCore, want: &State) -> Vec<Field> {
         name: name.into(),
         got,
         want,
-        bytes,
+        notation: Notation::Hex { bytes },
     };
 
     let mut fields = vec![
@@ -177,7 +199,16 @@ fn compare(core: &dyn TestCore, want: &State) -> Vec<Field> {
             name: format!("mem[{addr:#08X}]"),
             got: core.peek(addr) as u64,
             want: want as u64,
-            bytes: 1,
+            notation: Notation::Hex { bytes: 1 },
+        });
+    }
+
+    if let Some(want) = test.expected_cycles() {
+        fields.push(Field {
+            name: "cycles".into(),
+            got: cycles,
+            want,
+            notation: Notation::Dec,
         });
     }
 

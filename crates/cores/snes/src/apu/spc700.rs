@@ -2,6 +2,7 @@ pub mod regs;
 
 mod decoder;
 mod interpreter;
+mod timing;
 
 pub use regs::{Flags, Spc700};
 
@@ -24,8 +25,10 @@ impl<M: ApuMap> decoder::DisasmCtx for Reader<'_, M> {
     }
 }
 
-pub fn step<M: ApuMap>(apu: &mut Apu<M>) {
+/// Execute one instruction and return the SPC700 cycles it took.
+pub fn step<M: ApuMap>(apu: &mut Apu<M>) -> u64 {
     let pc = apu.spc700.pc;
+    let opcode = apu.peek(pc);
     let (inst, len) = {
         let reader = Reader { apu: &*apu };
         decoder::decode(pc as u64, &reader)
@@ -33,7 +36,10 @@ pub fn step<M: ApuMap>(apu: &mut Apu<M>) {
 
     let mut view = Interpreter::new(apu, len);
     view.exec(inst);
+    let branch_taken = view.branch_taken();
     apu.spc700.pc = view.next_pc();
+
+    timing::cycles(opcode, branch_taken)
 }
 
 pub fn disassemble<M: ApuMap>(apu: &Apu<M>, pc: u16) -> (String, u8, Option<u16>, FlowKind) {

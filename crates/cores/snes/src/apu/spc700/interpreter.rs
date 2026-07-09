@@ -45,16 +45,25 @@ enum Mode {
 pub(super) struct Interpreter<'a, M: ApuMap> {
     apu: &'a mut Apu<M>,
     next_pc: u16,
+    branch_taken: bool,
 }
 
 impl<'a, M: ApuMap> Interpreter<'a, M> {
     pub(super) fn new(apu: &'a mut Apu<M>, len: u8) -> Self {
         let next_pc = apu.spc700.pc.wrapping_add(len as u16);
-        Self { apu, next_pc }
+        Self {
+            apu,
+            next_pc,
+            branch_taken: false,
+        }
     }
 
     pub(super) fn next_pc(&self) -> u16 {
         self.next_pc
+    }
+
+    pub(super) fn branch_taken(&self) -> bool {
+        self.branch_taken
     }
 
     fn set_a(&mut self, value: u8) {
@@ -183,6 +192,7 @@ impl<'a, M: ApuMap> Interpreter<'a, M> {
 
     fn branch(&mut self, disp: i8) {
         self.next_pc = self.next_pc.wrapping_add(disp as u16);
+        self.branch_taken = true;
     }
 
     pub(super) fn exec(&mut self, inst: Instruction) {

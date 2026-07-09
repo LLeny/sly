@@ -173,15 +173,19 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
             M::Trb => self.bit_modify(form, arg, false),
 
             // branches
-            M::Bra | M::Brl => self.branch(true, arg),
-            M::Beq => self.branch(self.snes.cpu.flags.zero(), arg),
-            M::Bne => self.branch(!self.snes.cpu.flags.zero(), arg),
-            M::Bcs => self.branch(self.snes.cpu.flags.carry(), arg),
-            M::Bcc => self.branch(!self.snes.cpu.flags.carry(), arg),
-            M::Bmi => self.branch(self.snes.cpu.flags.negative(), arg),
-            M::Bpl => self.branch(!self.snes.cpu.flags.negative(), arg),
-            M::Bvs => self.branch(self.snes.cpu.flags.overflow(), arg),
-            M::Bvc => self.branch(!self.snes.cpu.flags.overflow(), arg),
+            M::Bra
+            | M::Brl
+            | M::Beq
+            | M::Bne
+            | M::Bcs
+            | M::Bcc
+            | M::Bmi
+            | M::Bpl
+            | M::Bvs
+            | M::Bvc => {
+                let taken = crate::cpu::branch_taken(&self.snes.cpu.flags, mnemonic);
+                self.branch(taken, arg);
+            }
 
             // jumps, calls and returns
             M::Jmp => match (form, arg) {

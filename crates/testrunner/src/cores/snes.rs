@@ -49,8 +49,8 @@ impl TestCore for SnesCpu {
         }
     }
 
-    fn step(&mut self) {
-        snes::cpu::step(&mut self.snes);
+    fn step(&mut self) -> u64 {
+        snes::cpu::step(&mut self.snes)
     }
 
     fn regs(&self) -> Regs {
@@ -109,8 +109,8 @@ impl TestCore for Spc700 {
         spc.psw = PswFlags::from_raw(initial.p);
     }
 
-    fn step(&mut self) {
-        spc700::step(&mut self.apu);
+    fn step(&mut self) -> u64 {
+        spc700::step(&mut self.apu)
     }
 
     fn regs(&self) -> Regs {
