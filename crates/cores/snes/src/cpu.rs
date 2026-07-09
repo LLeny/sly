@@ -10,7 +10,7 @@ pub use disasm::disassemble_at;
 use crate::Snes;
 #[cfg(feature = "debug")]
 use crate::callstack::CallFrame;
-use crate::mmio::{Address, MemoryMap};
+use crate::mmio::{Address, MemoryMap, map};
 use interpreter::Interpreter;
 
 pub struct Cpu {
@@ -179,42 +179,56 @@ pub fn effective_address<M: MemoryMap>(snes: &Snes<M>, pc: u16) -> Option<Addres
 
 /// Execute one instruction and return the CPU cycles it took.
 pub fn step<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
-    if snes.irq.take_nmi() {
-        let cycles = timing::interrupt_cycles(&snes.cpu);
+    let cycles = if snes.irq.take_nmi() {
         self::service_nmi(snes);
-        return cycles;
-    }
+        timing::interrupt_cycles(&snes.cpu)
+    } else {
+        let (bank, pc, combo) = {
+            let cpu = &snes.cpu;
+            (cpu.program_bank, cpu.pc, self::mode_selectors(cpu))
+        };
 
-    let (bank, pc, combo) = {
-        let cpu = &snes.cpu;
-        (cpu.program_bank, cpu.pc, self::mode_selectors(cpu))
+        let opcode = snes.read8(Address::new(bank, pc));
+        let Decoded {
+            inst,
+            id,
+            mnemonic,
+            form,
+        } = self::decode(opcode, combo);
+        let len = decoder::stream_len_of(combo, id);
+
+        let arg = {
+            let reader = CodeReader { snes: &*snes, bank };
+            operand::fetch_arg(inst, mnemonic, form, pc as u64, &reader)
+        };
+
+        for i in 1..len as u16 {
+            let addr = Address::new(bank, pc.wrapping_add(i));
+            snes.mmu.clocks += snes.mmu.waitstates(addr);
+        }
+
+        if let Some((ptr, bytes)) = addressing::pointer_fetch(snes, form, arg) {
+            for i in 0..bytes as u16 {
+                snes.mmu.clocks += snes.mmu.waitstates(ptr.wrapping_add(i));
+            }
+        }
+
+        let cycles = timing::cycles(snes, mnemonic, form, arg);
+
+        #[cfg(feature = "debug")]
+        snes.mmu.access.resume();
+
+        let mut vm = Interpreter::new(&mut *snes, len);
+        vm.exec(mnemonic, form, arg);
+        vm.commit();
+
+        #[cfg(feature = "debug")]
+        snes.mmu.access.pause();
+
+        cycles
     };
 
-    let opcode = snes.read8(Address::new(bank, pc));
-    let Decoded {
-        inst,
-        id,
-        mnemonic,
-        form,
-    } = self::decode(opcode, combo);
-    let len = decoder::stream_len_of(combo, id);
-
-    let arg = {
-        let reader = CodeReader { snes: &*snes, bank };
-        operand::fetch_arg(inst, mnemonic, form, pc as u64, &reader)
-    };
-
-    let cycles = timing::cycles(snes, mnemonic, form, arg);
-
-    #[cfg(feature = "debug")]
-    snes.mmu.access.resume();
-
-    let mut vm = Interpreter::new(&mut *snes, len);
-    vm.exec(mnemonic, form, arg);
-    vm.commit();
-
-    #[cfg(feature = "debug")]
-    snes.mmu.access.pause();
+    snes.mmu.clocks += map::WAITSTATES_FAST * cycles;
 
     cycles
 }

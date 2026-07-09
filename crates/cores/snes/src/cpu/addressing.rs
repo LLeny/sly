@@ -14,6 +14,26 @@ pub(super) fn direct<M: MemoryMap>(snes: &Snes<M>, dp: u8, index: u16) -> Addres
     Address::new(0, offset)
 }
 
+pub(super) fn stack_relative<M: MemoryMap>(snes: &Snes<M>, sr: u8) -> Address {
+    Address::new(0, snes.cpu.stack_pointer.wrapping_add(sr as u16))
+}
+
+pub(super) fn pointer_fetch<M: MemoryMap>(
+    snes: &Snes<M>,
+    form: Form,
+    arg: Arg,
+) -> Option<(Address, u8)> {
+    use Form as F;
+
+    match (form, arg) {
+        (F::Idp | F::Idy, Arg::Dp(dp)) => Some((self::direct(snes, dp, 0), 2)),
+        (F::Idx, Arg::Dp(dp)) => Some((self::direct(snes, dp, snes.cpu.index_x), 2)),
+        (F::Idl | F::Idly, Arg::Dp(dp)) => Some((self::direct(snes, dp, 0), 3)),
+        (F::Isy, Arg::Sr(sr)) => Some((self::stack_relative(snes, sr), 2)),
+        _ => None,
+    }
+}
+
 pub(crate) fn resolve<M: MemoryMap>(
     snes: &Snes<M>,
     form: Form,
@@ -22,7 +42,7 @@ pub(crate) fn resolve<M: MemoryMap>(
     use Form as F;
 
     let cpu = &snes.cpu;
-    let (dbr, x, y, sp) = (cpu.data_bank, cpu.index_x, cpu.index_y, cpu.stack_pointer);
+    let (dbr, x, y) = (cpu.data_bank, cpu.index_x, cpu.index_y);
 
     let abs_idx = |addr: u16, idx: u16| {
         Address::from_24bit(Address::new(dbr, addr).as_24bit().wrapping_add(idx as u32))
@@ -45,11 +65,8 @@ pub(crate) fn resolve<M: MemoryMap>(
         (F::Idy, Arg::Dp(dp)) => abs_idx(dptr16(dp, 0), y),
         (F::Idl, Arg::Dp(dp)) => Address::from_24bit(dptr24(dp)),
         (F::Idly, Arg::Dp(dp)) => Address::from_24bit(dptr24(dp).wrapping_add(y as u32)),
-        (F::Sr, Arg::Sr(sr)) => Address::new(0, sp.wrapping_add(sr as u16)),
-        (F::Isy, Arg::Sr(sr)) => {
-            let ptr = Address::new(0, sp.wrapping_add(sr as u16));
-            abs_idx(snes.peek16(ptr), y)
-        }
+        (F::Sr, Arg::Sr(sr)) => self::stack_relative(snes, sr),
+        (F::Isy, Arg::Sr(sr)) => abs_idx(snes.peek16(self::stack_relative(snes, sr)), y),
         _ => return None,
     };
 

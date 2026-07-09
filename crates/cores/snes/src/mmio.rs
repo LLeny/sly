@@ -32,11 +32,14 @@ pub(crate) use symbol::MmioReg;
 pub use symbol::{MmioSymbol, address_of, is_symbol, symbol, symbols};
 
 pub(crate) const OPEN_BUS: u8 = 0xFF;
+pub(crate) const MEMSEL: u16 = 0x420D;
 
 pub struct Mmio<M: MemoryMap = CartridgeMap> {
     pub cartridge: Cartridge,
     pub wram: Box<[u8]>,
     map: M,
+    pub fastrom: bool,
+    pub clocks: u64,
 
     #[cfg(feature = "debug")]
     pub access: AccessTracker,
@@ -78,6 +81,8 @@ impl<M: MemoryMap> Mmio<M> {
             cartridge,
             wram: vec![0; M::WRAM_SIZE].into_boxed_slice(),
             map,
+            fastrom: false,
+            clocks: 0,
 
             #[cfg(feature = "debug")]
             access: AccessTracker::default(),
@@ -86,6 +91,8 @@ impl<M: MemoryMap> Mmio<M> {
 
     pub fn reset(&mut self) {
         self.wram.fill(0);
+        self.fastrom = false;
+        self.clocks = 0;
 
         #[cfg(feature = "debug")]
         {
@@ -96,6 +103,11 @@ impl<M: MemoryMap> Mmio<M> {
     /// Translate a CPU address to an address space (WRAM, ROM, I/O or unmapped).
     pub(crate) fn map(&self, addr: Address) -> AddressSpace {
         self.map.map(&self.cartridge, addr)
+    }
+
+    /// Waitstate clocks an access to `addr` adds beyond the fast cycle.
+    pub(crate) fn waitstates(&self, addr: Address) -> u64 {
+        self.map.speed(addr, self.fastrom) - map::WAITSTATES_FAST
     }
 }
 
@@ -139,6 +151,7 @@ impl<M: MemoryMap> Snes<M> {
 
     pub fn read8(&mut self, addr: Address) -> u8 {
         let space = self.mmu.map(addr);
+        self.mmu.clocks += self.mmu.waitstates(addr);
 
         #[cfg(feature = "debug")]
         self.record_access(&space, false);
@@ -169,6 +182,7 @@ impl<M: MemoryMap> Snes<M> {
 
     pub fn write8(&mut self, addr: Address, value: u8) {
         let space = self.mmu.map(addr);
+        self.mmu.clocks += self.mmu.waitstates(addr);
 
         #[cfg(feature = "debug")]
         self.record_access(&space, true);
@@ -195,6 +209,7 @@ impl<M: MemoryMap> Snes<M> {
 
     fn read_io(&mut self, reg: u16) -> u8 {
         match reg {
+            MEMSEL => self.mmu.fastrom as u8,
             RDDIVL => self.math.div_quotient as u8,
             RDDIVH => (self.math.div_quotient >> 8) as u8,
             RDMPYL => self.math.product_or_remainder as u8,
@@ -298,6 +313,7 @@ impl<M: MemoryMap> Snes<M> {
                 }
             }
             BgScrollOffset::START..=BgScrollOffset::END => BgScrollOffset::write(self, reg, value),
+            MEMSEL => self.mmu.fastrom = value & 0x01 != 0,
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::write(self, value),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::write(self, value),
@@ -327,6 +343,7 @@ impl<M: MemoryMap> Snes<M> {
 
     fn peek_io(&self, reg: u16) -> u8 {
         match reg {
+            MEMSEL => self.mmu.fastrom as u8,
             RDDIVL => self.math.div_quotient as u8,
             RDDIVH => (self.math.div_quotient >> 8) as u8,
             RDMPYL => self.math.product_or_remainder as u8,
