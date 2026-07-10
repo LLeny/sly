@@ -18,11 +18,6 @@ pub const SPC700_CLOCK: u64 = APU_CLOCK / 24;
 pub const SPC_TIMER01_DIVIDER: u64 = 128;
 pub const SPC_TIMER2_DIVIDER: u64 = 16;
 
-pub const SNES_CYCLES_PER_SPC700_CYCLE: u64 = 21;
-
-pub const TIMER01_PERIOD: u64 = SPC_TIMER01_DIVIDER * SNES_CYCLES_PER_SPC700_CYCLE;
-pub const TIMER2_PERIOD: u64 = SPC_TIMER2_DIVIDER * SNES_CYCLES_PER_SPC700_CYCLE;
-
 const IPL_ROM: &[u8] = include_bytes!("../assets/spc700.rom");
 
 pub struct Apu<M: ApuMap = HardwareMap> {
@@ -144,6 +139,11 @@ impl<M: ApuMap> Apu<M> {
                 );
                 0
             }
+            0xFD..=0xFF => {
+                let value = self.peek_io(reg);
+                self.timer_counters[(reg - 0xFD) as usize] = 0;
+                value
+            }
             _ => self.peek_io(reg),
         }
     }
@@ -196,33 +196,32 @@ impl<M: ApuMap> Apu<M> {
     }
 }
 
+fn tick_timer(apu: &mut Apu<impl ApuMap>, index: usize) {
+    apu.internal_timers[index] += 1;
+
+    let divider = match apu.timer_settings[index] {
+        0 => 256,
+        value => value as u16,
+    };
+
+    if apu.internal_timers[index] >= divider {
+        apu.internal_timers[index] = 0;
+        apu.timer_counters[index] = apu.timer_counters[index].wrapping_add(1) & 0x0F;
+    }
+}
+
 pub(crate) fn timer01_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
     if snes.apu.control.enable_timer0() {
-        snes.apu.internal_timers[0] = snes.apu.internal_timers[0].wrapping_add(1);
-
-        if snes.apu.internal_timers[0] > snes.apu.timer_settings[0] as u16 {
-            snes.apu.internal_timers[0] = 0;
-            snes.apu.timer_counters[0] = snes.apu.timer_counters[0].wrapping_add(1);
-        }
+        tick_timer(&mut snes.apu, 0);
     }
 
     if snes.apu.control.enable_timer1() {
-        snes.apu.internal_timers[1] = snes.apu.internal_timers[1].wrapping_add(1);
-
-        if snes.apu.internal_timers[1] > snes.apu.timer_settings[1] as u16 {
-            snes.apu.internal_timers[1] = 0;
-            snes.apu.timer_counters[1] = snes.apu.timer_counters[1].wrapping_add(1);
-        }
+        tick_timer(&mut snes.apu, 1);
     }
 }
 
 pub(crate) fn timer2_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
     if snes.apu.control.enable_timer2() {
-        snes.apu.internal_timers[2] = snes.apu.internal_timers[2].wrapping_add(1);
-
-        if snes.apu.internal_timers[2] > snes.apu.timer_settings[2] as u16 {
-            snes.apu.internal_timers[2] = 0;
-            snes.apu.timer_counters[2] = snes.apu.timer_counters[2].wrapping_add(1);
-        }
+        tick_timer(&mut snes.apu, 2);
     }
 }

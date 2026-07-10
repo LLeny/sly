@@ -5,7 +5,7 @@ use crate::Snes;
 use crate::alu::{AluResult, ShiftOp, Width, adc_bcd8, add_binary, bcd16, sbc_bcd8};
 #[cfg(feature = "debug")]
 use crate::callstack::{CallFrame, CallKind};
-use crate::cpu::{Cpu, Flags};
+use crate::cpu::{Cpu, ExecutionState, Flags};
 use crate::mmio::{Address, MemoryMap};
 
 #[derive(Clone, Copy)]
@@ -94,7 +94,9 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
         };
 
         match mnemonic {
-            M::Invalid | M::Nop | M::WdmImm | M::Stp | M::Wai => {}
+            M::Invalid | M::Nop | M::WdmImm => {}
+            M::Wai => self.snes.cpu.execution = ExecutionState::Waiting,
+            M::Stp => self.snes.cpu.execution = ExecutionState::Stopped,
 
             // loads and stores
             M::Lda => {

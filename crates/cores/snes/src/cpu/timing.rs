@@ -74,7 +74,7 @@ pub(super) fn cycles<M: MemoryMap>(
         M::RepImm | M::SepImm => 3,
         M::Xba => 3,
         M::BrkImm | M::CopImm => self::interrupt_cycles(cpu),
-        M::Stp | M::Wai => 4,
+        M::Stp | M::Wai => 3,
 
         M::Mvn | M::Mvp => 7,
 

@@ -129,6 +129,8 @@ fn run_dma_channel(snes: &mut Snes<impl MemoryMap>, index: usize) {
     let count = channel.byte_count.count() as usize;
 
     for &pattern_offset in pattern.iter().cycle().take(count) {
+        let clocks_before = snes.mmu.clocks;
+
         let b_reg = channel.b_bus_addr.wrapping_add(pattern_offset);
         let b_bus = Address::from(B_BUS_BASE as u32 | b_reg as u32);
         let a_bus = Address::from(channel.a_bus_addr.raw());
@@ -148,6 +150,8 @@ fn run_dma_channel(snes: &mut Snes<impl MemoryMap>, index: usize) {
         if !(a_bus_blocked && matches!(direction, Direction::BToA)) {
             snes.write8(dst, value);
         }
+
+        snes.mmu.clocks = clocks_before + 8;
 
         channel
             .a_bus_addr

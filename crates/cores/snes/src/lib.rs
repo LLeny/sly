@@ -98,8 +98,9 @@ impl<M: MemoryMap + 'static> Snes<M> {
         self.joypads.reset();
 
         self.scheduler = Scheduler::new(tv_system);
+        let spc_delay = self.scheduler.spc_master_clocks(1);
         self.scheduler
-            .schedule_event(apu::SNES_CYCLES_PER_SPC700_CYCLE, scheduler::spc700_tick);
+            .schedule_event(spc_delay, scheduler::spc700_tick);
         self.scheduler.schedule_periodic_at(
             scheduler::VBLANK_START_SCANLINE * scheduler::MASTER_CLOCKS_PER_SCANLINE,
             self.scheduler.cycles_per_frame(),
@@ -109,12 +110,16 @@ impl<M: MemoryMap + 'static> Snes<M> {
             .schedule_periodic(self.scheduler.cycles_per_frame(), ppu::vblank_end);
         self.scheduler
             .schedule_periodic(scheduler::MASTER_CLOCKS_PER_SCANLINE, ppu::draw_scanline);
+        self.scheduler.schedule_periodic_at(
+            scheduler::REFRESH_START_CLOCK,
+            scheduler::MASTER_CLOCKS_PER_SCANLINE,
+            scheduler::dram_refresh,
+        );
 
-        // TODO: Could schedule these when enabled?
         self.scheduler
-            .schedule_periodic(apu::TIMER01_PERIOD, apu::timer01_tick);
+            .schedule_periodic_spc(apu::SPC_TIMER01_DIVIDER, apu::timer01_tick);
         self.scheduler
-            .schedule_periodic(apu::TIMER2_PERIOD, apu::timer2_tick);
+            .schedule_periodic_spc(apu::SPC_TIMER2_DIVIDER, apu::timer2_tick);
 
         self.mmu.reset();
         self.cpu.pc = self.read16(Address::new(BANK_ZERO, RESET_VECTOR_ADDR));

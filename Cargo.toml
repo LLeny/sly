@@ -4,6 +4,7 @@ members = [
     "crates/cirsium",
     "crates/cores/snes",
     "frontends/debugger",
+    "frontends/runner",
     "crates/models/core",
     "crates/models/debugger",
     "crates/models/frontend",

@@ -1,0 +1,8 @@
+[package]
+name = "runner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+snes = { path = "../../crates/cores/snes" }
+minifb = { version = "0.28.0", default-features = false, features = ["x11"] }

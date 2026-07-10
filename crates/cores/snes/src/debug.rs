@@ -478,13 +478,7 @@ fn caption(label: &str, snes: &Snes) -> String {
 }
 
 fn frame_interval(snes: &Snes) -> Duration {
-    const MASTER_CLOCK_HZ_NTSC: u64 = 21_477_272;
-    const MASTER_CLOCK_HZ_PAL: u64 = 21_281_370;
-
-    let clock_hz = match snes.mmu.cartridge.region().tv_system() {
-        crate::cartridge::TvSystem::Ntsc => MASTER_CLOCK_HZ_NTSC,
-        crate::cartridge::TvSystem::Pal => MASTER_CLOCK_HZ_PAL,
-    };
+    let clock_hz = snes.scheduler.master_clock_hz();
     let nanos = snes.scheduler.cycles_per_frame() as u128 * 1_000_000_000 / clock_hz as u128;
     Duration::from_nanos(nanos as u64)
 }
