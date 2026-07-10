@@ -19,9 +19,9 @@ use crate::mmio::regs::{
 };
 use crate::ppu::regs::{
     Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, COLDATA, ColorMathControl,
-    ColorMathSelect, OAMADDH, OAMADDL, OAMDATA, OAMDATAREAD, RDCGRAM, RDVRAMH, RDVRAML, SETINI,
-    SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL,
-    VramControl,
+    ColorMathSelect, MPYH, MPYL, MPYM, Mode7, OAMADDH, OAMADDL, OAMDATA, OAMDATAREAD, RDCGRAM,
+    RDVRAMH, RDVRAML, SETINI, SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH, VMADDL,
+    VMDATAH, VMDATAL, VramControl,
 };
 use crate::{Cartridge, Snes};
 
@@ -235,6 +235,9 @@ impl<M: MemoryMap> Snes<M> {
             VMDATAH => self.ppu.vram.peek_high(),
             RDVRAML => self.ppu.vram.read_low(),
             RDVRAMH => self.ppu.vram.read_high(),
+            MPYL => self.ppu.matrix.result as u8,
+            MPYM => (self.ppu.matrix.result >> 8) as u8,
+            MPYH => (self.ppu.matrix.result >> 16) as u8,
             NmiTimerEnable::ADDRESS => NmiTimerEnable::read(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::read(self),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::read(self),
@@ -306,6 +309,7 @@ impl<M: MemoryMap> Snes<M> {
                 }
             }
             BgScrollOffset::START..=BgScrollOffset::END => BgScrollOffset::write(self, reg, value),
+            Mode7::START..=Mode7::END => Mode7::write(self, reg, value),
             MEMSEL => self.mmu.fastrom = value & 0x01 != 0,
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::write(self, value),
@@ -358,6 +362,9 @@ impl<M: MemoryMap> Snes<M> {
             VMADDH => (self.ppu.vram.word_addr() >> 8) as u8,
             VMDATAL | RDVRAML => self.ppu.vram.peek_low(),
             VMDATAH | RDVRAMH => self.ppu.vram.peek_high(),
+            MPYL => self.ppu.matrix.result as u8,
+            MPYM => (self.ppu.matrix.result >> 8) as u8,
+            MPYH => (self.ppu.matrix.result >> 16) as u8,
             TM => self.ppu.main_screen.raw(),
             TS => self.ppu.sub_screen.raw(),
             ColorMathSelect::ADDRESS => ColorMathSelect::peek(self),

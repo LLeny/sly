@@ -3,6 +3,7 @@ pub mod cgram;
 pub(crate) mod color_math;
 pub(crate) mod latch;
 mod layer_order;
+mod mtx;
 pub mod oam;
 pub(crate) mod obj;
 pub(crate) mod regs;
@@ -40,6 +41,7 @@ pub struct Ppu {
     pub(crate) sub_screen: LayerMask,
     pub(crate) color_math: ColorMath,
     pub(crate) obj: ObjLayer,
+    pub(crate) matrix: mtx::Matrix,
     pub(crate) frame_buffer: Vec<(u8, u8, u8)>,
 }
 
@@ -58,6 +60,7 @@ impl Ppu {
             sub_screen: LayerMask::default(),
             color_math: ColorMath::default(),
             obj: ObjLayer::default(),
+            matrix: mtx::Matrix::default(),
             frame_buffer: vec![(0, 0, 0); SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize],
         }
     }

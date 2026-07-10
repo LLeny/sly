@@ -42,6 +42,8 @@ pub fn run(
     let mut capture = Capture::default();
     let mut seen = HashSet::new();
 
+    std::fs::create_dir_all(out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
+
     while capture.frames_run < config.max_frames {
         if let Err(payload) = catch_unwind(AssertUnwindSafe(|| core.run_frame())) {
             capture.panic = Some(self::panic_message(payload.as_ref()));
@@ -59,11 +61,6 @@ pub fn run(
         if self::monochrome(&frame) || !seen.insert(self::hash_pixels(&frame.pixels)) {
             capture.skipped += 1;
             continue;
-        }
-
-        if capture.screenshots == 0 {
-            std::fs::create_dir_all(out_dir)
-                .with_context(|| format!("creating {}", out_dir.display()))?;
         }
 
         let path = out_dir.join(format!("{:06}.png", capture.frames_run));

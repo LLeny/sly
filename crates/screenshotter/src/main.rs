@@ -3,16 +3,17 @@ mod cores;
 mod roms;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{Read, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{Command, ExitCode, Stdio};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use owo_colors::OwoColorize;
 
-use capture::CaptureConfig;
 use cores::System;
 use roms::RomFile;
 
@@ -32,6 +33,10 @@ struct Args {
     /// Worker threads (default: available parallelism)
     #[arg(long)]
     threads: Option<usize>,
+
+    /// INTERNAL ONLY
+    #[arg(long, hide = true)]
+    worker: bool,
 }
 
 struct RomResult {
@@ -44,11 +49,27 @@ struct RomResult {
     error: Option<String>,
 }
 
+const KEY_GAME_ID: &str = "game_id";
+const KEY_SCREENSHOTS: &str = "screenshots";
+const KEY_SKIPPED: &str = "skipped";
+const KEY_FRAMES_RUN: &str = "frames_run";
+const KEY_ERROR: &str = "error";
+
+fn system_dir(out: &Path, system: &System) -> PathBuf {
+    out.join(system.name)
+}
+
 fn main() -> ExitCode {
     std::panic::set_hook(Box::new(|_| {}));
 
     let args = Args::parse();
-    match self::run(&args) {
+    let outcome = if args.worker {
+        self::run_worker(&args).map(|()| true)
+    } else {
+        self::run(&args)
+    };
+
+    match outcome {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(e) => {
@@ -78,7 +99,7 @@ fn run(args: &Args) -> Result<bool> {
         );
     }
 
-    let system_dir = args.out.join(system.name);
+    let system_dir = self::system_dir(&args.out, system);
     std::fs::create_dir_all(&system_dir)
         .with_context(|| format!("creating {}", system_dir.display()))?;
 
@@ -103,6 +124,7 @@ fn run(args: &Args) -> Result<bool> {
 
     let queue = Mutex::new(roms);
     let results = Mutex::new(Vec::new());
+    let db = Mutex::new(Db::load(&system_dir));
 
     std::thread::scope(|scope| {
         for _ in 0..threads {
@@ -113,8 +135,19 @@ fn run(args: &Args) -> Result<bool> {
                         return;
                     };
 
-                    let result = self::run_rom(&rom, system, config, &system_dir);
+                    let result = self::run_rom(&rom, system, args);
                     self::print_result(&result);
+
+                    if let Some(game_id) = &result.game_id {
+                        let mut db = db.lock().unwrap();
+                        db.titlemap.insert(game_id.clone(), result.stem.clone());
+                        db.gamelist.insert(result.file_name.clone());
+
+                        if let Err(e) = db.write(&system_dir) {
+                            eprintln!("{} {e:#}", "error:".red().bold());
+                        }
+                    }
+
                     results.lock().unwrap().push(result);
                 }
             });
@@ -122,14 +155,12 @@ fn run(args: &Args) -> Result<bool> {
     });
 
     let results = results.into_inner().unwrap();
-    self::write_titlemap(&system_dir, &results)?;
-    self::write_gamelist(&system_dir, &results)?;
     self::print_summary(&results);
 
     Ok(results.iter().any(|r| r.screenshots > 0))
 }
 
-fn run_rom(rom: &RomFile, system: &System, config: &CaptureConfig, system_dir: &Path) -> RomResult {
+fn run_rom(rom: &RomFile, system: &System, args: &Args) -> RomResult {
     let mut result = RomResult {
         file_name: rom.file_name.clone(),
         stem: rom.stem.clone(),
@@ -140,93 +171,181 @@ fn run_rom(rom: &RomFile, system: &System, config: &CaptureConfig, system_dir: &
         error: None,
     };
 
-    let bytes = match roms::load(&rom.path, system.extensions) {
-        Ok(bytes) => bytes,
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
         Err(e) => {
-            result.error = Some(format!("{e:#}"));
+            result.error = Some(format!("resolving own executable: {e}"));
             return result;
         }
     };
 
-    let mut core = match catch_unwind(AssertUnwindSafe(|| system.build(bytes))) {
-        Ok(Ok(core)) => core,
-        Ok(Err(e)) => {
-            result.error = Some(format!("{e:#}"));
-            return result;
-        }
-        Err(_) => {
-            result.error = Some("panicked during boot".to_string());
+    let child = Command::new(exe)
+        .arg(system.name)
+        .arg(&rom.path)
+        .arg("--worker")
+        .arg("--out")
+        .arg(&args.out)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let mut child = match child {
+        Ok(child) => child,
+        Err(e) => {
+            result.error = Some(format!("spawning worker: {e}"));
             return result;
         }
     };
 
-    let game_id = core.game_id();
-    let out_dir = system_dir.join(&game_id);
-    result.game_id = Some(game_id);
-
-    match capture::run(core.as_mut(), config, &out_dir) {
-        Ok(capture) => {
-            result.screenshots = capture.screenshots;
-            result.skipped = capture.skipped;
-            result.frames_run = capture.frames_run;
-            result.error = capture
-                .panic
-                .map(|message| format!("panicked @ frame {}: {message}", capture.frames_run));
+    let deadline = Instant::now() + system.timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => {
+                result.error = Some(format!("waiting for worker: {e}"));
+                let _ = child.kill();
+                let _ = child.wait();
+                return result;
+            }
         }
-        Err(e) => result.error = Some(format!("{e:#}")),
+    };
+
+    let mut stdout = String::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        let _ = pipe.read_to_string(&mut stdout);
+    }
+    let mut stderr = String::new();
+    if let Some(mut pipe) = child.stderr.take() {
+        let _ = pipe.read_to_string(&mut stderr);
+    }
+
+    for line in stdout.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key {
+            KEY_GAME_ID => result.game_id = Some(value.to_string()),
+            KEY_SCREENSHOTS => result.screenshots = value.parse().unwrap_or(0),
+            KEY_SKIPPED => result.skipped = value.parse().unwrap_or(0),
+            KEY_FRAMES_RUN => result.frames_run = value.parse().unwrap_or(0),
+            KEY_ERROR => result.error = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
+    match status {
+        None => {
+            result.error = Some(format!("timed out after {}s", system.timeout.as_secs()));
+        }
+        Some(status) if !status.success() && result.error.is_none() => {
+            let detail = stderr
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .map(|l| format!(": {}", l.trim()))
+                .unwrap_or_default();
+            result.error = Some(format!("crashed ({status}){detail}"));
+        }
+        Some(_) => {}
     }
 
     result
 }
 
-fn write_titlemap(system_dir: &Path, results: &[RomResult]) -> Result<()> {
-    let path = system_dir.join("titlemap.txt");
+fn run_worker(args: &Args) -> Result<()> {
+    let Some(system) = cores::select(&args.system) else {
+        bail!("unknown system '{}'", args.system);
+    };
 
-    let mut titlemap = BTreeMap::new();
-    if let Ok(existing) = std::fs::read_to_string(&path) {
-        for line in existing.lines() {
-            if let Some((id, title)) = line.split_once('=') {
-                titlemap.insert(id.to_string(), title.to_string());
-            }
-        }
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+
+    let bytes = match roms::load(&args.roms, system.extensions) {
+        Ok(bytes) => bytes,
+        Err(e) => return self::emit_error(&mut out, &format!("{e:#}")),
+    };
+
+    let mut core = match catch_unwind(AssertUnwindSafe(|| system.build(bytes))) {
+        Ok(Ok(core)) => core,
+        Ok(Err(e)) => return self::emit_error(&mut out, &format!("{e:#}")),
+        Err(_) => return self::emit_error(&mut out, "panicked during boot"),
+    };
+
+    let game_id = core.game_id();
+    writeln!(out, "{KEY_GAME_ID}={game_id}")?;
+    out.flush()?;
+
+    let out_dir = self::system_dir(&args.out, system).join(&game_id);
+    let capture = match capture::run(core.as_mut(), &system.config, &out_dir) {
+        Ok(capture) => capture,
+        Err(e) => return self::emit_error(&mut out, &format!("{e:#}")),
+    };
+
+    writeln!(out, "{KEY_SCREENSHOTS}={}", capture.screenshots)?;
+    writeln!(out, "{KEY_SKIPPED}={}", capture.skipped)?;
+    writeln!(out, "{KEY_FRAMES_RUN}={}", capture.frames_run)?;
+    if let Some(message) = capture.panic {
+        let message = format!("panicked @ frame {}: {message}", capture.frames_run);
+        return self::emit_error(&mut out, &message);
     }
 
-    for result in results {
-        if let Some(game_id) = &result.game_id {
-            titlemap.insert(game_id.clone(), result.stem.clone());
-        }
-    }
-
-    let mut content = String::new();
-    for (id, title) in &titlemap {
-        content.push_str(&format!("{id}={title}\n"));
-    }
-
-    std::fs::write(&path, content).with_context(|| format!("writing {}", path.display()))
+    Ok(())
 }
 
-fn write_gamelist(system_dir: &Path, results: &[RomResult]) -> Result<()> {
-    let path = system_dir.join("gamelist.txt");
+fn emit_error(out: &mut impl Write, message: &str) -> Result<()> {
+    writeln!(out, "{KEY_ERROR}={}", self::one_line(message))?;
+    Ok(())
+}
 
-    let mut gamelist = BTreeSet::new();
-    if let Ok(existing) = std::fs::read_to_string(&path) {
-        gamelist.extend(existing.lines().map(str::to_string));
+fn one_line(message: &str) -> String {
+    message.replace('\n', "; ")
+}
+
+#[derive(Default)]
+struct Db {
+    titlemap: BTreeMap<String, String>,
+    gamelist: BTreeSet<String>,
+}
+
+impl Db {
+    fn load(system_dir: &Path) -> Self {
+        let mut db = Self::default();
+
+        if let Ok(existing) = std::fs::read_to_string(system_dir.join("titlemap.txt")) {
+            for line in existing.lines() {
+                if let Some((id, title)) = line.split_once('=') {
+                    db.titlemap.insert(id.to_string(), title.to_string());
+                }
+            }
+        }
+        if let Ok(existing) = std::fs::read_to_string(system_dir.join("gamelist.txt")) {
+            db.gamelist.extend(existing.lines().map(str::to_string));
+        }
+
+        db
     }
 
-    gamelist.extend(
-        results
-            .iter()
-            .filter(|r| r.game_id.is_some())
-            .map(|r| r.file_name.clone()),
-    );
+    fn write(&self, system_dir: &Path) -> Result<()> {
+        let path = system_dir.join("titlemap.txt");
+        let mut content = String::new();
+        for (id, title) in &self.titlemap {
+            content.push_str(&format!("{id}={title}\n"));
+        }
+        std::fs::write(&path, content).with_context(|| format!("writing {}", path.display()))?;
 
-    let mut content = String::new();
-    for file_name in &gamelist {
-        content.push_str(file_name);
-        content.push('\n');
+        let path = system_dir.join("gamelist.txt");
+        let mut content = String::new();
+        for file_name in &self.gamelist {
+            content.push_str(file_name);
+            content.push('\n');
+        }
+        std::fs::write(&path, content).with_context(|| format!("writing {}", path.display()))
     }
-
-    std::fs::write(&path, content).with_context(|| format!("writing {}", path.display()))
 }
 
 fn print_result(result: &RomResult) {

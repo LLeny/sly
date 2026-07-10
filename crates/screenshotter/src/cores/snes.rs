@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use snes::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use snes::{Cartridge, Snes};
@@ -13,6 +15,7 @@ pub const SYSTEM: System = System {
         every_frames: 60,
         max_frames: 1800,
     },
+    timeout: Duration::from_secs(120),
     build: |rom| Ok(Box::new(SnesScreenshotter::new(rom)?)),
 };
 
@@ -37,13 +40,7 @@ impl SnesScreenshotter {
     }
 
     fn game_id(cartridge: &Cartridge) -> String {
-        const CHECKSUM_OFFSET: usize = 0x1E;
-
-        let offset = cartridge.header_offset() + CHECKSUM_OFFSET;
-        let checksum = u16::from_le_bytes([
-            cartridge.rom.get(offset).copied().unwrap_or(0),
-            cartridge.rom.get(offset + 1).copied().unwrap_or(0),
-        ]);
+        let crc = crc32fast::hash(&cartridge.rom);
 
         let mut title = String::new();
         for chunk in cartridge
@@ -65,7 +62,7 @@ impl SnesScreenshotter {
             title.push_str("UNKNOWN");
         }
 
-        format!("{title}-{checksum:04X}")
+        format!("{title}-{crc:08X}")
     }
 }
 

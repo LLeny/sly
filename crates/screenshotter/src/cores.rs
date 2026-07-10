@@ -1,5 +1,7 @@
 mod snes;
 
+use std::time::Duration;
+
 use crate::capture::{CaptureConfig, ScreenshotCore};
 use anyhow::Result;
 
@@ -7,6 +9,7 @@ pub struct System {
     pub name: &'static str,
     pub extensions: &'static [&'static str],
     pub config: CaptureConfig,
+    pub timeout: Duration,
     build: fn(Vec<u8>) -> Result<Box<dyn ScreenshotCore>>,
 }
 

@@ -3,7 +3,7 @@ use crate::mmio::regs::{
     AddressAdjustMode, Direction, DmaAddress, DmaByteCount, DmaChannelParameters, HdmaLineCounter,
     HdmaTransferEnable, MdmaTransferStart, TransferPattern,
 };
-use crate::mmio::{Address, MemoryMap, OPEN_BUS};
+use crate::mmio::{Address, AddressSpace, MemoryMap, OPEN_BUS};
 
 pub const CHANNEL_COUNT: usize = 8;
 pub const CHANNEL_REGS_START: u16 = 0x4300;
@@ -138,8 +138,16 @@ fn run_dma_channel(snes: &mut Snes<impl MemoryMap>, index: usize) {
             Direction::BToA => (b_bus, a_bus),
         };
 
-        let value = snes.read8(src);
-        snes.write8(dst, value);
+        let a_bus_blocked = matches!(snes.mmu.map(a_bus), AddressSpace::Io(_));
+        let value = if a_bus_blocked && matches!(direction, Direction::AToB) {
+            OPEN_BUS
+        } else {
+            snes.read8(src)
+        };
+
+        if !(a_bus_blocked && matches!(direction, Direction::BToA)) {
+            snes.write8(dst, value);
+        }
 
         channel
             .a_bus_addr

@@ -5536,6 +5536,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "crc32fast",
  "owo-colors",
  "png 0.18.1",
  "snes",

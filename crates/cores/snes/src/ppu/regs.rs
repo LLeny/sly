@@ -27,6 +27,18 @@ pub(crate) const VMDATAH: u16 = 0x2119;
 pub(crate) const RDVRAML: u16 = 0x2139;
 pub(crate) const RDVRAMH: u16 = 0x213A;
 
+pub(crate) const M7HOFS: u16 = 0x210D;
+pub(crate) const M7VOFS: u16 = 0x210E;
+pub(crate) const M7_MATRIX_A: u16 = 0x211B;
+pub(crate) const M7_MATRIX_B: u16 = 0x211C;
+pub(crate) const M7_MATRIX_C: u16 = 0x211D;
+pub(crate) const M7_MATRIX_D: u16 = 0x211E;
+pub(crate) const M7_CENTER_X: u16 = 0x211F;
+pub(crate) const M7_CENTER_Y: u16 = 0x2120;
+pub(crate) const MPYL: u16 = 0x2134;
+pub(crate) const MPYM: u16 = 0x2135;
+pub(crate) const MPYH: u16 = 0x2136;
+
 register_mmio_raw! {
     OAMADDL => "OAMADDL",
     OAMADDH => "OAMADDH",
@@ -53,6 +65,17 @@ register_mmio_raw! {
     0x2112 => "BG3VOFS",
     0x2113 => "BG4HOFS",
     0x2114 => "BG4VOFS",
+    M7HOFS => "M7HOFS",
+    M7VOFS => "M7VOFS",
+    M7_MATRIX_A => "M7A",
+    M7_MATRIX_B => "M7B",
+    M7_MATRIX_C => "M7C",
+    M7_MATRIX_D => "M7D",
+    M7_CENTER_X => "M7X",
+    M7_CENTER_Y => "M7Y",
+    MPYL => "MPYL",
+    MPYM => "MPYM",
+    MPYH => "MPYH",
 }
 
 pub(crate) struct BgScrollOffset;
@@ -62,6 +85,13 @@ impl BgScrollOffset {
     pub(crate) const END: u16 = 0x2114; // BG4VOFS
 
     pub(crate) fn write<M: MemoryMap>(snes: &mut Snes<M>, reg: u16, value: u8) {
+        let matrix = &mut snes.ppu.matrix;
+        match reg {
+            M7HOFS => matrix.hofs = Mode7::sign_extend13(matrix.latch(value)),
+            M7VOFS => matrix.vofs = Mode7::sign_extend13(matrix.latch(value)),
+            _ => {}
+        }
+
         let index = (reg - Self::START) as usize;
         let layer = &mut snes.ppu.bg_layers[index / 2];
 
@@ -71,6 +101,36 @@ impl BgScrollOffset {
             layer.hofs = (value as u16) << 8 | (prev & !7) as u16 | (prev_h & 7) as u16;
         } else {
             layer.vofs = (value as u16) << 8 | prev as u16;
+        }
+    }
+}
+
+pub(crate) struct Mode7;
+
+impl Mode7 {
+    pub(crate) const START: u16 = M7_MATRIX_A;
+    pub(crate) const END: u16 = M7_CENTER_Y;
+
+    fn sign_extend13(word: u16) -> i16 {
+        ((word << 3) as i16) >> 3
+    }
+
+    pub(crate) fn write<M: MemoryMap>(snes: &mut Snes<M>, reg: u16, value: u8) {
+        let matrix = &mut snes.ppu.matrix;
+        let word = matrix.latch(value);
+
+        match reg {
+            M7_MATRIX_A => matrix.a = word as i16,
+            M7_MATRIX_B => matrix.b = word as i16,
+            M7_MATRIX_C => matrix.c = word as i16,
+            M7_MATRIX_D => matrix.d = word as i16,
+            M7_CENTER_X => matrix.center_x = Self::sign_extend13(word),
+            M7_CENTER_Y => matrix.center_y = Self::sign_extend13(word),
+            _ => unreachable!(),
+        }
+
+        if matches!(reg, M7_MATRIX_A | M7_MATRIX_B) {
+            matrix.update_result();
         }
     }
 }
