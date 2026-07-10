@@ -359,8 +359,23 @@ impl<'a> ScanlineRenderer<'a> {
 impl Ppu {
     pub fn render_scanline(&mut self, scanline: usize) {
         let mut row = [(0, 0, 0); SCREEN_WIDTH_USIZE];
-        ScanlineRenderer::new(self, scanline as u32).render(&mut row);
+
+        if !self.force_blank {
+            ScanlineRenderer::new(self, scanline as u32).render(&mut row);
+
+            if self.brightness != 15 {
+                for pixel in &mut row {
+                    *pixel = Self::apply_brightness(*pixel, self.brightness);
+                }
+            }
+        }
+
         self.frame_buffer[scanline * SCREEN_WIDTH_USIZE..][..SCREEN_WIDTH_USIZE]
             .copy_from_slice(&row);
+    }
+
+    fn apply_brightness((r, g, b): (u8, u8, u8), brightness: u8) -> (u8, u8, u8) {
+        let scale = |channel: u8| (channel as u16 * brightness as u16 / 15) as u8;
+        (scale(r), scale(g), scale(b))
     }
 }

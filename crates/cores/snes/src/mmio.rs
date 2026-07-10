@@ -19,9 +19,9 @@ use crate::mmio::regs::{
 };
 use crate::ppu::regs::{
     Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, COLDATA, ColorMathControl,
-    ColorMathSelect, MPYH, MPYL, MPYM, Mode7, OAMADDH, OAMADDL, OAMDATA, OAMDATAREAD, RDCGRAM,
-    RDVRAMH, RDVRAML, SETINI, SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH, VMADDL,
-    VMDATAH, VMDATAL, VramControl,
+    ColorMathSelect, INIDISP, MPYH, MPYL, MPYM, Mode7, OAMADDH, OAMADDL, OAMDATA, OAMDATAREAD,
+    RDCGRAM, RDVRAMH, RDVRAML, SETINI, SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH,
+    VMADDL, VMDATAH, VMDATAL, VramControl,
 };
 use crate::{Cartridge, Snes};
 
@@ -323,6 +323,7 @@ impl<M: MemoryMap> Snes<M> {
                 .apu
                 .cpu_write_port((reg - APU_IO_START) as usize, value),
             JOYSER0 => {}
+            INIDISP => self.ppu.set_display_control(value),
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),

@@ -4,6 +4,8 @@ use crate::Snes;
 use crate::macros::{register_mmio, register_mmio_family, register_mmio_raw};
 use crate::mmio::{MemoryMap, MmioReg};
 
+pub(crate) const INIDISP: u16 = 0x2100;
+
 pub(crate) const OAMADDL: u16 = 0x2102;
 pub(crate) const OAMADDH: u16 = 0x2103;
 pub(crate) const OAMDATA: u16 = 0x2104;

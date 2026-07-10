@@ -42,6 +42,8 @@ pub struct Ppu {
     pub(crate) color_math: ColorMath,
     pub(crate) obj: ObjLayer,
     pub(crate) matrix: mtx::Matrix,
+    pub(crate) force_blank: bool,
+    pub(crate) brightness: u8,
     pub(crate) frame_buffer: Vec<(u8, u8, u8)>,
 }
 
@@ -61,8 +63,15 @@ impl Ppu {
             color_math: ColorMath::default(),
             obj: ObjLayer::default(),
             matrix: mtx::Matrix::default(),
+            force_blank: true,
+            brightness: 0,
             frame_buffer: vec![(0, 0, 0); SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize],
         }
+    }
+
+    pub(crate) fn set_display_control(&mut self, value: u8) {
+        self.force_blank = value & 0x80 != 0;
+        self.brightness = value & 0x0F;
     }
 
     pub fn palette(&self, index: usize) -> [u16; 16] {
