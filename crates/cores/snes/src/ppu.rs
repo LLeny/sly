@@ -2,6 +2,7 @@ pub(crate) mod bg;
 pub mod cgram;
 pub(crate) mod color_math;
 pub(crate) mod latch;
+mod layer_order;
 pub mod oam;
 pub(crate) mod obj;
 pub(crate) mod regs;
@@ -236,7 +237,7 @@ pub struct TilemapEntry {
     pub raw: u16,
     pub tile_index: u16,
     pub palette_selection: u8,
-    pub priority: bool,
+    pub priority: Priority,
     pub flip_h: bool,
     pub flip_v: bool,
 }
@@ -247,7 +248,11 @@ impl From<u16> for TilemapEntry {
             raw,
             tile_index: raw & 0b11_1111_1111,
             palette_selection: (raw >> 10) as u8 & 0b111,
-            priority: raw & 1 << 13 != 0,
+            priority: if raw & 1 << 13 != 0 {
+                Priority::High
+            } else {
+                Priority::Normal
+            },
             flip_h: raw & 1 << 14 != 0,
             flip_v: raw & 1 << 15 != 0,
         }

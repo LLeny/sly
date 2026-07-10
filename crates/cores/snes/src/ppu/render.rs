@@ -1,63 +1,101 @@
-use crate::ppu::regs::{
-    BackgroundMode, ColorMathAddend, ColorMathIntensity, ColorSource, LayerMask, Priority,
-};
+use crate::ppu::layer_order::{self, RenderPass};
+use crate::ppu::regs::{ColorMathAddend, ColorMathIntensity, ColorSource, LayerMask, Priority};
 use crate::ppu::{Ppu, SCREEN_WIDTH, Sprite, TilemapEntry, cgram};
 
-#[derive(Clone, Copy)]
-struct Pixel {
-    word: u16,
-    layer: u8,
-    math: bool,
+const SCREEN_WIDTH_USIZE: usize = SCREEN_WIDTH as usize;
+const MAX_OBJECTS_PER_SCANLINE: usize = 32;
+const MAX_OBJECT_TILES_PER_SCANLINE: usize = 34;
+const FIRST_COLOR_MATH_OBJECT_PALETTE: u8 = 4;
+
+type CompositedLine = [Option<VisiblePixel>; SCREEN_WIDTH_USIZE];
+type ObjectLine = [Option<ObjectPixel>; SCREEN_WIDTH_USIZE];
+type RgbLine = [(u8, u8, u8); SCREEN_WIDTH_USIZE];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VisiblePixel {
+    color: u16,
+    source: PixelSource,
+    allows_color_math: bool,
 }
 
-const OBJ: u8 = LayerMask::OBJ;
-const BACKDROP: u8 = LayerMask::BACKDROP;
-
-const FIRST_MATH_OBJ_PALETTE: u8 = 4;
-
-type Line = [Option<Pixel>; SCREEN_WIDTH as usize];
-type ObjLine = [Option<(u8, u8)>; SCREEN_WIDTH as usize];
-
-#[derive(Clone, Copy)]
-enum Layer {
-    Bg(usize, bool),
-    Obj(u8),
+impl VisiblePixel {
+    fn backdrop(color: u16) -> Self {
+        Self {
+            color,
+            source: PixelSource::Backdrop,
+            allows_color_math: true,
+        }
+    }
 }
 
-impl Ppu {
-    pub fn render_scanline(&mut self, scanline: usize) {
-        let y = scanline as u32;
-        let obj = if self.main_screen.obj() || self.sub_screen.obj() {
-            self.obj_line(y)
-        } else {
-            [None; SCREEN_WIDTH as usize]
-        };
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PixelSource {
+    Background(u8),
+    Object,
+    Backdrop,
+}
 
-        let main = self.composite(self.main_screen, &obj, y);
-        let sub = if self.color_math.addend == ColorMathAddend::SubScreen
-            && self.color_math.layers.raw() != 0
-        {
-            Some(self.composite(self.sub_screen, &obj, y))
-        } else {
-            None
-        };
+impl PixelSource {
+    fn color_math_layer(self) -> u8 {
+        match self {
+            Self::Background(layer) => layer,
+            Self::Object => LayerMask::OBJ,
+            Self::Backdrop => LayerMask::BACKDROP,
+        }
+    }
+}
 
-        self.resolve(scanline, &main, sub.as_ref());
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ObjectPixel {
+    priority: u8,
+    palette: u8,
+    color: u8,
+}
+
+struct ScanlineRenderer<'a> {
+    ppu: &'a Ppu,
+    y: u32,
+}
+
+impl<'a> ScanlineRenderer<'a> {
+    fn new(ppu: &'a Ppu, y: u32) -> Self {
+        Self { ppu, y }
     }
 
-    fn composite(&self, screen: LayerMask, obj: &ObjLine, y: u32) -> Line {
-        let mut line: Line = [None; SCREEN_WIDTH as usize];
+    fn render(&self, row: &mut RgbLine) {
+        let objects = if self.ppu.main_screen.obj() || self.ppu.sub_screen.obj() {
+            self.object_pixels_on_scanline()
+        } else {
+            [None; SCREEN_WIDTH_USIZE]
+        };
 
-        for &layer in self.layer_order() {
-            match layer {
-                Layer::Bg(bg, priority) => {
-                    if screen.bg(bg) {
-                        self.draw_bg(bg, priority, y, &mut line);
+        let main = self.compose_layers(self.ppu.main_screen, &objects);
+        let sub = self
+            .uses_sub_screen_for_color_math()
+            .then(|| self.compose_layers(self.ppu.sub_screen, &objects));
+
+        self.resolve_output_scanline(&main, sub.as_ref(), row);
+    }
+
+    fn uses_sub_screen_for_color_math(&self) -> bool {
+        self.ppu.color_math.addend == ColorMathAddend::SubScreen
+            && self.ppu.color_math.layers.raw() != 0
+    }
+
+    fn compose_layers(&self, enabled_layers: LayerMask, objects: &ObjectLine) -> CompositedLine {
+        let mut line = [None; SCREEN_WIDTH_USIZE];
+
+        let passes = layer_order::front_to_back_passes(self.ppu.bg_mode, self.ppu.bg3_priority);
+        for pass in passes {
+            match *pass {
+                RenderPass::Background { layer, priority } => {
+                    if enabled_layers.bg(layer) {
+                        self.paint_background(layer, priority, &mut line);
                     }
                 }
-                Layer::Obj(priority) => {
-                    if screen.obj() {
-                        self.draw_obj(priority, obj, &mut line);
+                RenderPass::Objects { priority } => {
+                    if enabled_layers.obj() {
+                        self.paint_objects(priority, objects, &mut line);
                     }
                 }
             }
@@ -66,170 +104,71 @@ impl Ppu {
         line
     }
 
-    fn resolve(&mut self, scanline: usize, main: &Line, sub: Option<&Line>) {
-        let math = &self.color_math;
-
-        // TODO: windows
-        let in_window = false;
-        let force_black = math.main_screen_region.contains(in_window);
-        let math_masked = math.sub_screen_region.contains(in_window);
-
-        let backdrop = Pixel {
-            word: self.cgram.word(0),
-            layer: BACKDROP,
-            math: true,
-        };
-
-        let row =
-            &mut self.frame_buffer[scanline * SCREEN_WIDTH as usize..][..SCREEN_WIDTH as usize];
-
-        for (x, (dst, pixel)) in row.iter_mut().zip(main).enumerate() {
-            let pixel = pixel.unwrap_or(backdrop);
-            let mut word = if force_black { 0 } else { pixel.word };
-
-            if pixel.math && math.layers.layer(pixel.layer) && !math_masked {
-                let (addend, transparent_sub) = match (math.addend, sub) {
-                    (ColorMathAddend::SubScreen, Some(line)) => match line[x] {
-                        Some(sub_pixel) => (sub_pixel.word, false),
-                        None => (math.fixed_color, true),
-                    },
-                    _ => (math.fixed_color, false),
-                };
-                let halve = matches!(math.intensity, ColorMathIntensity::Half)
-                    && !force_black
-                    && !transparent_sub;
-                word = math.apply(word, addend, halve);
-            }
-
-            *dst = cgram::rgb(word);
-        }
-    }
-
-    fn layer_order(&self) -> &'static [Layer] {
-        use Layer::{Bg, Obj};
-
-        const H: bool = true;
-        const L: bool = false;
-
-        const TWO_BG: &[Layer] = &[
-            Obj(3),
-            Bg(0, H),
-            Obj(2),
-            Bg(1, H),
-            Obj(1),
-            Bg(0, L),
-            Obj(0),
-            Bg(1, L),
-        ];
-
-        match (self.bg_mode, self.bg3_priority) {
-            (BackgroundMode::Mode0, _) => &[
-                Obj(3),
-                Bg(0, H),
-                Bg(1, H),
-                Obj(2),
-                Bg(0, L),
-                Bg(1, L),
-                Obj(1),
-                Bg(2, H),
-                Bg(3, H),
-                Obj(0),
-                Bg(2, L),
-                Bg(3, L),
-            ],
-            (BackgroundMode::Mode1, Priority::High) => &[
-                Bg(2, H),
-                Obj(3),
-                Bg(0, H),
-                Bg(1, H),
-                Obj(2),
-                Bg(0, L),
-                Bg(1, L),
-                Obj(1),
-                Obj(0),
-                Bg(2, L),
-            ],
-            (BackgroundMode::Mode1, Priority::Normal) => &[
-                Obj(3),
-                Bg(0, H),
-                Bg(1, H),
-                Obj(2),
-                Bg(0, L),
-                Bg(1, L),
-                Obj(1),
-                Bg(2, H),
-                Obj(0),
-                Bg(2, L),
-            ],
-            // TODO: modes 2-7
-            _ => TWO_BG,
-        }
-    }
-
-    fn sprites_in_range(&self, y: u32) -> [Option<Sprite>; 32] {
-        // TODO: priority rotation
-        let mut in_range = [None; 32];
+    fn visible_objects_on_scanline(&self) -> [Option<Sprite>; MAX_OBJECTS_PER_SCANLINE] {
+        // TODO: apply OAM priority rotation
+        let mut objects = [None; MAX_OBJECTS_PER_SCANLINE];
         let mut count = 0;
 
         for index in 0..128 {
-            if !self.sprite_covers_line(index, y) {
+            if !self.ppu.sprite_covers_line(index, self.y) {
                 continue;
             }
 
-            let sprite = self.sprite(index);
-            if !sprite.in_range(y) {
+            let sprite = self.ppu.sprite(index);
+            if !sprite.in_range(self.y) {
                 continue;
             }
 
-            if count == in_range.len() {
-                // TODO: range over flag
+            if count == objects.len() {
+                // TODO: set the range-over flag
                 break;
             }
 
-            in_range[count] = Some(sprite);
+            objects[count] = Some(sprite);
             count += 1;
         }
 
-        in_range
+        objects
     }
 
-    fn obj_line(&self, y: u32) -> ObjLine {
-        let mut line = [None; SCREEN_WIDTH as usize];
-        let mut tiles = 0;
+    fn object_pixels_on_scanline(&self) -> ObjectLine {
+        let mut line = [None; SCREEN_WIDTH_USIZE];
+        let mut tile_count = 0;
 
-        for sprite in self.sprites_in_range(y).iter().rev().flatten() {
-            let row = sprite.row(y);
+        for sprite in self.visible_objects_on_scanline().iter().rev().flatten() {
+            let sprite_row = sprite.row(self.y);
 
-            for sliver in 0..sprite.width / 8 {
-                let base = sprite.x + sliver as i32 * 8;
-                if base <= -8 || base >= SCREEN_WIDTH as i32 {
+            for tile_column in 0..sprite.width / 8 {
+                let screen_x = sprite.x + tile_column as i32 * 8;
+                if screen_x <= -8 || screen_x >= SCREEN_WIDTH as i32 {
                     continue;
                 }
 
-                if tiles == 34 {
-                    // TODO: time over flag
+                if tile_count == MAX_OBJECT_TILES_PER_SCANLINE {
+                    // TODO: set the time-over flag?
                     return line;
                 }
+                tile_count += 1;
 
-                tiles += 1;
+                let (texture_x, texture_y) = sprite.texel(tile_column * 8, sprite_row);
+                let tile = sprite.sub_tile(texture_x / 8, texture_y / 8);
+                let tile_base = self.ppu.obj.tile_addr(tile) * 2;
+                let tile_row = self.ppu.tile_row(tile_base, texture_y as usize % 8, 4);
 
-                let (tx, ty) = sprite.texel(sliver * 8, row);
-                let tile_base = self.obj.tile_addr(sprite.sub_tile(tx / 8, ty / 8)) * 2;
-                let pixels = self.tile_row(tile_base, ty as usize % 8, 4);
-
-                for i in 0..8u32 {
-                    let x = base + i as i32;
+                for pixel_offset in 0..8u32 {
+                    let x = screen_x + pixel_offset as i32;
                     if !(0..SCREEN_WIDTH as i32).contains(&x) {
                         continue;
                     }
 
-                    let (px, _) = sprite.texel(sliver * 8 + i, row);
-                    let color = pixels[px as usize % 8];
-                    if color != 0 {
-                        line[x as usize] = Some((
-                            sprite.priority,
-                            Self::obj_palette_addr(sprite.palette, color),
-                        ));
+                    let (texture_x, _) = sprite.texel(tile_column * 8 + pixel_offset, sprite_row);
+                    let color_index = tile_row[texture_x as usize % 8];
+                    if color_index != 0 {
+                        line[x as usize] = Some(ObjectPixel {
+                            priority: sprite.priority,
+                            palette: sprite.palette,
+                            color: color_index,
+                        });
                     }
                 }
             }
@@ -238,79 +177,182 @@ impl Ppu {
         line
     }
 
-    fn draw_obj(&self, priority: u8, obj: &ObjLine, line: &mut Line) {
-        for (slot, &pixel) in line.iter_mut().zip(obj) {
-            if slot.is_none()
-                && let Some((p, addr)) = pixel
-                && p == priority
-            {
-                *slot = Some(Pixel {
-                    word: self.cgram.word(addr),
-                    layer: OBJ,
-                    math: addr >= Self::obj_palette_addr(FIRST_MATH_OBJ_PALETTE, 0),
-                });
-            }
-        }
-    }
-
-    fn draw_bg(&self, layer: usize, priority: bool, y: u32, line: &mut Line) {
-        let (Some(bpp), Some(map)) = (self.bg_mode.bpp(layer), self.tilemap_header(layer)) else {
-            return;
-        };
-
-        let direct = bpp == 8 && matches!(self.color_math.color_source, ColorSource::Direct);
-        let sy = (y + map.scroll_y) % (map.height * map.tile_px);
-        let (ty, in_y) = (sy / map.tile_px, sy % map.tile_px);
-
-        let mut cached = None;
-        let mut pixels = [0u8; 8];
-
-        let mut x = 0;
-        while x < line.len() as u32 {
-            let sx = (x + map.scroll_x) % (map.width * map.tile_px);
-            let (tx, in_x) = (sx / map.tile_px, sx % map.tile_px);
-            let run = (map.tile_px - in_x).min(line.len() as u32 - x);
-
-            let entry = TilemapEntry::from(self.vram.word(map.entry_addr(tx, ty) as u16));
-            if entry.priority != priority {
-                x += run;
+    fn paint_objects(&self, priority: u8, objects: &ObjectLine, line: &mut CompositedLine) {
+        for (slot, object) in line.iter_mut().zip(objects) {
+            let Some(object) = object else {
+                continue;
+            };
+            if slot.is_some() || object.priority != priority {
                 continue;
             }
 
-            let (base, _) = self.bg_palette(layer, bpp, entry.palette_selection as usize);
+            *slot = Some(self.visible_object_pixel(*object));
+        }
+    }
 
-            for i in 0..run {
-                let slot = &mut line[(x + i) as usize];
+    fn visible_object_pixel(&self, object: ObjectPixel) -> VisiblePixel {
+        VisiblePixel {
+            color: self
+                .ppu
+                .cgram
+                .word(Ppu::obj_palette_addr(object.palette, object.color)),
+            source: PixelSource::Object,
+            allows_color_math: object.palette >= FIRST_COLOR_MATH_OBJECT_PALETTE,
+        }
+    }
+
+    fn paint_background(&self, layer: usize, priority: Priority, line: &mut CompositedLine) {
+        let (Some(bits_per_pixel), Some(map)) =
+            (self.ppu.bg_mode.bpp(layer), self.ppu.tilemap_header(layer))
+        else {
+            return;
+        };
+
+        let use_direct_color =
+            bits_per_pixel == 8 && matches!(self.ppu.color_math.color_source, ColorSource::Direct);
+        let map_y = (self.y + map.scroll_y) % (map.height * map.tile_px);
+        let (tile_y, pixel_y) = (map_y / map.tile_px, map_y % map.tile_px);
+
+        // adjacent pixels usually come from the same tile row, so cache the
+        // last decoded one
+        let mut cached_tile_row = None;
+        let mut decoded_row = [0u8; 8];
+        let mut screen_x = 0;
+
+        while screen_x < SCREEN_WIDTH {
+            let map_x = (screen_x + map.scroll_x) % (map.width * map.tile_px);
+            let (tile_x, pixel_x) = (map_x / map.tile_px, map_x % map.tile_px);
+            let pixels_in_span = (map.tile_px - pixel_x).min(SCREEN_WIDTH - screen_x);
+
+            let entry =
+                TilemapEntry::from(self.ppu.vram.word(map.entry_addr(tile_x, tile_y) as u16));
+            if entry.priority != priority {
+                screen_x += pixels_in_span;
+                continue;
+            }
+
+            let (palette_base, _) =
+                self.ppu
+                    .bg_palette(layer, bits_per_pixel, entry.palette_selection as usize);
+
+            for offset in 0..pixels_in_span {
+                let slot = &mut line[(screen_x + offset) as usize];
                 if slot.is_some() {
                     continue;
                 }
 
-                let (px, py) = entry.texel(in_x + i, in_y, map.tile_px);
-                let index = entry.char_index(px, py);
-                if cached != Some((index, py)) {
-                    let tile_base =
-                        self.bg_layers[layer].tileset_addr * 2 + index as u32 * (bpp as u32 * 8);
-                    pixels = self.tile_row(tile_base, py as usize % 8, bpp);
-                    cached = Some((index, py));
+                let (texture_x, texture_y) = entry.texel(pixel_x + offset, pixel_y, map.tile_px);
+                let tile_index = entry.char_index(texture_x, texture_y);
+                if cached_tile_row != Some((tile_index, texture_y)) {
+                    let tile_base = self.ppu.bg_layers[layer].tileset_addr * 2
+                        + tile_index as u32 * (bits_per_pixel as u32 * 8);
+                    decoded_row =
+                        self.ppu
+                            .tile_row(tile_base, texture_y as usize % 8, bits_per_pixel);
+                    cached_tile_row = Some((tile_index, texture_y));
                 }
 
-                let color = pixels[px as usize % 8];
-                if color != 0 {
-                    let word = if direct {
-                        cgram::direct_color(entry.palette_selection, color)
-                    } else {
-                        self.cgram.word((base + color as usize) as u8)
-                    };
-
-                    *slot = Some(Pixel {
-                        word,
-                        layer: layer as u8,
-                        math: true,
-                    });
+                let color_index = decoded_row[texture_x as usize % 8];
+                if color_index == 0 {
+                    continue;
                 }
+
+                *slot = Some(VisiblePixel {
+                    color: self.background_color(
+                        palette_base,
+                        &entry,
+                        color_index,
+                        use_direct_color,
+                    ),
+                    source: PixelSource::Background(layer as u8),
+                    allows_color_math: true,
+                });
             }
 
-            x += run;
+            screen_x += pixels_in_span;
         }
+    }
+
+    fn background_color(
+        &self,
+        palette_base: usize,
+        entry: &TilemapEntry,
+        color_index: u8,
+        use_direct_color: bool,
+    ) -> u16 {
+        if use_direct_color {
+            cgram::direct_color(entry.palette_selection, color_index)
+        } else {
+            self.ppu
+                .cgram
+                .word((palette_base + color_index as usize) as u8)
+        }
+    }
+
+    fn resolve_output_scanline(
+        &self,
+        main: &CompositedLine,
+        sub: Option<&CompositedLine>,
+        row: &mut RgbLine,
+    ) {
+        // TODO: windows lol
+        let in_window = false;
+        let force_main_to_black = self.ppu.color_math.main_screen_region.contains(in_window);
+        let color_math_masked = self.ppu.color_math.sub_screen_region.contains(in_window);
+        let backdrop = VisiblePixel::backdrop(self.ppu.cgram.word(0));
+
+        for (x, out) in row.iter_mut().enumerate() {
+            *out = self.resolve_output_pixel(
+                main[x].unwrap_or(backdrop),
+                sub.and_then(|line| line[x]),
+                force_main_to_black,
+                color_math_masked,
+            );
+        }
+    }
+
+    fn resolve_output_pixel(
+        &self,
+        pixel: VisiblePixel,
+        sub: Option<VisiblePixel>,
+        force_main_to_black: bool,
+        color_math_masked: bool,
+    ) -> (u8, u8, u8) {
+        let mut color = if force_main_to_black { 0 } else { pixel.color };
+
+        if pixel.allows_color_math
+            && self
+                .ppu
+                .color_math
+                .layers
+                .layer(pixel.source.color_math_layer())
+            && !color_math_masked
+        {
+            let (addend, sub_screen_was_transparent) = self.color_math_addend(sub);
+            let halve = matches!(self.ppu.color_math.intensity, ColorMathIntensity::Half)
+                && !force_main_to_black
+                && !sub_screen_was_transparent;
+            color = self.ppu.color_math.apply(color, addend, halve);
+        }
+
+        cgram::rgb(color)
+    }
+
+    /// Returns addend and whether the sub was transparent.
+    fn color_math_addend(&self, sub: Option<VisiblePixel>) -> (u16, bool) {
+        match (self.ppu.color_math.addend, sub) {
+            (ColorMathAddend::SubScreen, Some(pixel)) => (pixel.color, false),
+            (ColorMathAddend::SubScreen, None) => (self.ppu.color_math.fixed_color, true),
+            _ => (self.ppu.color_math.fixed_color, false),
+        }
+    }
+}
+
+impl Ppu {
+    pub fn render_scanline(&mut self, scanline: usize) {
+        let mut row = [(0, 0, 0); SCREEN_WIDTH_USIZE];
+        ScanlineRenderer::new(self, scanline as u32).render(&mut row);
+        self.frame_buffer[scanline * SCREEN_WIDTH_USIZE..][..SCREEN_WIDTH_USIZE]
+            .copy_from_slice(&row);
     }
 }

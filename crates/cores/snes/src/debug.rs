@@ -1066,7 +1066,7 @@ fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {
             raw: entry.raw,
             tile_index: entry.tile_index,
             palette: entry.palette_selection,
-            priority: entry.priority,
+            priority: entry.priority == crate::ppu::regs::Priority::High,
             flip_h: entry.flip_h,
             flip_v: entry.flip_v,
             pixels,

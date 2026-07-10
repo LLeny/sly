@@ -193,7 +193,7 @@ impl BackgroundMode {
     }
 }
 
-#[derive(BitEnum, Clone, Copy, Default)]
+#[derive(BitEnum, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Priority {
     #[fallback]
     #[default]
