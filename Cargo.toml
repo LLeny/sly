@@ -8,6 +8,7 @@ members = [
     "crates/models/debugger",
     "crates/models/frontend",
     "crates/playground",
+    "crates/screenshotter",
     "crates/testrunner",
 ]
 
