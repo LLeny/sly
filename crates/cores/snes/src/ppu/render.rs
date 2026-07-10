@@ -1,5 +1,7 @@
 use crate::ppu::layer_order::{self, RenderPass};
-use crate::ppu::regs::{ColorMathAddend, ColorMathIntensity, ColorSource, LayerMask, Priority};
+use crate::ppu::regs::{
+    ColorMathAddend, ColorMathIntensity, ColorSource, LayerMask, Priority, WindowRegion,
+};
 use crate::ppu::{Ppu, SCREEN_WIDTH, Sprite, TilemapEntry, cgram};
 
 const SCREEN_WIDTH_USIZE: usize = SCREEN_WIDTH as usize;
@@ -295,11 +297,17 @@ impl<'a> ScanlineRenderer<'a> {
         sub: Option<&CompositedLine>,
         row: &mut RgbLine,
     ) {
-        // TODO: windows lol
-        let in_window = false;
-        let force_main_to_black = self.ppu.color_math.main_screen_region.contains(in_window);
-        let color_math_masked = self.ppu.color_math.sub_screen_region.contains(in_window);
         let backdrop = VisiblePixel::backdrop(self.ppu.cgram.word(0));
+
+        // TODO: Windows, HDMA?
+        let force_main_to_black = matches!(
+            self.ppu.color_math.main_screen_region,
+            WindowRegion::Everywhere
+        );
+        let color_math_masked = matches!(
+            self.ppu.color_math.sub_screen_region,
+            WindowRegion::Everywhere
+        );
 
         for (x, out) in row.iter_mut().enumerate() {
             *out = self.resolve_output_pixel(
