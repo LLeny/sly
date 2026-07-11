@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 snes = { path = "../../crates/cores/snes" }
-minifb = { version = "0.28.0", default-features = false, features = ["x11"] }
+sdl3 = { version = "0.18.4", features = ["build-from-source-static"] }
+gif = "0.14.2"
