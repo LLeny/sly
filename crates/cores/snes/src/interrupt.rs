@@ -1,4 +1,9 @@
+use crate::Snes;
+use crate::mmio::MemoryMap;
 use crate::mmio::regs::{NmiTimerEnable, VblankFlagCpuVersion};
+
+const MASTER_CLOCKS_PER_DOT: u64 = 4;
+const MAX_H_COUNTER: u64 = 339;
 
 #[derive(Default)]
 pub struct EdgeLatch {
@@ -20,11 +25,42 @@ impl EdgeLatch {
     }
 }
 
+pub struct Timer {
+    pub(crate) target: u16,
+}
+
+impl Default for Timer {
+    fn default() -> Self {
+        Self { target: 0x1FF }
+    }
+}
+
+impl Timer {
+    pub(crate) fn set_target_low(&mut self, value: u8) {
+        self.target = (self.target & 0x100) | value as u16;
+    }
+
+    pub(crate) fn set_target_high(&mut self, value: u8) {
+        self.target = (self.target & 0x0FF) | ((value as u16 & 1) << 8);
+    }
+
+    pub(crate) fn target_low(&self) -> u8 {
+        self.target as u8
+    }
+
+    pub(crate) fn target_high(&self) -> u8 {
+        (self.target >> 8) as u8
+    }
+}
+
 #[derive(Default)]
 pub struct Irq {
     nmitimen: NmiTimerEnable,
     rdnmi: VblankFlagCpuVersion,
     nmi: EdgeLatch,
+    timer_flag: bool,
+    pub(crate) h_timer: Timer,
+    pub(crate) v_timer: Timer,
 }
 
 impl Irq {
@@ -40,6 +76,9 @@ impl Irq {
 
     pub fn write_nmitimen(&mut self, value: u8) {
         self.nmitimen = NmiTimerEnable::from_raw(value);
+        if self.nmitimen.hv_timer_condition() == 0 {
+            self.timer_flag = false;
+        }
         self.sync();
     }
 
@@ -49,6 +88,28 @@ impl Irq {
 
     pub fn joypad_autoread_enabled(&self) -> bool {
         self.nmitimen.joypad_autoread_enable()
+    }
+
+    pub fn hv_timer_condition(&self) -> u8 {
+        self.nmitimen.hv_timer_condition()
+    }
+
+    pub fn raise_timer(&mut self) {
+        self.timer_flag = true;
+    }
+
+    pub fn irq_pending(&self) -> bool {
+        self.timer_flag
+    }
+
+    pub fn read_timeup(&mut self) -> u8 {
+        let value = self.peek_timeup();
+        self.timer_flag = false;
+        value
+    }
+
+    pub fn peek_timeup(&self) -> u8 {
+        (self.timer_flag as u8) << 7
     }
 
     pub fn read_rdnmi(&mut self) -> u8 {
@@ -63,5 +124,39 @@ impl Irq {
 
     pub fn take_nmi(&mut self) -> bool {
         self.nmi.take()
+    }
+}
+
+pub(crate) fn hv_timer_line<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: u64) {
+    let condition = snes.irq.hv_timer_condition();
+    if condition == 0 {
+        return;
+    }
+
+    let scanline = snes.scheduler.scanline_at(deadline);
+    let htime = snes.irq.h_timer.target as u64;
+    let vtime = snes.irq.v_timer.target as u64;
+
+    match condition {
+        // H-timer: fire every scanline when H reaches HTIME
+        1 => schedule_h_fire(snes, deadline, htime),
+        // V-timer: fire once per frame at V == VTIME, H = 0
+        2 if scanline == vtime => snes.irq.raise_timer(),
+        // H+V-timer: fire at V == VTIME when H reaches HTIME
+        3 if scanline == vtime => schedule_h_fire(snes, deadline, htime),
+        _ => {}
+    }
+}
+
+fn schedule_h_fire<M: MemoryMap + 'static>(snes: &mut Snes<M>, line_start: u64, htime: u64) {
+    if htime <= MAX_H_COUNTER {
+        snes.scheduler
+            .schedule_event(line_start + htime * MASTER_CLOCKS_PER_DOT, hv_timer_fire);
+    }
+}
+
+fn hv_timer_fire<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
+    if snes.irq.hv_timer_condition() != 0 {
+        snes.irq.raise_timer();
     }
 }

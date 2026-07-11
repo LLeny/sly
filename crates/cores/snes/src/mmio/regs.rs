@@ -137,6 +137,14 @@ register_mmio! {
     }
 }
 
+register_mmio! {
+    /// TIMEUP
+    pub struct TimerUp @ 0x4211 {
+        #[bits(7)]
+        pub flag: u8,
+    }
+}
+
 #[derive(BitEnum, Clone, Copy)]
 pub enum TransferPattern {
     #[fallback]
@@ -365,5 +373,17 @@ impl MmioReg for VblankFlagCpuVersion {
 
     fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
         snes.irq.rdnmi_raw()
+    }
+}
+
+impl MmioReg for TimerUp {
+    fn read<M: MemoryMap>(snes: &mut Snes<M>) -> u8 {
+        snes.irq.read_timeup()
+    }
+
+    fn write<M: MemoryMap>(_snes: &mut Snes<M>, _value: u8) {}
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        snes.irq.peek_timeup()
     }
 }

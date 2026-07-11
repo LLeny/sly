@@ -360,8 +360,7 @@ pub(crate) fn in_hblank<M: MemoryMap>(scheduler: &Scheduler<M>) -> bool {
 }
 
 pub(crate) fn draw_scanline<M: MemoryMap>(snes: &mut Snes<M>, deadline: u64) {
-    let lines_per_frame = snes.scheduler.cycles_per_frame() / MASTER_CLOCKS_PER_SCANLINE;
-    let scanline = (deadline / MASTER_CLOCKS_PER_SCANLINE) % lines_per_frame;
+    let scanline = snes.scheduler.scanline_at(deadline);
     if (1..=SCREEN_HEIGHT as u64).contains(&scanline) {
         snes.ppu.render_scanline(scanline as usize - 1);
     }

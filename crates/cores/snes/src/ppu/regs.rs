@@ -41,6 +41,11 @@ pub(crate) const MPYL: u16 = 0x2134;
 pub(crate) const MPYM: u16 = 0x2135;
 pub(crate) const MPYH: u16 = 0x2136;
 
+pub(crate) const HTIMEL: u16 = 0x4207;
+pub(crate) const HTIMEH: u16 = 0x4208;
+pub(crate) const VTIMEL: u16 = 0x4209;
+pub(crate) const VTIMEH: u16 = 0x420A;
+
 register_mmio_raw! {
     OAMADDL => "OAMADDL",
     OAMADDH => "OAMADDH",
@@ -78,6 +83,10 @@ register_mmio_raw! {
     MPYL => "MPYL",
     MPYM => "MPYM",
     MPYH => "MPYH",
+    HTIMEL => "HTIMEL",
+    HTIMEH => "HTIMEH",
+    VTIMEL => "VTIMEL",
+    VTIMEH => "VTIMEH",
 }
 
 pub(crate) struct BgScrollOffset;

@@ -15,13 +15,13 @@ use crate::math::{RDDIVH, RDDIVL, RDMPYH, RDMPYL, WRDIVB, WRDIVH, WRDIVL, WRMPYA
 use crate::mmio::dma::{CHANNEL_REGS_END, CHANNEL_REGS_START, Dma};
 use crate::mmio::regs::{
     APU_IO_END, APU_IO_START, HdmaTransferEnable, HvStatusJoypadBusy, MdmaTransferStart,
-    NmiTimerEnable, VblankFlagCpuVersion,
+    NmiTimerEnable, TimerUp, VblankFlagCpuVersion,
 };
 use crate::ppu::regs::{
     Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, COLDATA, ColorMathControl,
-    ColorMathSelect, INIDISP, MPYH, MPYL, MPYM, Mode7, OAMADDH, OAMADDL, OAMDATA, OAMDATAREAD,
-    RDCGRAM, RDVRAMH, RDVRAML, SETINI, SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH,
-    VMADDL, VMDATAH, VMDATAL, VramControl,
+    ColorMathSelect, HTIMEH, HTIMEL, INIDISP, MPYH, MPYL, MPYM, Mode7, OAMADDH, OAMADDL, OAMDATA,
+    OAMDATAREAD, RDCGRAM, RDVRAMH, RDVRAML, SETINI, SpriteSizeAndTileBase, TM, TS,
+    TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL, VTIMEH, VTIMEL, VramControl,
 };
 use crate::{Cartridge, Snes};
 
@@ -240,6 +240,7 @@ impl<M: MemoryMap> Snes<M> {
             MPYH => (self.ppu.matrix.result >> 16) as u8,
             NmiTimerEnable::ADDRESS => NmiTimerEnable::read(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::read(self),
+            TimerUp::ADDRESS => TimerUp::read(self),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::read(self),
             MdmaTransferStart::ADDRESS => MdmaTransferStart::read(self),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::read(self),
@@ -310,9 +311,14 @@ impl<M: MemoryMap> Snes<M> {
             }
             BgScrollOffset::START..=BgScrollOffset::END => BgScrollOffset::write(self, reg, value),
             Mode7::START..=Mode7::END => Mode7::write(self, reg, value),
+            HTIMEL => self.irq.h_timer.set_target_low(value),
+            HTIMEH => self.irq.h_timer.set_target_high(value),
+            VTIMEL => self.irq.v_timer.set_target_low(value),
+            VTIMEH => self.irq.v_timer.set_target_high(value),
             MEMSEL => self.mmu.fastrom = value & 0x01 != 0,
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::write(self, value),
+            TimerUp::ADDRESS => TimerUp::write(self, value),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::write(self, value),
             MdmaTransferStart::ADDRESS => MdmaTransferStart::write(self, value),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::write(self, value),
@@ -368,10 +374,15 @@ impl<M: MemoryMap> Snes<M> {
             MPYH => (self.ppu.matrix.result >> 16) as u8,
             TM => self.ppu.main_screen.raw(),
             TS => self.ppu.sub_screen.raw(),
+            HTIMEL => self.irq.h_timer.target_low(),
+            HTIMEH => self.irq.h_timer.target_high(),
+            VTIMEL => self.irq.v_timer.target_low(),
+            VTIMEH => self.irq.v_timer.target_high(),
             ColorMathSelect::ADDRESS => ColorMathSelect::peek(self),
             ColorMathControl::ADDRESS => ColorMathControl::peek(self),
             NmiTimerEnable::ADDRESS => NmiTimerEnable::peek(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::peek(self),
+            TimerUp::ADDRESS => TimerUp::peek(self),
             HvStatusJoypadBusy::ADDRESS => HvStatusJoypadBusy::peek(self),
             MdmaTransferStart::ADDRESS => MdmaTransferStart::peek(self),
             HdmaTransferEnable::ADDRESS => HdmaTransferEnable::peek(self),

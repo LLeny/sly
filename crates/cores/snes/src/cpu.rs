@@ -193,8 +193,17 @@ pub fn step<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
         ExecutionState::Stopped => self::idle_cycles(snes),
         _ if snes.irq.take_nmi() => {
             snes.cpu.execution = ExecutionState::Running;
-            self::service_nmi(snes);
+            self::service_vectored(snes, 0xFFEA, 0xFFFA);
             timing::interrupt_cycles(&snes.cpu)
+        }
+        _ if snes.irq.irq_pending() && !snes.cpu.flags.irq_disable() => {
+            snes.cpu.execution = ExecutionState::Running;
+            self::service_vectored(snes, 0xFFEE, 0xFFFE);
+            timing::interrupt_cycles(&snes.cpu)
+        }
+        ExecutionState::Waiting if snes.irq.irq_pending() => {
+            snes.cpu.execution = ExecutionState::Running;
+            self::execute_instruction(snes)
         }
         ExecutionState::Waiting => self::idle_cycles(snes),
         ExecutionState::Running => self::execute_instruction(snes),
@@ -258,9 +267,9 @@ fn execute_instruction<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
     cycles
 }
 
-pub(crate) fn service_nmi<M: MemoryMap>(snes: &mut Snes<M>) {
+pub(crate) fn service_vectored<M: MemoryMap>(snes: &mut Snes<M>, native: u16, emulation: u16) {
     let mut vm = Interpreter::new(snes, 0);
-    vm.service_interrupt(0xFFEA, 0xFFFA);
+    vm.service_interrupt(native, emulation);
     vm.commit();
 }
 

@@ -110,6 +110,10 @@ impl<M: MemoryMap + 'static> Snes<M> {
             .schedule_periodic(self.scheduler.cycles_per_frame(), ppu::vblank_end);
         self.scheduler
             .schedule_periodic(scheduler::MASTER_CLOCKS_PER_SCANLINE, ppu::draw_scanline);
+        self.scheduler.schedule_periodic(
+            scheduler::MASTER_CLOCKS_PER_SCANLINE,
+            interrupt::hv_timer_line,
+        );
         self.scheduler.schedule_periodic_at(
             scheduler::REFRESH_START_CLOCK,
             scheduler::MASTER_CLOCKS_PER_SCANLINE,

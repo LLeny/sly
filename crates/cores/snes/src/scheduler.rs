@@ -101,6 +101,11 @@ impl<M: MemoryMap> Scheduler<M> {
         (self.cycles / self.cycles_per_frame + 1) * self.cycles_per_frame
     }
 
+    pub fn scanline_at(&self, deadline: u64) -> u64 {
+        let lines_per_frame = self.cycles_per_frame / MASTER_CLOCKS_PER_SCANLINE;
+        (deadline / MASTER_CLOCKS_PER_SCANLINE) % lines_per_frame
+    }
+
     pub fn advance_by(&mut self, cycles: u64) {
         self.cycles += cycles;
     }
