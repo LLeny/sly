@@ -5552,6 +5552,7 @@ dependencies = [
  "anyhow",
  "clap",
  "crc32fast",
+ "gif 0.14.2",
  "owo-colors",
  "png 0.18.1",
  "snes",

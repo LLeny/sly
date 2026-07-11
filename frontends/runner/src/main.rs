@@ -6,15 +6,10 @@ use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
 use sdl3::pixels::PixelFormat;
 use sdl3::render::ScaleMode;
-use snes::cartridge::TvSystem;
 use snes::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use snes::{Cartridge, Snes};
 
 const SCALE: u32 = 2;
-
-const NTSC_FPS: f64 = 60.0988;
-const PAL_FPS: f64 = 50.007;
-
 const RECORD_FRAME_STEP: u32 = 2;
 
 struct Recorder {
@@ -95,10 +90,7 @@ fn main() {
     let cartridge = Cartridge::new(rom).expect("Failed to parse cartridge");
     let title = cartridge.title().trim().to_string();
     let tv_system = cartridge.region().tv_system();
-    let target_fps = match tv_system {
-        TvSystem::Ntsc => NTSC_FPS,
-        TvSystem::Pal => PAL_FPS,
-    };
+    let target_fps = tv_system.frame_rate();
     let frame_duration = Duration::from_secs_f64(1.0 / target_fps);
     let mut snes = Snes::new(cartridge);
 

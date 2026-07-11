@@ -34,6 +34,10 @@ struct Args {
     #[arg(long)]
     threads: Option<usize>,
 
+    /// Also write a demo.gif per game (every 4th frame)
+    #[arg(long)]
+    gif: bool,
+
     /// INTERNAL ONLY
     #[arg(long, hide = true)]
     worker: bool,
@@ -179,12 +183,17 @@ fn run_rom(rom: &RomFile, system: &System, args: &Args) -> RomResult {
         }
     };
 
-    let child = Command::new(exe)
+    let mut command = Command::new(exe);
+    command
         .arg(system.name)
         .arg(&rom.path)
         .arg("--worker")
         .arg("--out")
-        .arg(&args.out)
+        .arg(&args.out);
+    if args.gif {
+        command.arg("--gif");
+    }
+    let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -281,7 +290,7 @@ fn run_worker(args: &Args) -> Result<()> {
     out.flush()?;
 
     let out_dir = self::system_dir(&args.out, system).join(&game_id);
-    let capture = match capture::run(core.as_mut(), &system.config, &out_dir) {
+    let capture = match capture::run(core.as_mut(), &system.config, &out_dir, args.gif) {
         Ok(capture) => capture,
         Err(e) => return self::emit_error(&mut out, &format!("{e:#}")),
     };

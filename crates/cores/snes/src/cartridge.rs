@@ -120,6 +120,15 @@ pub enum TvSystem {
     Pal,
 }
 
+impl TvSystem {
+    pub fn frame_rate(self) -> f64 {
+        match self {
+            TvSystem::Ntsc => 60.0988,
+            TvSystem::Pal => 50.007,
+        }
+    }
+}
+
 impl std::fmt::Display for TvSystem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {

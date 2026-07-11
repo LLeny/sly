@@ -11,9 +11,9 @@ pub const SYSTEM: System = System {
     name: "snes",
     extensions: &["sfc", "smc"],
     config: CaptureConfig {
-        warmup_frames: 120,
+        warmup_frames: 60,
         every_frames: 60,
-        max_frames: 1800,
+        max_frames: 2400,
     },
     timeout: Duration::from_secs(120),
     build: |rom| Ok(Box::new(SnesScreenshotter::new(rom)?)),
@@ -22,6 +22,7 @@ pub const SYSTEM: System = System {
 struct SnesScreenshotter {
     snes: Snes,
     game_id: String,
+    frame_rate: f64,
 }
 
 impl SnesScreenshotter {
@@ -32,10 +33,12 @@ impl SnesScreenshotter {
 
         let cartridge = Cartridge::new(rom).context("parsing cartridge header")?;
         let game_id = Self::game_id(&cartridge);
+        let frame_rate = cartridge.region().tv_system().frame_rate();
 
         Ok(Self {
             snes: Snes::new(cartridge),
             game_id,
+            frame_rate,
         })
     }
 
@@ -69,6 +72,10 @@ impl SnesScreenshotter {
 impl ScreenshotCore for SnesScreenshotter {
     fn game_id(&self) -> String {
         self.game_id.clone()
+    }
+
+    fn frame_rate(&self) -> f64 {
+        self.frame_rate
     }
 
     fn run_frame(&mut self) {
