@@ -25,9 +25,12 @@ pub struct CaptureConfig {
     pub max_frames: u32,
 }
 
-const GIF_FRAME_STEP: u32 = 4;
+const GIF_FRAME_STEP: u32 = 2;
 const SIGNATURE_SIZE: usize = 16;
 const SIMILARITY_THRESHOLD: u32 = 5;
+
+const PNG_OPTIMIZATION_LEVEL: u8 = 2;
+const GIF_ENCODE_SPEED: i32 = 1;
 
 #[derive(Default)]
 pub struct Capture {
@@ -92,10 +95,17 @@ pub fn run(
     }
 
     if let Some(recorder) = gif {
-        recorder.finish();
+        recorder.finish()?;
     }
 
     Ok(capture)
+}
+
+struct PendingFrame {
+    width: u16,
+    height: u16,
+    pixels: Vec<u8>,
+    delay: u16,
 }
 
 struct GifRecorder {
@@ -103,6 +113,7 @@ struct GifRecorder {
     encoder: Option<gif::Encoder<BufWriter<File>>>,
     delay: u16,
     has_content: bool,
+    pending: Option<PendingFrame>,
 }
 
 impl GifRecorder {
@@ -113,6 +124,7 @@ impl GifRecorder {
             encoder: None,
             delay,
             has_content: false,
+            pending: None,
         }
     }
 
@@ -121,34 +133,56 @@ impl GifRecorder {
             self.has_content = true;
         }
 
+        if let Some(pending) = self.pending.as_mut().filter(|p| p.pixels == frame.pixels) {
+            pending.delay = pending.delay.saturating_add(self.delay);
+            return Ok(());
+        }
+
+        self.flush_pending()?;
+        self.pending = Some(PendingFrame {
+            width: frame.width as u16,
+            height: frame.height as u16,
+            pixels: frame.pixels.clone(),
+            delay: self.delay,
+        });
+        Ok(())
+    }
+
+    fn flush_pending(&mut self) -> Result<()> {
+        let Some(pending) = self.pending.take() else {
+            return Ok(());
+        };
+
         let encoder = match &mut self.encoder {
             Some(encoder) => encoder,
             None => {
                 let file = File::create(&self.path)
                     .with_context(|| format!("creating {}", self.path.display()))?;
-                let mut encoder = gif::Encoder::new(
-                    BufWriter::new(file),
-                    frame.width as u16,
-                    frame.height as u16,
-                    &[],
-                )
-                .with_context(|| format!("encoding {}", self.path.display()))?;
+                let mut encoder =
+                    gif::Encoder::new(BufWriter::new(file), pending.width, pending.height, &[])
+                        .with_context(|| format!("encoding {}", self.path.display()))?;
                 encoder.set_repeat(gif::Repeat::Infinite)?;
                 self.encoder.insert(encoder)
             }
         };
 
-        let mut gif_frame =
-            gif::Frame::from_rgb_speed(frame.width as u16, frame.height as u16, &frame.pixels, 30);
-        gif_frame.delay = self.delay;
+        let mut gif_frame = gif::Frame::from_rgb_speed(
+            pending.width,
+            pending.height,
+            &pending.pixels,
+            GIF_ENCODE_SPEED,
+        );
+        gif_frame.delay = pending.delay;
         encoder.write_frame(&gif_frame).context("writing gif frame")
     }
 
-    fn finish(self) {
+    fn finish(mut self) -> Result<()> {
+        self.flush_pending()?;
         drop(self.encoder);
         if !self.has_content {
             let _ = std::fs::remove_file(&self.path);
         }
+        Ok(())
     }
 }
 
@@ -207,17 +241,22 @@ fn similar(a: &[u8], b: &[u8]) -> bool {
 }
 
 fn write_png(path: &Path, frame: &Frame) -> Result<()> {
-    let file = File::create(path).with_context(|| format!("creating {}", path.display()))?;
+    let image = oxipng::RawImage::new(
+        frame.width,
+        frame.height,
+        oxipng::ColorType::RGB {
+            transparent_color: None,
+        },
+        oxipng::BitDepth::Eight,
+        frame.pixels.clone(),
+    )
+    .context("building raw image")?;
 
-    let mut encoder = png::Encoder::new(BufWriter::new(file), frame.width, frame.height);
-    encoder.set_color(png::ColorType::Rgb);
-    encoder.set_depth(png::BitDepth::Eight);
-    encoder
-        .write_header()?
-        .write_image_data(&frame.pixels)
-        .with_context(|| format!("writing {}", path.display()))?;
+    let png = image
+        .create_optimized_png(&oxipng::Options::from_preset(PNG_OPTIMIZATION_LEVEL))
+        .with_context(|| format!("optimizing {}", path.display()))?;
 
-    Ok(())
+    std::fs::write(path, png).with_context(|| format!("writing {}", path.display()))
 }
 
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {

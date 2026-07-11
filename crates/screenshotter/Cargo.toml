@@ -8,7 +8,7 @@ snes = { path = "../cores/snes" }
 anyhow = "1.0.103"
 clap = { version = "4.6.1", features = ["derive"] }
 owo-colors = "4.3.0"
-png = { version = "0.18.0", default-features = false }
 gif = "0.14.2"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 crc32fast = "1.5.0"
+oxipng = { version = "10.1.1", default-features = false }
