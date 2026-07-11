@@ -10,7 +10,7 @@ use snes::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use snes::{Cartridge, Snes};
 
 const SCALE: u32 = 2;
-const RECORD_FRAME_STEP: u32 = 2;
+const RECORD_FRAME_STEP: u32 = 1;
 
 struct Recorder {
     encoder: gif::Encoder<BufWriter<File>>,
