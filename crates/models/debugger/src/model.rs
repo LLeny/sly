@@ -388,6 +388,108 @@ pub struct PaletteView {
     pub palettes: Vec<Vec<PaletteColor>>,
     pub meta: Arc<str>,
 }
+#[derive(Clone, Default)]
+pub struct AudioChannel {
+    pub index: u8,
+    pub label: Arc<str>,
+    pub active: bool,
+    pub waveform: Arc<[f32]>,
+}
+
+#[derive(Clone, Default)]
+pub struct AudioScopesView {
+    pub channels: Vec<AudioChannel>,
+}
+
+#[derive(Clone, Default)]
+pub struct AudioScopeView {
+    pub samples: Arc<[f32]>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum Tone {
+    #[default]
+    Normal,
+    Muted,
+    Warning,
+}
+
+#[derive(Clone, Default)]
+pub struct StructuredView {
+    pub sections: Vec<Section>,
+    pub meta: Option<Arc<str>>,
+}
+
+#[derive(Clone, Default)]
+pub struct Section {
+    pub title: Option<Arc<str>>,
+    pub leading: bool,
+    pub group: u8,
+    pub basis: Option<f32>,
+    pub rows: Vec<Row>,
+}
+
+#[derive(Clone)]
+pub enum Row {
+    Field(Field),
+    Flags {
+        flags: Vec<FlagView>,
+        note: Option<(Arc<str>, Tone)>,
+    },
+    BitHeader {
+        bits: u8,
+    },
+    BitGrid {
+        label: Arc<str>,
+        bits: u8,
+        on_mask: u8,
+    },
+    Meter {
+        label: Arc<str>,
+        value: i32,
+        max: i32,
+        accent: bool,
+    },
+    Tags {
+        tags: Vec<Arc<str>>,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub enum ColWidth {
+    Fixed(f32),
+    Flex,
+}
+
+#[derive(Clone)]
+pub struct Column {
+    pub label: Arc<str>,
+    pub width: ColWidth,
+}
+
+#[derive(Clone)]
+pub enum Cell {
+    Text(Arc<str>),
+    Meter {
+        value: i32,
+        max: i32,
+        label: Option<Arc<str>>,
+    },
+    FlagChips(Vec<FlagView>),
+}
+
+#[derive(Clone, Default)]
+pub struct TableRow {
+    pub active: bool,
+    pub cells: Vec<Cell>,
+}
+
+#[derive(Clone, Default)]
+pub struct TableView {
+    pub columns: Vec<Column>,
+    pub rows: Vec<TableRow>,
+    pub meta: Option<Arc<str>>,
+}
 
 #[derive(Clone)]
 pub struct MemoryRegion {

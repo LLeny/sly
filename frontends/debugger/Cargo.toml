@@ -6,9 +6,11 @@ edition = "2024"
 [dependencies]
 gpui = { workspace = true }
 cirsium = { path = "../../crates/cirsium" }
+core-model = { path = "../../crates/models/core" }
 debugger-model = { path = "../../crates/models/debugger" }
 frontend-model = { path = "../../crates/models/frontend" }
 snes = { path = "../../crates/cores/snes", features = ["debug"] }
+audio = { path = "../../crates/audio" }
 urlencoding = "2.1.3"
 crc32fast = "1.5.0"
 tracing.workspace = true

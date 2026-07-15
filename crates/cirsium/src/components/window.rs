@@ -1,71 +1,110 @@
 use gpui::prelude::*;
 
-#[cfg(not(target_family = "wasm"))]
-use gpui::MouseButton;
-use gpui::{App, ClickEvent, Div, FontWeight, Hsla, SharedString, Stateful, Window, div, px, svg};
+use gpui::{
+    App, ClickEvent, Div, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window, div, px,
+    svg,
+};
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(target_family = "wasm")))]
 use crate::assets::icon;
 use crate::theme::Theme;
 
-pub fn title_bar(theme: &Theme, title: impl Into<SharedString>, controls: impl IntoElement) -> Div {
-    let leading = div().flex_1().h_full().flex().items_center().gap_2().px_3();
-
-    #[cfg(not(target_family = "wasm"))]
-    let leading =
-        leading.on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move());
-
-    #[cfg(not(target_os = "macos"))]
-    let leading = leading.child(svg().path(icon::LOGO).size(px(15.)).text_color(theme.logo));
-
-    let leading = leading.child(
-        div()
-            .text_xs()
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(theme.text_secondary)
-            .child(title.into()),
-    );
-
-    #[cfg(target_os = "macos")]
-    let leading = leading.pl(px(92.));
-
-    let trailing = div().flex().items_center().h_full().child(controls);
-
-    #[cfg(all(not(target_os = "macos"), not(target_family = "wasm")))]
-    let trailing = trailing
-        .child(self::window_button(
-            theme,
-            "win-min",
-            false,
-            icon::MINIMIZE,
-            |w, _| w.minimize_window(),
-        ))
-        .child(self::window_button(
-            theme,
-            "win-max",
-            false,
-            icon::MAXIMIZE,
-            |w, _| w.zoom_window(),
-        ))
-        .child(self::window_button(
-            theme,
-            "win-close",
-            true,
-            icon::CLOSE,
-            |_, cx| cx.quit(),
-        ));
-
+/// A titlebar region that swallows left-clicks so its contents don't start a
+/// window drag.
+fn drag_shield() -> Div {
     div()
         .flex()
         .items_center()
-        .h(px(34.))
+        .h_full()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+}
+
+pub fn title_bar(
+    theme: &Theme,
+    title: impl Into<SharedString>,
+    leading: impl IntoElement,
+    trailing: impl IntoElement,
+) -> Div {
+    let left_controls = drag_shield().gap_2().child(leading);
+
+    let left = div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .items_center()
+        .px_2()
+        .child(left_controls);
+
+    #[cfg(target_os = "macos")]
+    let left = left.pl(px(72.));
+
+    let center = div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.text_secondary)
+                .child(title.into()),
+        );
+
+    let right_controls = drag_shield().gap_2().px_2().child(trailing);
+
+    let right = div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .items_center()
+        .justify_end()
+        .child(right_controls);
+
+    #[cfg(all(not(target_os = "macos"), not(target_family = "wasm")))]
+    let right = right.child(
+        drag_shield()
+            .child(self::window_button(
+                theme,
+                "win-min",
+                false,
+                icon::MINIMIZE,
+                |w, _| w.minimize_window(),
+            ))
+            .child(self::window_button(
+                theme,
+                "win-max",
+                false,
+                icon::MAXIMIZE,
+                |w, _| w.zoom_window(),
+            ))
+            .child(self::window_button(
+                theme,
+                "win-close",
+                true,
+                icon::CLOSE,
+                |_, cx| cx.quit(),
+            )),
+    );
+
+    let bar = div()
+        .flex()
+        .items_center()
+        .h(px(40.))
         .flex_none()
         .bg(theme.bg_panel)
         .border_b_1()
         .border_color(theme.border_subtle)
         .font_family(theme.ui_font)
-        .child(leading)
-        .child(trailing)
+        .child(left)
+        .child(center)
+        .child(right);
+
+    #[cfg(not(target_family = "wasm"))]
+    let bar = bar.on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move());
+
+    bar
 }
 
 pub fn icon_button(
@@ -76,8 +115,11 @@ pub fn icon_button(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
     let icon_color = theme.text_secondary;
+    let icon_hover = theme.text_primary;
+
     div()
         .id(id)
+        .group(id)
         .w(px(46.))
         .h_full()
         .flex()
@@ -85,7 +127,13 @@ pub fn icon_button(
         .justify_center()
         .hover(move |s| s.bg(hover_bg))
         .on_click(on_click)
-        .child(svg().path(icon_path).size(px(15.)).text_color(icon_color))
+        .child(
+            svg()
+                .path(icon_path)
+                .size(px(15.))
+                .text_color(icon_color)
+                .group_hover(id, move |s| s.text_color(icon_hover)),
+        )
 }
 
 pub fn window_button(

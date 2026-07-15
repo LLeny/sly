@@ -5,6 +5,20 @@ use gpui::{App, Global, Hsla, rgb, rgba};
 pub const UI_FONT: &str = "IBM Plex Sans";
 pub const MONO_FONT: &str = "IBM Plex Mono";
 
+pub const ACCENT_PRESETS: [u32; 8] = [
+    0xA55CFF, // purple (default)
+    0xFF8FC7, // pink
+    0x7DB9FF, // blue
+    0x5FD0C5, // teal
+    0x9EDE8F, // green
+    0xF2D06B, // yellow
+    0xFFB27A, // orange
+    0xFF8B8B, // red
+];
+
+// Special people :)
+pub const GUEST_COLORS: &[(&str, u32)] = &[("Blody", 0xD7B4F3), ("Chicho", 0x93C572)];
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ThemeMode {
     Dark,
@@ -87,6 +101,24 @@ impl Theme {
 
     pub fn global(cx: &App) -> Arc<Theme> {
         cx.global::<GlobalTheme>().0.clone()
+    }
+
+    pub fn with_accent(mut self, accent: Hsla) -> Self {
+        self.accent = accent;
+        self.accent_soft = with_alpha(accent, 0.23);
+        self.accent_hover = Hsla {
+            l: (accent.l + 0.12).min(1.0),
+            ..accent
+        };
+        self.on_accent = if accent.l > 0.62 {
+            rgb(0x101014).into()
+        } else {
+            rgb(0xffffff).into()
+        };
+        self.selection = with_alpha(accent, 0.30);
+        self.selection_border = with_alpha(accent, 0.65);
+        self.logo = accent;
+        self
     }
 
     pub fn dark() -> Self {

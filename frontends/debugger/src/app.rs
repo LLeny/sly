@@ -9,20 +9,27 @@ use cirsium::components::{
     combobox_menu, context_menu, field_button, icon_button, popover, status_bar, title_bar,
 };
 use cirsium::widgets::{
-    BreakpointKind, BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView,
-    CartridgeWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView,
-    DmaWidget, FramebufferView, FramebufferWidget, GridPanel, LogWidget, MemoryWidget, MmioView,
-    MmioWidget, PaletteView, PaletteWidget, PpuView, PpuWidget, RowProvider, SpritesView,
-    SpritesWidget, TilemapView, TilemapWidget, TilesetLayer, TilesetView, TilesetWidget, ViewMode,
+    AudioScopeView, AudioScopeWidget, AudioScopesView, BreakpointKind, BreakpointsWidget,
+    CallStackView, CallStackWidget, CartridgeView, CartridgeWidget, ChannelScopesWidget,
+    ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView, DmaWidget,
+    FramebufferView, FramebufferWidget, GridPanel, LogWidget, MemoryWidget, MmioView, MmioWidget,
+    PaletteView, PaletteWidget, PpuView, PpuWidget, RowProvider, SpritesView, SpritesWidget,
+    StructuredPanel, StructuredView, TablePanel, TableView, TilemapView, TilemapWidget,
+    TilesetLayer, TilesetView, TilesetWidget, ViewMode,
 };
-use cirsium::{ChangeTracker, Highlight, Theme, set_theme};
+use cirsium::{
+    ACCENT_PRESETS, ChangeTracker, GUEST_COLORS, Highlight, Theme, ThemeMode, set_theme,
+};
 use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
-use frontend_model::{ComponentManifest, DockLocation, PanelKind, RefreshPolicy, WorkspaceIcon};
+use frontend_model::{
+    ComponentManifest, DockLocation, PanelDescriptor, PanelKind, RefreshPolicy, WorkspaceIcon,
+};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, Div, Entity, MouseDownEvent, Pixels,
-    Point, RenderImage, SharedString, Size, Task, Window, div, px,
+    Point, RenderImage, SharedString, Size, Task, Window, div, px, rgb,
 };
+use snes::debug::{INSPECTOR_ID as AUDIO_INSPECTOR_ID, VOICES_ID as DSP_VOICES_TABLE_ID};
 use web_time::Instant;
 
 use crate::breakpoints::Breakpoints;
@@ -88,6 +95,13 @@ pub(crate) struct Debugger {
     dma_view: DmaView,
     palette_view: PaletteView,
     palette_selected: Option<(usize, usize)>,
+    structured_views: HashMap<SharedString, Arc<StructuredView>>,
+    table_views: HashMap<SharedString, Arc<TableView>>,
+    table_selection: HashMap<SharedString, usize>,
+    audio_scopes: AudioScopesView,
+    scope: AudioScopeView,
+    scope_samples: Vec<f32>,
+    audio_samples: Vec<i16>,
     ppu_view: PpuView,
     tileset: Option<TilesetView>,
     tileset_layers: Vec<TilesetLayer>,
@@ -114,6 +128,8 @@ pub(crate) struct Debugger {
     workspace: SharedString,
     running: bool,
     run_task: Option<Task<()>>,
+    audio: crate::audio_out::AudioOut,
+    accent: usize,
 }
 
 const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -171,12 +187,21 @@ impl Debugger {
             .map(|w| SharedString::from(w.id.clone()))
             .unwrap_or_default();
 
+        let audio = crate::audio_out::AudioOut::new(target.audio_spec());
+
         Self {
             cartridge: target.cartridge().clone().into(),
             mmio_view: target.mmio_view().into(),
             dma_view: target.dma_view().into(),
             palette_view: target.palette_view().into(),
             palette_selected: None,
+            structured_views: HashMap::new(),
+            table_views: HashMap::new(),
+            table_selection: HashMap::new(),
+            audio_scopes: AudioScopesView::default(),
+            scope: AudioScopeView::default(),
+            scope_samples: Vec::new(),
+            audio_samples: Vec::new(),
             ppu_view: target.ppu_view().into(),
             tileset: target.tileset(0, 0).map(Into::into),
             tileset_layers: target
@@ -208,6 +233,8 @@ impl Debugger {
             workspace,
             running: false,
             run_task: None,
+            audio,
+            accent: 0,
         }
     }
 
@@ -265,11 +292,14 @@ impl Debugger {
         self.framebuffer = self.target.framebuffer().map(Into::into);
     }
 
+    fn should_refresh(&self, panel: &PanelDescriptor, live: bool) -> bool {
+        !live || self.live_refresh || panel.refresh == RefreshPolicy::Continuous
+    }
+
     fn wants_refresh(&self, live: bool, kind: impl Fn(&PanelKind) -> bool) -> bool {
-        self.manifest.in_workspace(&self.workspace).any(|panel| {
-            kind(&panel.kind)
-                && (!live || self.live_refresh || panel.refresh == RefreshPolicy::Continuous)
-        })
+        self.manifest
+            .in_workspace(&self.workspace)
+            .any(|panel| kind(&panel.kind) && self.should_refresh(panel, live))
     }
 
     fn refresh_panes(&mut self, mode: CpuRefresh, live: bool, cx: &mut Context<Self>) {
@@ -291,6 +321,7 @@ impl Debugger {
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Mmio)) {
             self.mmio_view = self.target.mmio_view().into();
         }
+
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Dma)) {
             self.dma_view = self.target.dma_view().into();
         }
@@ -306,9 +337,11 @@ impl Debugger {
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Palette)) {
             self.palette_view = self.target.palette_view().into();
         }
+
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Ppu)) {
             self.ppu_view = self.target.ppu_view().into();
         }
+
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tileset)) {
             self.tileset_layers = self
                 .target
@@ -318,11 +351,84 @@ impl Debugger {
                 .collect();
             self.refresh_tileset(cx);
         }
+
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tilemap)) {
             self.refresh_tilemap(cx);
         }
+
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Sprites)) {
             self.refresh_sprites(cx);
+        }
+
+        let (tables, structured, scopes, inspector) = self.visible_generic_panels(live);
+
+        for id in tables {
+            let view = Arc::new(self.target.table_view(id.as_ref()));
+            self.table_views.insert(id, view);
+        }
+
+        for id in structured {
+            let view = Arc::new(self.target.structured_view(id.as_ref(), None));
+            self.structured_views.insert(id, view);
+        }
+
+        if scopes {
+            self.audio_scopes = self.target.audio_scopes_view();
+        }
+
+        if inspector {
+            self.refresh_audio_inspector();
+        }
+    }
+
+    fn visible_generic_panels(
+        &self,
+        live: bool,
+    ) -> (Vec<SharedString>, Vec<SharedString>, bool, bool) {
+        let mut tables = Vec::new();
+        let mut structured = Vec::new();
+        let mut scopes = false;
+        let mut inspector = false;
+
+        for panel in self.manifest.in_workspace(&self.workspace) {
+            if !self.should_refresh(panel, live) || self.is_collapsed(panel.id.as_ref()) {
+                continue;
+            }
+
+            match panel.kind {
+                PanelKind::Table => tables.push(panel.id.clone().into()),
+                PanelKind::Structured => structured.push(panel.id.clone().into()),
+                PanelKind::ChannelScopes => scopes = true,
+                PanelKind::AudioScope => inspector = true,
+                _ => {}
+            }
+        }
+
+        (tables, structured, scopes, inspector)
+    }
+
+    fn refresh_audio_inspector(&mut self) {
+        let sel = self
+            .table_selection
+            .get(DSP_VOICES_TABLE_ID)
+            .copied()
+            .unwrap_or(0);
+        let view = self.target.structured_view(AUDIO_INSPECTOR_ID, Some(sel));
+        self.structured_views
+            .insert(AUDIO_INSPECTOR_ID.into(), Arc::new(view));
+    }
+
+    fn push_scope(buffer: &mut Vec<f32>, samples: &[i16]) {
+        const SCOPE_LEN: usize = 512;
+
+        for pair in samples.chunks_exact(2) {
+            let mono = (pair[0] as f32 + pair[1] as f32) * 0.5 / 32768.0;
+            buffer.push(mono);
+        }
+
+        let len = buffer.len();
+        if len > SCOPE_LEN {
+            buffer.drain(..len - SCOPE_LEN);
         }
     }
 
@@ -387,6 +493,14 @@ impl Debugger {
         cx.notify();
     }
 
+    fn select_table_row(&mut self, table_id: SharedString, row: usize, cx: &mut Context<Self>) {
+        self.table_selection.insert(table_id.clone(), row);
+        if table_id.as_ref() == DSP_VOICES_TABLE_ID {
+            self.refresh_audio_inspector();
+        }
+        cx.notify();
+    }
+
     fn wire_grid(
         &self,
         panel: GridPanel,
@@ -448,6 +562,13 @@ impl Debugger {
     fn set_workspace(&mut self, id: SharedString, cx: &mut Context<Self>) {
         self.workspace = id;
         self.refresh_panes(CpuRefresh::Highlight, false, cx);
+        cx.notify();
+    }
+
+    fn set_accent(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.accent = index;
+        let mode = Theme::global(cx).mode;
+        set_theme(cx, self::themed(mode, index));
         cx.notify();
     }
 
@@ -520,6 +641,11 @@ impl Debugger {
             let _silenced = SilencedPanics::new();
             self.target.debug_run_frame(self.breakpoints.marks())
         };
+        self.audio_samples.clear();
+        self.target.drain_audio(&mut self.audio_samples);
+        self.audio.queue(&self.audio_samples);
+        Self::push_scope(&mut self.scope_samples, &self.audio_samples);
+        self.scope.samples = self.scope_samples.as_slice().into();
 
         let keep_going = outcome == RunOutcome::Done;
         self.refresh_panes(CpuRefresh::Highlight, keep_going, cx);
@@ -912,10 +1038,51 @@ impl Debugger {
     }
 }
 
+fn accent_at(index: usize) -> u32 {
+    let presets = ACCENT_PRESETS.len();
+    if index < presets {
+        ACCENT_PRESETS[index]
+    } else {
+        GUEST_COLORS[index - presets].1
+    }
+}
+
+/// A clickable accent swatch that selects the unified accent `index`.
+fn accent_dot(
+    t: &Theme,
+    index: usize,
+    selected: bool,
+    cx: &mut Context<Debugger>,
+) -> impl IntoElement {
+    div()
+        .id(("accent", index))
+        .size(px(16.))
+        .rounded_full()
+        .bg(rgb(accent_at(index)))
+        .border_2()
+        .border_color(if selected {
+            t.text_primary
+        } else {
+            gpui::transparent_black()
+        })
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _, _, cx| this.set_accent(index, cx)))
+}
+
+fn themed(mode: ThemeMode, accent: usize) -> Theme {
+    let base = Theme::new(mode);
+    if accent == 0 {
+        base
+    } else {
+        base.with_accent(rgb(accent_at(accent)).into())
+    }
+}
+
 fn workspace_icon(icon: WorkspaceIcon) -> &'static str {
     match icon {
         WorkspaceIcon::Cpu => icon::CPU,
         WorkspaceIcon::Video => icon::MONITOR,
+        WorkspaceIcon::Sound => icon::AUDIO,
     }
 }
 
@@ -936,6 +1103,16 @@ fn panel_row(left: AnyElement, right: Div) -> AnyElement {
 
 fn half_row(left: AnyElement, right: AnyElement) -> AnyElement {
     self::panel_row(left, panel_column().flex_1().child(right))
+}
+
+fn fixed_half_row(left: AnyElement, right: AnyElement) -> AnyElement {
+    div()
+        .flex()
+        .flex_none()
+        .gap_2()
+        .child(panel_column().flex_1().child(left))
+        .child(panel_column().flex_1().child(right))
+        .into_any_element()
 }
 
 fn with_screen(widget: AnyElement, screen: Option<AnyElement>) -> AnyElement {
@@ -1034,20 +1211,20 @@ impl Render for Debugger {
             "theme-toggle",
             t.bg_panel_alt,
             icon::THEME,
-            cx.listener(|_, _, _, cx| {
+            cx.listener(|this, _, _, cx| {
                 let next = Theme::global(cx).mode.toggled();
-                set_theme(cx, Theme::new(next));
+                set_theme(cx, self::themed(next, this.accent));
                 cx.notify();
             }),
         );
-        let titlebar_controls = div()
+        let titlebar_leading = div().flex().items_center().h_full().children(
+            workspace_switcher.map(|switcher| div().flex().items_center().child(switcher)),
+        );
+        let titlebar_trailing = div()
             .flex()
             .items_center()
+            .gap_2()
             .h_full()
-            .children(
-                workspace_switcher
-                    .map(|switcher| div().flex().items_center().pr_2().child(switcher)),
-            )
             .child(settings_button)
             .child(theme_toggle);
 
@@ -1410,6 +1587,39 @@ impl Render for Debugger {
                     "Drop repeated logs",
                     CheckboxSize::Small,
                     cx.listener(|this, _, _, cx| this.log_toggle_dedup(cx)),
+                ))
+                .child(div().text_xs().text_color(t.text_muted).child("ACCENT"))
+                .child({
+                    let selected = self.accent;
+                    (0..ACCENT_PRESETS.len())
+                        .fold(div().flex().items_center().gap_2().py_1(), |row, i| {
+                            row.child(self::accent_dot(t, i, i == selected, cx))
+                        })
+                })
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(t.text_muted)
+                        .child("SPECIAL GUEST COLORS"),
+                )
+                .child(GUEST_COLORS.iter().enumerate().fold(
+                    div().flex().flex_col().gap(px(3.)),
+                    |col, (gi, &(name, _color))| {
+                        let index = ACCENT_PRESETS.len() + gi;
+                        col.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(self::accent_dot(t, index, index == self.accent, cx))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(t.text_secondary)
+                                        .child(name.to_string()),
+                                ),
+                        )
+                    },
                 ));
             popover(
                 t,
@@ -1629,6 +1839,83 @@ impl Render for Debugger {
         if let Some(ppu) = ppu {
             panels.insert(PpuWidget::ID.into(), ppu.into_any_element());
         }
+
+        let panel_glyph: &str = manifest
+            .workspaces
+            .iter()
+            .find(|w| w.id.as_ref() == active_workspace.as_ref())
+            .map_or(icon::AUDIO, |w| self::workspace_icon(w.icon));
+        for panel in manifest.in_workspace(&active_workspace) {
+            let id = panel.id.as_ref();
+            if !visible.contains(id)
+                || !matches!(
+                    panel.kind,
+                    PanelKind::Table
+                        | PanelKind::Structured
+                        | PanelKind::ChannelScopes
+                        | PanelKind::AudioScope
+                )
+            {
+                continue;
+            }
+            let pid = SharedString::from(panel.id.clone());
+            let title = SharedString::from(panel.title.clone());
+            let on_toggle = {
+                let id = pid.clone();
+                cx.listener(move |this, _, _, cx| this.toggle(id.clone(), cx))
+            };
+            let element = match panel.kind {
+                PanelKind::Table => {
+                    let view = self.table_views.get(id).cloned().unwrap_or_default();
+                    TablePanel::new(pid.clone(), title, view)
+                        .selected(self.table_selection.get(id).copied().unwrap_or(0))
+                        .collapsed(self.is_collapsed(id))
+                        .on_toggle(on_toggle)
+                        .on_select({
+                            let this = this.clone();
+                            let id = pid.clone();
+                            move |row, _, cx| {
+                                let id = id.clone();
+                                this.update(cx, |d, cx| d.select_table_row(id, row, cx))
+                            }
+                        })
+                        .glyph(panel_glyph)
+                        .into_any_element()
+                }
+                PanelKind::Structured => {
+                    let view = self.structured_views.get(id).cloned().unwrap_or_default();
+                    StructuredPanel::new(pid.clone(), title, view)
+                        .collapsed(self.is_collapsed(id))
+                        .on_toggle(on_toggle)
+                        .glyph(panel_glyph)
+                        .into_any_element()
+                }
+                PanelKind::ChannelScopes => {
+                    ChannelScopesWidget::new(pid.clone(), title, self.audio_scopes.clone())
+                        .collapsed(self.is_collapsed(id))
+                        .on_toggle(on_toggle)
+                        .glyph(panel_glyph)
+                        .into_any_element()
+                }
+                PanelKind::AudioScope => {
+                    let scope = AudioScopeWidget::new(pid.clone(), title, self.scope.clone())
+                        .collapsed(self.is_collapsed(id))
+                        .on_toggle(on_toggle)
+                        .glyph(panel_glyph);
+                    let inspector_view = self
+                        .structured_views
+                        .get(AUDIO_INSPECTOR_ID)
+                        .cloned()
+                        .unwrap_or_default();
+                    let inspector =
+                        StructuredPanel::new(AUDIO_INSPECTOR_ID, "Audio Inspector", inspector_view)
+                            .glyph(panel_glyph);
+                    self::fixed_half_row(scope.into_any_element(), inspector.into_any_element())
+                }
+                _ => unreachable!(),
+            };
+            panels.insert(id.to_string(), element);
+        }
         match (tileset, tilemap) {
             (Some(tileset), Some(tilemap)) => {
                 panels.insert(
@@ -1659,10 +1946,14 @@ impl Render for Debugger {
             };
             panels.insert(SpritesWidget::ID.into(), element);
         }
-        panels.insert(
-            MemoryWidget::ID.into(),
-            self::with_screen(memory_widget.into_any_element(), framebuffer),
-        );
+        if visible.contains(MemoryWidget::ID) {
+            panels.insert(
+                MemoryWidget::ID.into(),
+                self::with_screen(memory_widget.into_any_element(), framebuffer.take()),
+            );
+        } else if let Some(screen) = framebuffer.take() {
+            panels.insert(FramebufferWidget::ID.into(), screen);
+        }
         if let Some(log_region) = log_region {
             panels.insert(LogWidget::ID.into(), log_region.into_any_element());
         }
@@ -1688,7 +1979,12 @@ impl Render for Debugger {
             .font_family(t.ui_font)
             .text_color(t.text_primary)
             .text_sm()
-            .child(title_bar(t, "Sly Debugger", titlebar_controls))
+            .child(title_bar(
+                t,
+                "Sly Debugger",
+                titlebar_leading,
+                titlebar_trailing,
+            ))
             .child(
                 div()
                     .flex()

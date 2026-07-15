@@ -2,6 +2,7 @@
 
 mod app;
 mod art;
+mod audio_out;
 mod breakpoints;
 mod db;
 mod disasm;

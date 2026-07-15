@@ -29,6 +29,17 @@ pub fn bool_chip(theme: &Theme, text: impl Into<SharedString>, on: bool) -> Div 
         .child(text.into())
 }
 
+/// Flat monospace state label for dense status rows. Unlike [`bool_chip`], this
+/// has no background.
+pub fn status_flag(theme: &Theme, text: impl Into<SharedString>, on: bool) -> Div {
+    div()
+        .font_family(theme.mono_font)
+        .text_xs()
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(if on { theme.accent } else { theme.text_dim })
+        .child(text.into())
+}
+
 pub use debugger_model::hex;
 
 pub fn flip_label(flip_h: bool, flip_v: bool) -> &'static str {
@@ -76,6 +87,25 @@ pub fn field_button(
         )
 }
 
+/// A thin horizontal magnitude bar: a track with a fractional fill. `frac` is
+/// clamped to `0.0..=1.0`; `accent` picks the accent fill over a dim one.
+pub fn meter_bar(theme: &Theme, frac: f32, accent: bool) -> Div {
+    let fill = if accent { theme.accent } else { theme.text_dim };
+    div()
+        .flex_1()
+        .min_w(px(6.))
+        .h(px(6.))
+        .bg(theme.bg_panel_alt)
+        .rounded_sm()
+        .child(
+            div()
+                .h_full()
+                .w(gpui::relative(frac.clamp(0.0, 1.0)))
+                .bg(fill)
+                .rounded_sm(),
+        )
+}
+
 /// A muted, compact field label.
 pub fn label_text(theme: &Theme, text: impl Into<SharedString>) -> Div {
     div()
@@ -101,6 +131,16 @@ pub fn empty_state(theme: &Theme, text: impl Into<SharedString>) -> Div {
         .text_xs()
         .text_color(theme.text_dim)
         .child(text.into())
+}
+
+/// [`empty_state`] centered within the space it fills (for panels that grow).
+pub fn empty_state_centered(theme: &Theme, text: impl Into<SharedString>) -> Div {
+    div()
+        .flex()
+        .flex_1()
+        .items_center()
+        .justify_center()
+        .child(empty_state(theme, text))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

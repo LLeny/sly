@@ -124,6 +124,8 @@ impl<M: MemoryMap + 'static> Snes<M> {
             .schedule_periodic_spc(apu::SPC_TIMER01_DIVIDER, apu::timer01_tick);
         self.scheduler
             .schedule_periodic_spc(apu::SPC_TIMER2_DIVIDER, apu::timer2_tick);
+        self.scheduler
+            .schedule_periodic_spc(apu::DSP_SAMPLE_PERIOD_SPC, apu::dsp_tick);
 
         self.mmu.reset();
         self.cpu.pc = self.read16(Address::new(BANK_ZERO, RESET_VECTOR_ADDR));
@@ -191,5 +193,16 @@ impl<M: MemoryMap + 'static> core_model::Core for Snes<M> {
 
     fn run_frame(&mut self) {
         Snes::run_frame(self);
+    }
+
+    fn audio_spec(&self) -> Option<core_model::AudioSpec> {
+        Some(core_model::AudioSpec {
+            sample_rate: (apu::SPC700_CLOCK / apu::DSP_SAMPLE_PERIOD_SPC) as u32,
+            channels: 2,
+        })
+    }
+
+    fn drain_audio(&mut self, out: &mut Vec<i16>) {
+        self.apu.drain_audio(out);
     }
 }

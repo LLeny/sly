@@ -25,6 +25,8 @@
         #loading .message h1 { font-size: 1.2rem; margin-bottom: 0.75rem; }
         #loading .message p { font-size: 0.95rem; opacity: 0.8; margin-bottom: 0.5rem; }
         #loading .message code { font-family: ui-monospace, monospace; background: #1e1e2e; padding: 0.1em 0.35em; border-radius: 4px; }
+        #loading .message ul { text-align: left; padding-left: 1.2rem; }
+        #loading .message li { font-size: 0.95rem; opacity: 0.8; margin-bottom: 0.5rem; }
     </style>
 </head>
 <body>
@@ -34,13 +36,23 @@
 
         const adapter = 'gpu' in navigator ? await navigator.gpu.requestAdapter().catch(() => null) : null;
         if (!adapter) {
+            const hint = !window.isSecureContext
+                ? `<p>This page is served over plain <code>http</code> on a non-localhost
+                   origin, so the browser hides WebGPU. Open it via
+                   <code>http://localhost:&lt;port&gt;</code> or serve
+                   it over <code>https</code>.</p>`
+                : `<ul>
+                     <li><b>Chrome / Edge</b>: make sure hardware acceleration is on; on
+                         Linux try <code>chrome://flags/#enable-vulkan</code> and
+                         <code>chrome://flags/#enable-unsafe-webgpu</code>.</li>
+                     <li><b>Firefox</b>: in <code>about:config</code> set
+                         <code>dom.webgpu.enabled</code> (and, if it still fails,
+                         <code>gfx.webgpu.force-enabled</code>), then restart.</li>
+                     <li><b>Safari</b>: needs Safari 26+; on older versions enable WebGPU
+                         under Develop &gt; Feature Flags.</li>
+                   </ul>`;
             loading.classList.add('error');
-            loading.innerHTML = `
-                <div class="message">
-                    <h1>No WebGPU adapter found</h1>
-                    <p>In Chrome, enabling <code>chrome://flags/#enable-unsafe-webgpu</code> and
-                    <code>chrome://flags/#enable-vulkan</code> may help.</p>
-                </div>`;
+            loading.innerHTML = `<div class="message"><h1>WebGPU is not available</h1>${hint}</div>`;
         } else {
             const { default: init } = await import('./debugger.js');
             await init();

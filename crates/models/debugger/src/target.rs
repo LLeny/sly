@@ -8,9 +8,9 @@ use frontend_model::{
 };
 
 use crate::model::{
-    CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Framebuffer, Highlight,
-    MemoryRegion, MmioView, PaletteView, PpuView, Sprites, StatusView, Tilemap, Tileset,
-    TilesetLayer,
+    AudioScopesView, CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Framebuffer,
+    Highlight, MemoryRegion, MmioView, PaletteView, PpuView, Sprites, StatusView, StructuredView,
+    TableView, Tilemap, Tileset, TilesetLayer,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -180,6 +180,18 @@ pub trait DebugCore: Core {
         None
     }
 
+    fn structured_view(&self, _id: &str, _selection: Option<usize>) -> StructuredView {
+        StructuredView::default()
+    }
+
+    fn table_view(&self, _id: &str) -> TableView {
+        TableView::default()
+    }
+
+    fn audio_scopes_view(&self) -> AudioScopesView {
+        AudioScopesView::default()
+    }
+
     fn status(&self, label: &str) -> StatusView;
     fn caption(&self, label: &str) -> String;
     fn memory_regions(&self) -> Vec<MemoryRegion>;
@@ -194,6 +206,7 @@ pub trait DebugCore: Core {
 
 pub const CPU_WORKSPACE: &str = "cpu";
 pub const VIDEO_WORKSPACE: &str = "video";
+pub const SOUND_WORKSPACE: &str = "sound";
 
 pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
     use DockLocation::{Bottom, Center, Left, Right};

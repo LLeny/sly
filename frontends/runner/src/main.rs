@@ -66,21 +66,26 @@ impl Recorder {
 }
 
 fn main() {
+    use core_model::Core;
+
     let mut rom_path = None;
     let mut uncapped = false;
     let mut record = false;
+    let mut mute = false;
 
     for arg in std::env::args().skip(1) {
         if arg == "--uncapped" {
             uncapped = true;
         } else if arg == "--record" {
             record = true;
+        } else if arg == "--mute" {
+            mute = true;
         } else {
             rom_path = Some(arg);
         }
     }
 
-    let path = rom_path.expect("Usage: runner <path-to-rom> [--uncapped] [--record]");
+    let path = rom_path.expect("Usage: runner <path-to-rom> [--uncapped] [--record] [--mute]");
 
     let mut rom = std::fs::read(&path).expect("Failed to read ROM");
     if rom.len() % 1024 == 512 {
@@ -122,6 +127,14 @@ fn main() {
 
     let mut event_pump = sdl.event_pump().expect("Failed to get event pump");
 
+    let mut player = match (mute, snes.audio_spec()) {
+        (false, Some(spec)) => audio::AudioPlayer::new(spec)
+            .inspect_err(|err| eprintln!("audio disabled: {err}"))
+            .ok(),
+        _ => None,
+    };
+    let mut audio_buffer: Vec<i16> = Vec::new();
+
     let mut buffer = vec![0u8; SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 3];
     let mut frames = 0u32;
     let mut core_time = Duration::ZERO;
@@ -144,6 +157,12 @@ fn main() {
         snes.run_frame();
         core_time += start.elapsed();
         frames += 1;
+
+        if let Some(player) = player.as_mut() {
+            snes.drain_audio(&mut audio_buffer);
+            player.queue(&audio_buffer);
+            audio_buffer.clear();
+        }
 
         for (dst, &(r, g, b)) in buffer.chunks_exact_mut(3).zip(snes.ppu.frame_buffer()) {
             dst[0] = r;

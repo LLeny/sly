@@ -3,11 +3,13 @@ use crate::apu::regs::Control;
 use crate::mmio::{AccessTracker, MemKind};
 use crate::{MemoryMap, Snes};
 
+pub mod dsp;
 mod map;
 mod regs;
 pub mod spc700;
 mod symbol;
 
+pub use dsp::Dsp;
 pub use map::{ApuMap, HardwareMap, Region};
 pub use symbol::{is_symbol, symbol, symbols};
 
@@ -18,6 +20,9 @@ pub const SPC700_CLOCK: u64 = APU_CLOCK / 24;
 pub const SPC_TIMER01_DIVIDER: u64 = 128;
 pub const SPC_TIMER2_DIVIDER: u64 = 16;
 
+pub const DSP_SAMPLE_PERIOD_SPC: u64 = 32;
+const AUDIO_BUFFER_CAP: usize = 0x10000;
+
 const IPL_ROM: &[u8] = include_bytes!("../assets/spc700.rom");
 
 pub struct Apu<M: ApuMap = HardwareMap> {
@@ -26,8 +31,9 @@ pub struct Apu<M: ApuMap = HardwareMap> {
     // Registers ($00F0-$00FF except $F8-$F9)
     unknown: u8,             // $F0
     control: Control,        // $F1 (W)
-    dsp_addr: u8,            // $F2
-    dsp_data: u8,            // $F3
+    dsp_addr: u8,            // $F2 (DSP register select)
+    pub dsp: Dsp,            // $F3 reads/writes the selected DSP register
+    audio_out: Vec<i16>,     // interleaved stereo samples produced by the DSP
     cpu_to_apu: [u8; 4],     // written by main CPU $2140-$2143, read by SPC $F4-$F7
     apu_to_cpu: [u8; 4],     // written by SPC $F4-$F7, read by main CPU $2140-$2143
     timer_settings: [u8; 3], // $FA-$FC on write
@@ -64,7 +70,8 @@ impl<M: ApuMap> Apu<M> {
             unknown: 0,
             control: Control::default(),
             dsp_addr: 0,
-            dsp_data: 0,
+            dsp: Dsp::new(),
+            audio_out: Vec::new(),
             cpu_to_apu: [0; 4],
             apu_to_cpu: [0; 4],
             timer_settings: [0; 3],
@@ -98,6 +105,18 @@ impl<M: ApuMap> Apu<M> {
         self.cpu_to_apu[index] = value;
     }
 
+    pub fn dsp_tick(&mut self) {
+        let (left, right) = self.dsp.tick(&mut self.ram);
+        if self.audio_out.len() < AUDIO_BUFFER_CAP {
+            self.audio_out.push(left);
+            self.audio_out.push(right);
+        }
+    }
+
+    pub fn drain_audio(&mut self, out: &mut Vec<i16>) {
+        out.append(&mut self.audio_out);
+    }
+
     pub fn peek(&self, addr: u16) -> u8 {
         match self.map.region(addr) {
             Region::Register => self.peek_io(addr as u8),
@@ -122,7 +141,7 @@ impl<M: ApuMap> Apu<M> {
             0xF0 => self.unknown,
             0xF1 => self.control.raw(),
             0xF2 => self.dsp_addr,
-            0xF3 => self.dsp_data,
+            0xF3 => self.dsp.read(self.dsp_addr),
             0xF4..=0xF7 => self.cpu_to_apu[(reg - 0xF4) as usize],
             0xFA..=0xFC => self.timer_settings[(reg - 0xFA) as usize],
             0xFD..=0xFF => self.timer_counters[(reg - 0xFD) as usize],
@@ -182,7 +201,7 @@ impl<M: ApuMap> Apu<M> {
                 self.control = ctrl;
             }
             0xF2 => self.dsp_addr = value,
-            0xF3 => self.dsp_data = value,
+            0xF3 => self.dsp.write(self.dsp_addr, value),
             0xF4..=0xF7 => self.apu_to_cpu[(reg - 0xF4) as usize] = value,
             0xFA..=0xFC => self.timer_settings[(reg - 0xFA) as usize] = value,
             _ => {
@@ -224,4 +243,8 @@ pub(crate) fn timer2_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline:
     if snes.apu.control.enable_timer2() {
         tick_timer(&mut snes.apu, 2);
     }
+}
+
+pub(crate) fn dsp_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
+    snes.apu.dsp_tick();
 }

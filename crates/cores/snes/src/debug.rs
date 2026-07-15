@@ -3,15 +3,20 @@ use std::time::Duration;
 
 use core_model::Core;
 use debugger_model::{
-    BreakpointKind, BreakpointMark, CPU_WORKSPACE, CallStackView, CartridgeField, CartridgeView,
-    ComponentManifest, CpuDescriptor, CpuId, CpuView, DebugCore, DisasmLine, DisasmToken,
-    DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind, Framebuffer,
-    Highlight, MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor,
-    PaletteView, PanelDescriptor, PanelKind, PpuGroup, PpuProperty, PpuView, RefreshPolicy,
-    RegisterView, RunOutcome, SpriteEntry, Sprites, StackFrame, StatusView, SyntaxSpec, Tilemap,
-    TilemapEntry, TilemapViewport, Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE,
-    WorkspaceDescriptor, WorkspaceIcon, hex, standard_manifest, strip_symbol_sigils, tokenize,
+    AudioScopesView, BreakpointKind, BreakpointMark, CPU_WORKSPACE, CallStackView, CartridgeField,
+    CartridgeView, ComponentManifest, CpuDescriptor, CpuId, CpuView, DebugCore, DisasmLine,
+    DisasmToken, DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind,
+    Framebuffer, Highlight, MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView,
+    PaletteColor, PaletteView, PanelDescriptor, PanelKind, PpuGroup, PpuProperty, PpuView,
+    RefreshPolicy, RegisterView, RunOutcome, SOUND_WORKSPACE, SpriteEntry, Sprites, StackFrame,
+    StatusView, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapViewport,
+    Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE, WorkspaceDescriptor,
+    WorkspaceIcon, hex, standard_manifest, strip_symbol_sigils, tokenize,
 };
+
+mod dsp;
+
+pub use dsp::{INSPECTOR_ID, VOICES_ID};
 
 use crate::apu::{Apu, spc700};
 use crate::callstack::CallFrame;
@@ -139,6 +144,14 @@ impl Core for SnesDebug {
 
     fn run_frame(&mut self) {
         self.core.run_frame();
+    }
+
+    fn audio_spec(&self) -> Option<core_model::AudioSpec> {
+        self.core.audio_spec()
+    }
+
+    fn drain_audio(&mut self, out: &mut Vec<i16>) {
+        self.core.drain_audio(out);
     }
 }
 
@@ -305,6 +318,26 @@ impl DebugCore for SnesDebug {
         })
     }
 
+    fn table_view(&self, id: &str) -> TableView {
+        match id {
+            dsp::VOICES_ID => dsp::voices_view(&self.core.apu.dsp),
+            _ => TableView::default(),
+        }
+    }
+
+    fn structured_view(&self, id: &str, selection: Option<usize>) -> StructuredView {
+        let dsp = &self.core.apu.dsp;
+        match id {
+            dsp::REGISTERS_ID => dsp::registers_view(dsp),
+            dsp::INSPECTOR_ID => dsp::inspector_view(dsp, selection),
+            _ => StructuredView::default(),
+        }
+    }
+
+    fn audio_scopes_view(&self) -> AudioScopesView {
+        dsp::scopes_view(&self.core.apu.dsp)
+    }
+
     fn manifest(&self) -> ComponentManifest {
         let mut manifest = standard_manifest(&self.cpus());
         manifest.workspaces.push(WorkspaceDescriptor::new(
@@ -393,6 +426,66 @@ impl DebugCore for SnesDebug {
 
         // The sprites panel takes the memory viewer's place in the PPU workspace.
         manifest.restrict(PanelKind::Memory, CPU_WORKSPACE);
+
+        manifest.workspaces.push(WorkspaceDescriptor::new(
+            SOUND_WORKSPACE,
+            "APU",
+            WorkspaceIcon::Sound,
+        ));
+
+        manifest.insert_before(
+            PanelKind::Memory,
+            PanelDescriptor::new(
+                "audio_scope",
+                "Output",
+                PanelKind::AudioScope,
+                DockLocation::Center,
+                RefreshPolicy::Continuous,
+            )
+            .tag(SOUND_WORKSPACE),
+        );
+        manifest.insert_after(
+            PanelKind::AudioScope,
+            PanelDescriptor::new(
+                dsp::SCOPES_ID,
+                "Voice Scopes",
+                PanelKind::ChannelScopes,
+                DockLocation::Center,
+                RefreshPolicy::Continuous,
+            )
+            .tag(SOUND_WORKSPACE),
+        );
+
+        manifest.insert_before(
+            PanelKind::Mmio,
+            PanelDescriptor::new(
+                dsp::VOICES_ID,
+                "DSP Voices",
+                PanelKind::Table,
+                DockLocation::Right,
+                RefreshPolicy::Continuous,
+            )
+            .tag(SOUND_WORKSPACE),
+        );
+
+        manifest.relocate_after("framebuffer", PanelKind::Controls, DockLocation::Left);
+        manifest.insert_after(
+            PanelKind::Framebuffer,
+            PanelDescriptor::new(
+                dsp::REGISTERS_ID,
+                "DSP Registers",
+                PanelKind::Structured,
+                DockLocation::Left,
+                RefreshPolicy::Continuous,
+            )
+            .tag(SOUND_WORKSPACE),
+        );
+
+        manifest.relocate_after("breakpoints", PanelKind::Mmio, DockLocation::Right);
+
+        for id in [CPU_SPC, &format!("{CPU_SPC}.disasm"), "breakpoints", "log"] {
+            manifest.tag(id, SOUND_WORKSPACE);
+        }
 
         manifest
     }

@@ -8,9 +8,9 @@ pub mod icon {
     pub const CHEVRON_RIGHT: &str = "icons/chevron-right.svg";
     pub const THEME: &str = "icons/sun-moon.svg";
     pub const SETTINGS: &str = "icons/settings.svg";
-    pub const MINIMIZE: &str = "icons/minus.svg";
-    pub const MAXIMIZE: &str = "icons/square.svg";
-    pub const CLOSE: &str = "icons/x.svg";
+    pub const MINIMIZE: &str = "icons/titlebar-minimize.svg";
+    pub const MAXIMIZE: &str = "icons/titlebar-maximize.svg";
+    pub const CLOSE: &str = "icons/titlebar-close.svg";
     pub const LOGO: &str = "icons/raccoon.svg";
     pub const CPU: &str = "icons/cpu.svg";
     pub const CARTRIDGE: &str = "icons/memory-stick.svg";
@@ -28,6 +28,7 @@ pub mod icon {
     pub const GRID: &str = "icons/grid-3x3.svg";
     pub const MAP: &str = "icons/map.svg";
     pub const GHOST: &str = "icons/ghost.svg";
+    pub const AUDIO: &str = "icons/audio-lines.svg";
 
     pub const RUN: &str = "icons/play.svg";
     pub const PAUSE: &str = "icons/pause.svg";

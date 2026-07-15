@@ -30,6 +30,10 @@ pub enum PanelKind {
     Tileset,
     Tilemap,
     Sprites,
+    Structured,
+    Table,
+    ChannelScopes,
+    AudioScope,
     Log,
 }
 
@@ -37,6 +41,7 @@ pub enum PanelKind {
 pub enum WorkspaceIcon {
     Cpu,
     Video,
+    Sound,
 }
 
 #[derive(Clone, Debug)]
@@ -123,6 +128,28 @@ impl ComponentManifest {
             .position(|p| p.kind == anchor)
             .map_or(self.panels.len(), |ix| ix + 1);
         self.panels.insert(ix, panel);
+    }
+
+    /// Tag the panel with the given id for a workspace, if not already tagged.
+    pub fn tag(&mut self, id: &str, workspace: impl Into<Arc<str>>) {
+        if let Some(panel) = self.panels.iter_mut().find(|p| &*p.id == id) {
+            let workspace = workspace.into();
+            if !panel.workspaces.contains(&workspace) {
+                panel.workspaces.push(workspace);
+            }
+        }
+    }
+
+    /// Move the panel with the given id to `location`, re-inserting it right
+    /// after the first panel of `anchor` kind (or at the end if absent).
+    pub fn relocate_after(&mut self, id: &str, anchor: PanelKind, location: DockLocation) {
+        let Some(pos) = self.panels.iter().position(|p| &*p.id == id) else {
+            return;
+        };
+
+        let mut panel = self.panels.remove(pos);
+        panel.location = location;
+        self.insert_after(anchor, panel);
     }
 
     pub fn restrict(&mut self, kind: PanelKind, workspace: impl Into<Arc<str>>) {
