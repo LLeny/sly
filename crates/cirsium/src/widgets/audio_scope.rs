@@ -38,6 +38,11 @@ impl AudioScopeWidget {
         self
     }
 
+    pub fn glyph_opt(mut self, glyph: Option<gpui::SharedString>) -> Self {
+        self.glyph = glyph;
+        self
+    }
+
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
         self
@@ -80,16 +85,13 @@ impl RenderOnce for AudioScopeWidget {
             div().flex().flex_1().min_h(px(64.)).relative().child(scope)
         };
 
-        let mut panel = Panel::new(self.id, self.title)
+        Panel::new(self.id, self.title)
             .meta(format!("peak {:.0}%", peak * 100.0))
             .grow(true)
             .collapsed(self.collapsed)
             .on_toggle_opt(self.on_toggle)
-            .child(body);
-        if let Some(glyph) = self.glyph {
-            panel = panel.glyph(glyph);
-        }
-        panel
+            .glyph_opt(self.glyph)
+            .child(body)
     }
 }
 

@@ -11,6 +11,7 @@ pub struct AudioPlayer {
     ratio: f64,
     pos: f64,
     prev: [i16; 2],
+    resampled: Vec<i16>,
 }
 
 impl AudioPlayer {
@@ -75,6 +76,7 @@ impl AudioPlayer {
             ratio: spec.sample_rate.max(1) as f64 / device_rate as f64,
             pos: 0.0,
             prev: [0; 2],
+            resampled: Vec::new(),
         })
     }
 
@@ -83,6 +85,8 @@ impl AudioPlayer {
             return;
         }
 
+        self.resampled.clear();
+
         for frame in samples.chunks_exact(self.channels) {
             let cur = [frame[0], frame.get(1).copied().unwrap_or(frame[0])];
 
@@ -90,16 +94,16 @@ impl AudioPlayer {
                 |a: i16, b: i16, t: f64| -> i16 { (a as f64 + (b as f64 - a as f64) * t) as i16 };
 
             while self.pos < 1.0 {
-                let l = lerp(self.prev[0], cur[0], self.pos);
-                let r = lerp(self.prev[1], cur[1], self.pos);
-                let _ = self.producer.try_push(l);
-                let _ = self.producer.try_push(r);
+                self.resampled.push(lerp(self.prev[0], cur[0], self.pos));
+                self.resampled.push(lerp(self.prev[1], cur[1], self.pos));
                 self.pos += self.ratio;
             }
 
             self.pos -= 1.0;
             self.prev = cur;
         }
+
+        self.producer.push_slice(&self.resampled);
     }
 }
 
@@ -109,18 +113,26 @@ fn fill<T: Copy>(
     consumer: &mut ringbuf::HeapCons<i16>,
     convert: impl Fn(i16) -> T,
 ) {
+    const BLOCK_FRAMES: usize = 64;
+
+    let mut block = [0i16; BLOCK_FRAMES * 2];
     let silence = convert(0);
 
-    for frame in data.chunks_mut(channels) {
-        let l = consumer.try_pop().map(&convert).unwrap_or(silence);
-        let r = consumer.try_pop().map(&convert).unwrap_or(silence);
+    for chunk in data.chunks_mut(channels * BLOCK_FRAMES) {
+        let frames = chunk.len() / channels;
+        let wanted = &mut block[..frames * 2];
+        let got = consumer.pop_slice(wanted);
+        wanted[got..].fill(0);
 
-        for (i, out) in frame.iter_mut().enumerate() {
-            *out = match i {
-                0 => l,
-                1 => r,
-                _ => silence,
-            };
+        for (frame, pair) in chunk.chunks_mut(channels).zip(wanted.as_chunks::<2>().0) {
+            let (l, r) = (convert(pair[0]), convert(pair[1]));
+            for (i, out) in frame.iter_mut().enumerate() {
+                *out = match i {
+                    0 => l,
+                    1 => r,
+                    _ => silence,
+                };
+            }
         }
     }
 }

@@ -1,5 +1,6 @@
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, SharedString, Window, div, px};
+use std::sync::Arc;
 
 use crate::assets::icon;
 use crate::components::{ClickHandler, Copyable, Panel};
@@ -39,7 +40,7 @@ impl From<debugger_model::CallStackView> for CallStackView {
 
 #[derive(IntoElement)]
 pub struct CallStackWidget {
-    view: CallStackView,
+    view: Arc<CallStackView>,
     id: SharedString,
     title: SharedString,
     collapsed: bool,
@@ -50,7 +51,7 @@ pub struct CallStackWidget {
 impl CallStackWidget {
     pub const ID: &'static str = "callstack";
 
-    pub fn new(view: CallStackView) -> Self {
+    pub fn new(view: Arc<CallStackView>) -> Self {
         Self {
             view,
             id: Self::ID.into(),
@@ -124,9 +125,9 @@ impl RenderOnce for CallStackWidget {
             list = list.children(
                 self.view
                     .frames
-                    .into_iter()
+                    .iter()
                     .enumerate()
-                    .map(|(ix, frame)| self::frame_row(t, &self.id, ix, frame)),
+                    .map(|(ix, frame)| self::frame_row(t, &self.id, ix, frame.clone())),
             );
         }
 

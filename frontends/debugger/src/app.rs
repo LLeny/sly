@@ -18,9 +18,9 @@ use cirsium::widgets::{
     TilesetLayer, TilesetView, TilesetWidget, ViewMode,
 };
 use cirsium::{
-    ACCENT_PRESETS, ChangeTracker, GUEST_COLORS, Highlight, Theme, ThemeMode, set_theme,
+    ACCENT_PRESETS, ChangeTracker, GUEST_COLORS, Highlight, Theme, ThemeMode, accent_at, set_theme,
 };
-use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome};
+use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome, VideoGenerations};
 use frontend_model::{
     ComponentManifest, DockLocation, PanelDescriptor, PanelKind, RefreshPolicy, WorkspaceIcon,
 };
@@ -29,7 +29,6 @@ use gpui::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, Div, Entity, MouseDownEvent, Pixels,
     Point, RenderImage, SharedString, Size, Task, Window, div, px, rgb,
 };
-use snes::debug::{INSPECTOR_ID as AUDIO_INSPECTOR_ID, VOICES_ID as DSP_VOICES_TABLE_ID};
 use web_time::Instant;
 
 use crate::breakpoints::Breakpoints;
@@ -41,9 +40,9 @@ struct ProcessorPane {
     id: CpuId,
     title: SharedString,
     space: Arc<str>,
-    cpu_view: CpuView,
+    cpu_view: Arc<cirsium::widgets::CpuView>,
     disasm: Disasm,
-    call_stack: CallStackView,
+    call_stack: Arc<CallStackView>,
     reg_changes: ChangeTracker<Arc<str>>,
 }
 
@@ -90,19 +89,19 @@ impl GridState {
 
 pub(crate) struct Debugger {
     target: Box<dyn DebugCore>,
-    cartridge: CartridgeView,
-    mmio_view: MmioView,
-    dma_view: DmaView,
-    palette_view: PaletteView,
+    cartridge: Arc<CartridgeView>,
+    mmio_view: Arc<MmioView>,
+    dma_view: Arc<DmaView>,
+    palette_view: Arc<PaletteView>,
     palette_selected: Option<(usize, usize)>,
     structured_views: HashMap<SharedString, Arc<StructuredView>>,
     table_views: HashMap<SharedString, Arc<TableView>>,
     table_selection: HashMap<SharedString, usize>,
-    audio_scopes: AudioScopesView,
+    scopes_views: HashMap<SharedString, AudioScopesView>,
     scope: AudioScopeView,
     scope_samples: Vec<f32>,
     audio_samples: Vec<i16>,
-    ppu_view: PpuView,
+    ppu_view: Arc<PpuView>,
     tileset: Option<TilesetView>,
     tileset_layers: Vec<TilesetLayer>,
     tileset_ui: GridState,
@@ -111,6 +110,12 @@ pub(crate) struct Debugger {
     sprites: Option<SpritesView>,
     sprites_ui: GridState,
     framebuffer: Option<FramebufferView>,
+    framebuffer_staged: Vec<u8>,
+    framebuffer_dirty: bool,
+    palette_key: Option<u64>,
+    tileset_key: Option<(u64, usize, usize)>,
+    tilemap_key: Option<(u64, usize)>,
+    sprites_key: Option<u64>,
     expanded: HashMap<&'static str, HashSet<SharedString>>,
     manifest: ComponentManifest,
     status: StatusView,
@@ -141,6 +146,13 @@ enum CpuRefresh {
     Baseline,
 }
 
+#[derive(Default)]
+struct GenericRefresh {
+    tables: Vec<SharedString>,
+    structured: Vec<(SharedString, Option<usize>)>,
+    scopes: Vec<SharedString>,
+}
+
 impl Debugger {
     pub(crate) fn new(
         target: Box<dyn DebugCore>,
@@ -156,8 +168,8 @@ impl Debugger {
                     id: desc.id,
                     title: desc.title.into(),
                     space: desc.space,
-                    cpu_view: CpuView::default(),
-                    call_stack: CallStackView::default(),
+                    cpu_view: Arc::default(),
+                    call_stack: Arc::default(),
                     reg_changes: ChangeTracker::default(),
                 };
                 Self::refresh_pane_view(target.as_ref(), &mut pane, CpuRefresh::Baseline);
@@ -190,19 +202,19 @@ impl Debugger {
         let audio = crate::audio_out::AudioOut::new(target.audio_spec());
 
         Self {
-            cartridge: target.cartridge().clone().into(),
-            mmio_view: target.mmio_view().into(),
-            dma_view: target.dma_view().into(),
-            palette_view: target.palette_view().into(),
+            cartridge: Arc::new(target.cartridge().clone().into()),
+            mmio_view: Arc::new(target.mmio_view().into()),
+            dma_view: Arc::new(target.dma_view().into()),
+            palette_view: Arc::new(target.palette_view().into()),
             palette_selected: None,
             structured_views: HashMap::new(),
             table_views: HashMap::new(),
             table_selection: HashMap::new(),
-            audio_scopes: AudioScopesView::default(),
+            scopes_views: HashMap::new(),
             scope: AudioScopeView::default(),
             scope_samples: Vec::new(),
             audio_samples: Vec::new(),
-            ppu_view: target.ppu_view().into(),
+            ppu_view: Arc::new(target.ppu_view().into()),
             tileset: target.tileset(0, 0).map(Into::into),
             tileset_layers: target
                 .tileset_layers()
@@ -215,6 +227,12 @@ impl Debugger {
             sprites: target.sprites().map(Into::into),
             sprites_ui: GridState::default(),
             framebuffer: target.framebuffer().map(Into::into),
+            framebuffer_staged: Vec::new(),
+            framebuffer_dirty: false,
+            palette_key: None,
+            tileset_key: None,
+            tilemap_key: None,
+            sprites_key: None,
             expanded: HashMap::new(),
             manifest,
             status: target.status("paused").into(),
@@ -239,9 +257,11 @@ impl Debugger {
     }
 
     fn refresh_pane_view(target: &dyn DebugCore, pane: &mut ProcessorPane, mode: CpuRefresh) {
-        pane.cpu_view = Self::track_changes(target.cpu_view(&pane.id), &mut pane.reg_changes, mode);
+        pane.cpu_view = Arc::new(
+            Self::track_changes(target.cpu_view(&pane.id), &mut pane.reg_changes, mode).into(),
+        );
         pane.disasm.recompute(target);
-        pane.call_stack = target.call_stack(&pane.id).into();
+        pane.call_stack = Arc::new(target.call_stack(&pane.id).into());
     }
 
     fn selected_color(&self) -> usize {
@@ -255,6 +275,13 @@ impl Debugger {
         })
     }
 
+    fn invalidate_video_keys(&mut self) {
+        self.palette_key = None;
+        self.tileset_key = None;
+        self.tilemap_key = None;
+        self.sprites_key = None;
+    }
+
     fn drop_grid_image(cx: &mut Context<Self>, image: Option<Arc<RenderImage>>) {
         if let Some(image) = image {
             cx.defer(move |cx| cx.drop_image(image, None));
@@ -262,6 +289,16 @@ impl Debugger {
     }
 
     fn refresh_tileset(&mut self, cx: &mut Context<Self>) {
+        self.refresh_tileset_keyed(self.target.video_generations(), cx);
+    }
+
+    fn refresh_tileset_keyed(&mut self, gens: Option<VideoGenerations>, cx: &mut Context<Self>) {
+        let key = gens.map(|g| (g.tileset, self.tileset_ui.layer, self.selected_color()));
+        if key.is_some() && key == self.tileset_key && self.tileset.is_some() {
+            return;
+        }
+        self.tileset_key = key;
+
         Self::drop_grid_image(cx, self.tileset.take().and_then(|view| view.image));
         self.tileset = self
             .target
@@ -270,14 +307,39 @@ impl Debugger {
     }
 
     fn refresh_tilemap(&mut self, cx: &mut Context<Self>) {
+        self.refresh_tilemap_keyed(self.target.video_generations(), cx);
+    }
+
+    fn refresh_tilemap_keyed(&mut self, gens: Option<VideoGenerations>, cx: &mut Context<Self>) {
+        let key = gens.map(|g| (g.tilemap, self.tilemap_ui.layer));
+        if key.is_some() && key == self.tilemap_key && self.tilemap.is_some() {
+            let viewport = self.target.tilemap_viewport(self.tilemap_ui.layer);
+            if let Some(view) = &mut self.tilemap {
+                view.viewport = viewport.map(Into::into);
+            }
+
+            return;
+        }
+        self.tilemap_key = key;
+
         Self::drop_grid_image(cx, self.tilemap.take().and_then(|view| view.image));
         self.tilemap = self.target.tilemap(self.tilemap_ui.layer).map(Into::into);
     }
 
     fn refresh_sprites(&mut self, cx: &mut Context<Self>) {
+        self.refresh_sprites_keyed(self.target.video_generations(), cx);
+    }
+
+    fn refresh_sprites_keyed(&mut self, gens: Option<VideoGenerations>, cx: &mut Context<Self>) {
         if self.is_collapsed(SpritesWidget::ID) {
             return;
         }
+
+        let key = gens.map(|g| g.sprites);
+        if key.is_some() && key == self.sprites_key && self.sprites.is_some() {
+            return;
+        }
+        self.sprites_key = key;
 
         Self::drop_grid_image(cx, self.sprites.take().and_then(|view| view.image));
         self.sprites = self.target.sprites().map(Into::into);
@@ -288,8 +350,19 @@ impl Debugger {
             return;
         }
 
+        let fb = self.target.framebuffer();
+
+        if let (Some(view), Some(fb)) = (&self.framebuffer, &fb)
+            && view.matches(fb)
+        {
+            cirsium::widgets::stage_bgra(fb, &mut self.framebuffer_staged);
+            self.framebuffer_dirty = true;
+            return;
+        }
+
         Self::drop_grid_image(cx, self.framebuffer.take().and_then(|view| view.image));
-        self.framebuffer = self.target.framebuffer().map(Into::into);
+        self.framebuffer = fb.map(Into::into);
+        self.framebuffer_dirty = false;
     }
 
     fn should_refresh(&self, panel: &PanelDescriptor, live: bool) -> bool {
@@ -319,11 +392,11 @@ impl Debugger {
         }
 
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Mmio)) {
-            self.mmio_view = self.target.mmio_view().into();
+            self.mmio_view = Arc::new(self.target.mmio_view().into());
         }
 
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Dma)) {
-            self.dma_view = self.target.dma_view().into();
+            self.dma_view = Arc::new(self.target.dma_view().into());
         }
 
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Framebuffer)) {
@@ -334,88 +407,89 @@ impl Debugger {
     }
 
     fn refresh_video_panes(&mut self, live: bool, cx: &mut Context<Self>) {
-        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Palette)) {
-            self.palette_view = self.target.palette_view().into();
+        let wants_palette = self.wants_refresh(live, |kind| matches!(kind, PanelKind::Palette));
+        let wants_tileset = self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tileset));
+        let wants_tilemap = self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tilemap));
+        let wants_sprites = self.wants_refresh(live, |kind| matches!(kind, PanelKind::Sprites));
+
+        let gens = (wants_palette || wants_tileset || wants_tilemap || wants_sprites)
+            .then(|| self.target.video_generations())
+            .flatten();
+
+        if wants_palette {
+            let key = gens.map(|g| g.palette);
+            if key.is_none() || key != self.palette_key {
+                self.palette_key = key;
+                self.palette_view = Arc::new(self.target.palette_view().into());
+            }
         }
 
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Ppu)) {
-            self.ppu_view = self.target.ppu_view().into();
+            self.ppu_view = Arc::new(self.target.ppu_view().into());
         }
 
-        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tileset)) {
+        if wants_tileset {
             self.tileset_layers = self
                 .target
                 .tileset_layers()
                 .into_iter()
                 .map(Into::into)
                 .collect();
-            self.refresh_tileset(cx);
+            self.refresh_tileset_keyed(gens, cx);
         }
 
-        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tilemap)) {
-            self.refresh_tilemap(cx);
+        if wants_tilemap {
+            self.refresh_tilemap_keyed(gens, cx);
         }
 
-        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Sprites)) {
-            self.refresh_sprites(cx);
+        if wants_sprites {
+            self.refresh_sprites_keyed(gens, cx);
         }
 
-        let (tables, structured, scopes, inspector) = self.visible_generic_panels(live);
+        let generic = self.visible_generic_panels(live);
 
-        for id in tables {
+        for id in generic.tables {
             let view = Arc::new(self.target.table_view(id.as_ref()));
             self.table_views.insert(id, view);
         }
 
-        for id in structured {
-            let view = Arc::new(self.target.structured_view(id.as_ref(), None));
+        for (id, selection) in generic.structured {
+            let view = Arc::new(self.target.structured_view(id.as_ref(), selection));
             self.structured_views.insert(id, view);
         }
 
-        if scopes {
-            self.audio_scopes = self.target.audio_scopes_view();
-        }
-
-        if inspector {
-            self.refresh_audio_inspector();
+        for id in generic.scopes {
+            let view = self.target.scopes_view(id.as_ref());
+            self.scopes_views.insert(id, view);
         }
     }
 
-    fn visible_generic_panels(
-        &self,
-        live: bool,
-    ) -> (Vec<SharedString>, Vec<SharedString>, bool, bool) {
-        let mut tables = Vec::new();
-        let mut structured = Vec::new();
-        let mut scopes = false;
-        let mut inspector = false;
+    fn visible_generic_panels(&self, live: bool) -> GenericRefresh {
+        let mut refresh = GenericRefresh::default();
 
         for panel in self.manifest.in_workspace(&self.workspace) {
             if !self.should_refresh(panel, live) || self.is_collapsed(panel.id.as_ref()) {
                 continue;
             }
 
+            let id = SharedString::from(panel.id.clone());
             match panel.kind {
-                PanelKind::Table => tables.push(panel.id.clone().into()),
-                PanelKind::Structured => structured.push(panel.id.clone().into()),
-                PanelKind::ChannelScopes => scopes = true,
-                PanelKind::AudioScope => inspector = true,
+                PanelKind::Table => refresh.tables.push(id),
+                PanelKind::Structured => {
+                    let selection = panel.selection_from.as_ref().map(|table| {
+                        self.table_selection
+                            .get(table.as_ref())
+                            .copied()
+                            .unwrap_or(0)
+                    });
+                    refresh.structured.push((id, selection));
+                }
+                PanelKind::ChannelScopes => refresh.scopes.push(id),
                 _ => {}
             }
         }
 
-        (tables, structured, scopes, inspector)
-    }
-
-    fn refresh_audio_inspector(&mut self) {
-        let sel = self
-            .table_selection
-            .get(DSP_VOICES_TABLE_ID)
-            .copied()
-            .unwrap_or(0);
-        let view = self.target.structured_view(AUDIO_INSPECTOR_ID, Some(sel));
-        self.structured_views
-            .insert(AUDIO_INSPECTOR_ID.into(), Arc::new(view));
+        refresh
     }
 
     fn push_scope(buffer: &mut Vec<f32>, samples: &[i16]) {
@@ -495,9 +569,18 @@ impl Debugger {
 
     fn select_table_row(&mut self, table_id: SharedString, row: usize, cx: &mut Context<Self>) {
         self.table_selection.insert(table_id.clone(), row);
-        if table_id.as_ref() == DSP_VOICES_TABLE_ID {
-            self.refresh_audio_inspector();
+
+        let linked: Vec<SharedString> = self
+            .manifest
+            .in_workspace(&self.workspace)
+            .filter(|p| p.selection_from.as_deref() == Some(table_id.as_ref()))
+            .map(|p| SharedString::from(p.id.clone()))
+            .collect();
+        for id in linked {
+            let view = Arc::new(self.target.structured_view(id.as_ref(), Some(row)));
+            self.structured_views.insert(id, view);
         }
+
         cx.notify();
     }
 
@@ -626,6 +709,7 @@ impl Debugger {
             }));
         } else {
             self.run_task = None;
+            self.invalidate_video_keys();
             self.refresh_panes(CpuRefresh::Highlight, false, cx);
         }
 
@@ -637,17 +721,24 @@ impl Debugger {
             return false;
         }
 
-        let outcome = {
-            let _silenced = SilencedPanics::new();
-            self.target.debug_run_frame(self.breakpoints.marks())
-        };
+        let outcome = self.target.debug_run_frame(self.breakpoints.marks());
         self.audio_samples.clear();
         self.target.drain_audio(&mut self.audio_samples);
         self.audio.queue(&self.audio_samples);
-        Self::push_scope(&mut self.scope_samples, &self.audio_samples);
-        self.scope.samples = self.scope_samples.as_slice().into();
+
+        let scope_visible = self
+            .manifest
+            .in_workspace(&self.workspace)
+            .any(|p| matches!(p.kind, PanelKind::AudioScope) && !self.is_collapsed(p.id.as_ref()));
+        if scope_visible {
+            Self::push_scope(&mut self.scope_samples, &self.audio_samples);
+            self.scope.samples = self.scope_samples.as_slice().into();
+        }
 
         let keep_going = outcome == RunOutcome::Done;
+        if !keep_going {
+            self.invalidate_video_keys();
+        }
         self.refresh_panes(CpuRefresh::Highlight, keep_going, cx);
         self.follow_memory();
 
@@ -658,7 +749,6 @@ impl Debugger {
         self.set_state(match outcome {
             RunOutcome::Done => "running",
             RunOutcome::Breakpoint => "breakpoint",
-            RunOutcome::Fault => "unimplemented op",
         });
 
         cx.notify();
@@ -666,13 +756,12 @@ impl Debugger {
     }
 
     fn step(&mut self, cx: &mut Context<Self>) {
-        let ok = {
-            let _silenced = SilencedPanics::new();
-            self.target.debug_step()
-        };
+        self.target.debug_step();
+
+        self.invalidate_video_keys();
 
         self.refresh_panes(CpuRefresh::Highlight, false, cx);
-        self.set_state(if ok { "paused" } else { "unimplemented op" });
+        self.set_state("paused");
         self.running = false;
         self.run_task = None;
         self.follow_memory();
@@ -682,6 +771,8 @@ impl Debugger {
 
     fn reset(&mut self, cx: &mut Context<Self>) {
         self.target.reset();
+
+        self.invalidate_video_keys();
 
         self.refresh_panes(CpuRefresh::Baseline, false, cx);
         self.set_state("reset");
@@ -1038,15 +1129,6 @@ impl Debugger {
     }
 }
 
-fn accent_at(index: usize) -> u32 {
-    let presets = ACCENT_PRESETS.len();
-    if index < presets {
-        ACCENT_PRESETS[index]
-    } else {
-        GUEST_COLORS[index - presets].1
-    }
-}
-
 /// A clickable accent swatch that selects the unified accent `index`.
 fn accent_dot(
     t: &Theme,
@@ -1105,7 +1187,8 @@ fn half_row(left: AnyElement, right: AnyElement) -> AnyElement {
     self::panel_row(left, panel_column().flex_1().child(right))
 }
 
-fn fixed_half_row(left: AnyElement, right: AnyElement) -> AnyElement {
+/// [`half_row`] that keeps its natural height instead of growing.
+fn half_row_fixed(left: AnyElement, right: AnyElement) -> AnyElement {
     div()
         .flex()
         .flex_none()
@@ -1124,26 +1207,6 @@ fn with_screen(widget: AnyElement, screen: Option<AnyElement>) -> AnyElement {
     }
 }
 
-type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
-
-struct SilencedPanics(Option<PanicHook>);
-
-impl SilencedPanics {
-    fn new() -> Self {
-        let prev = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
-        Self(Some(prev))
-    }
-}
-
-impl Drop for SilencedPanics {
-    fn drop(&mut self) {
-        if let Some(prev) = self.0.take() {
-            std::panic::set_hook(prev);
-        }
-    }
-}
-
 fn clipboard_listener(
     cx: &mut Context<Debugger>,
     payload: SharedString,
@@ -1159,6 +1222,23 @@ impl Render for Debugger {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
+
+        if self.framebuffer_dirty {
+            self.framebuffer_dirty = false;
+            let updated = self
+                .framebuffer
+                .as_ref()
+                .and_then(|view| view.image.as_ref())
+                .is_some_and(|image| window.update_image(image, 0, &self.framebuffer_staged));
+
+            if !updated {
+                let old = self
+                    .framebuffer
+                    .as_mut()
+                    .and_then(|view| view.rebuild_from_staged(&self.framebuffer_staged));
+                Self::drop_grid_image(cx, old);
+            }
+        }
 
         self.logs.follow_tail();
 
@@ -1363,7 +1443,7 @@ impl Render for Debugger {
         for (pane_ix, pane) in self.panes.iter().enumerate() {
             if visible.contains(pane.id.as_str()) {
                 let cpu_id = SharedString::from(pane.id.arc());
-                let cpu_widget = CpuWidget::new(pane.cpu_view.clone().into())
+                let cpu_widget = CpuWidget::new(pane.cpu_view.clone())
                     .id(cpu_id.clone())
                     .title(pane.title.clone())
                     .collapsed(self.is_collapsed(&cpu_id))
@@ -1388,6 +1468,11 @@ impl Render for Debugger {
                 DisassemblyWidget::new(pane.disasm.view.clone(), pane.disasm.scroll.clone())
                     .id(disasm_id.clone())
                     .title(disasm_title)
+                    .current(pane.disasm.current_ix())
+                    .current_note(pane.disasm.current_note())
+                    .selected(pane.disasm.selected_ix())
+                    .breakpoints(pane.disasm.breakpoint_rows())
+                    .layout_cache(pane.disasm.layout_cache.clone())
                     .collapsed(self.is_collapsed(&disasm_id))
                     .on_toggle({
                         let id = disasm_id.clone();
@@ -1840,11 +1925,11 @@ impl Render for Debugger {
             panels.insert(PpuWidget::ID.into(), ppu.into_any_element());
         }
 
-        let panel_glyph: &str = manifest
+        let panel_glyph: Option<SharedString> = manifest
             .workspaces
             .iter()
             .find(|w| w.id.as_ref() == active_workspace.as_ref())
-            .map_or(icon::AUDIO, |w| self::workspace_icon(w.icon));
+            .map(|w| SharedString::from(self::workspace_icon(w.icon)));
         for panel in manifest.in_workspace(&active_workspace) {
             let id = panel.id.as_ref();
             if !visible.contains(id)
@@ -1879,7 +1964,7 @@ impl Render for Debugger {
                                 this.update(cx, |d, cx| d.select_table_row(id, row, cx))
                             }
                         })
-                        .glyph(panel_glyph)
+                        .glyph_opt(panel_glyph.clone())
                         .into_any_element()
                 }
                 PanelKind::Structured => {
@@ -1887,34 +1972,49 @@ impl Render for Debugger {
                     StructuredPanel::new(pid.clone(), title, view)
                         .collapsed(self.is_collapsed(id))
                         .on_toggle(on_toggle)
-                        .glyph(panel_glyph)
+                        .glyph_opt(panel_glyph.clone())
                         .into_any_element()
                 }
                 PanelKind::ChannelScopes => {
-                    ChannelScopesWidget::new(pid.clone(), title, self.audio_scopes.clone())
+                    let view = self.scopes_views.get(id).cloned().unwrap_or_default();
+                    ChannelScopesWidget::new(pid.clone(), title, view)
                         .collapsed(self.is_collapsed(id))
                         .on_toggle(on_toggle)
-                        .glyph(panel_glyph)
+                        .glyph_opt(panel_glyph.clone())
                         .into_any_element()
                 }
                 PanelKind::AudioScope => {
-                    let scope = AudioScopeWidget::new(pid.clone(), title, self.scope.clone())
+                    AudioScopeWidget::new(pid.clone(), title, self.scope.clone())
                         .collapsed(self.is_collapsed(id))
                         .on_toggle(on_toggle)
-                        .glyph(panel_glyph);
-                    let inspector_view = self
-                        .structured_views
-                        .get(AUDIO_INSPECTOR_ID)
-                        .cloned()
-                        .unwrap_or_default();
-                    let inspector =
-                        StructuredPanel::new(AUDIO_INSPECTOR_ID, "Audio Inspector", inspector_view)
-                            .glyph(panel_glyph);
-                    self::fixed_half_row(scope.into_any_element(), inspector.into_any_element())
+                        .glyph_opt(panel_glyph.clone())
+                        .into_any_element()
                 }
                 _ => unreachable!(),
             };
             panels.insert(id.to_string(), element);
+        }
+
+        let companions: Vec<(String, String)> = manifest
+            .in_workspace(&active_workspace)
+            .filter_map(|p| {
+                let companion = p.companion.as_ref()?;
+                Some((p.id.to_string(), companion.to_string()))
+            })
+            .collect();
+        for (host_id, companion_id) in companions {
+            let Some(companion) = panels.remove(companion_id.as_str()) else {
+                continue;
+            };
+
+            match panels.remove(host_id.as_str()) {
+                Some(host) => {
+                    panels.insert(host_id, self::half_row_fixed(host, companion));
+                }
+                None => {
+                    panels.insert(companion_id, companion);
+                }
+            }
         }
         match (tileset, tilemap) {
             (Some(tileset), Some(tilemap)) => {

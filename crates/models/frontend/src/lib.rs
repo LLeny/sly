@@ -69,6 +69,8 @@ pub struct PanelDescriptor {
     pub location: DockLocation,
     pub refresh: RefreshPolicy,
     pub workspaces: Vec<Arc<str>>,
+    pub selection_from: Option<Arc<str>>,
+    pub companion: Option<Arc<str>>,
 }
 
 impl PanelDescriptor {
@@ -86,11 +88,23 @@ impl PanelDescriptor {
             location,
             refresh,
             workspaces: Vec::new(),
+            selection_from: None,
+            companion: None,
         }
     }
 
     pub fn tag(mut self, workspace: impl Into<Arc<str>>) -> Self {
         self.workspaces.push(workspace.into());
+        self
+    }
+
+    pub fn selection_from(mut self, table_id: impl Into<Arc<str>>) -> Self {
+        self.selection_from = Some(table_id.into());
+        self
+    }
+
+    pub fn companion(mut self, panel_id: impl Into<Arc<str>>) -> Self {
+        self.companion = Some(panel_id.into());
         self
     }
 }
@@ -178,6 +192,17 @@ impl ComponentManifest {
                 debug_assert!(
                     self.workspaces.iter().any(|w| w.id == *tag),
                     "panel `{}` tagged with undeclared workspace `{tag}`",
+                    panel.id,
+                );
+            }
+
+            for link in [&panel.selection_from, &panel.companion]
+                .into_iter()
+                .flatten()
+            {
+                debug_assert!(
+                    self.panels.iter().any(|p| p.id == *link),
+                    "panel `{}` links to unknown panel `{link}`",
                     panel.id,
                 );
             }

@@ -24,14 +24,13 @@ impl From<debugger_model::Sprites> for SpritesView {
         let (large_w, large_h) = sprites.large;
         let cell = large_w.max(large_h).max(8);
         let rows = sprites.entries.len().div_ceil(COLS);
-        let scale = (64 / cell).max(1);
 
         let image = (rows > 0).then(|| {
             build_atlas(
                 COLS,
                 rows,
                 cell,
-                scale,
+                1,
                 sprites
                     .entries
                     .iter()

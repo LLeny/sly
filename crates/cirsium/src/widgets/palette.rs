@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, Div, Rgba, SharedString, Window, div, px, rgb};
@@ -35,7 +36,7 @@ fn swatch_color(color: &PaletteColor) -> Rgba {
 
 #[derive(IntoElement)]
 pub struct PaletteWidget {
-    view: PaletteView,
+    view: Arc<PaletteView>,
     selected: Option<(usize, usize)>,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
@@ -45,7 +46,7 @@ pub struct PaletteWidget {
 impl PaletteWidget {
     pub const ID: &'static str = "palette";
 
-    pub fn new(view: PaletteView) -> Self {
+    pub fn new(view: Arc<PaletteView>) -> Self {
         Self {
             view,
             selected: None,

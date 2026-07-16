@@ -10,7 +10,7 @@ use frontend_model::{
 use crate::model::{
     AudioScopesView, CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Framebuffer,
     Highlight, MemoryRegion, MmioView, PaletteView, PpuView, Sprites, StatusView, StructuredView,
-    TableView, Tilemap, Tileset, TilesetLayer,
+    TableView, Tilemap, TilemapViewport, Tileset, TilesetLayer, VideoGenerations,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -120,7 +120,6 @@ pub fn mark_at(marks: &[BreakpointMark], addr: u32, mask: u32) -> Option<Breakpo
 pub enum RunOutcome {
     Done,
     Breakpoint,
-    Fault,
 }
 
 pub trait DebugCore: Core {
@@ -130,6 +129,14 @@ pub trait DebugCore: Core {
     fn cpu_view(&self, cpu: &CpuId) -> CpuView;
     fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> Vec<DisasmLine>;
 
+    fn disasm_fingerprint(&self, _cpu: &CpuId, _base: u32, _count: usize) -> Option<u64> {
+        None
+    }
+
+    fn disassemble_one(&self, cpu: &CpuId, addr: u32) -> Option<DisasmLine> {
+        self.disassemble(cpu, addr, 1).into_iter().next()
+    }
+
     fn call_stack(&self, _cpu: &CpuId) -> CallStackView {
         CallStackView::default()
     }
@@ -138,7 +145,7 @@ pub trait DebugCore: Core {
         self::standard_manifest(&self.cpus())
     }
 
-    fn debug_step(&mut self) -> bool;
+    fn debug_step(&mut self);
     fn debug_run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome;
 
     fn frame_interval(&self) -> Option<Duration> {
@@ -172,11 +179,19 @@ pub trait DebugCore: Core {
         None
     }
 
+    fn tilemap_viewport(&self, _layer: usize) -> Option<TilemapViewport> {
+        None
+    }
+
     fn sprites(&self) -> Option<Sprites> {
         None
     }
 
     fn framebuffer(&self) -> Option<Framebuffer> {
+        None
+    }
+
+    fn video_generations(&self) -> Option<VideoGenerations> {
         None
     }
 
@@ -188,7 +203,7 @@ pub trait DebugCore: Core {
         TableView::default()
     }
 
-    fn audio_scopes_view(&self) -> AudioScopesView {
+    fn scopes_view(&self, _id: &str) -> AudioScopesView {
         AudioScopesView::default()
     }
 

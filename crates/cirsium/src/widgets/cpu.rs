@@ -1,5 +1,6 @@
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, SharedString, Window, div};
+use std::sync::Arc;
 
 use crate::assets::icon;
 use crate::components::{ClickHandler, Copyable, Panel, bool_chip, hex, label_text};
@@ -83,7 +84,7 @@ impl From<debugger_model::CpuView> for CpuView {
 
 #[derive(IntoElement)]
 pub struct CpuWidget {
-    view: CpuView,
+    view: Arc<CpuView>,
     id: SharedString,
     title: SharedString,
     collapsed: bool,
@@ -93,7 +94,7 @@ pub struct CpuWidget {
 impl CpuWidget {
     pub const ID: &'static str = "cpu";
 
-    pub fn new(view: CpuView) -> Self {
+    pub fn new(view: Arc<CpuView>) -> Self {
         Self {
             view,
             id: Self::ID.into(),
@@ -167,7 +168,7 @@ impl RenderOnce for CpuWidget {
 
         Panel::new(self.id, self.title)
             .glyph(icon::CPU)
-            .meta(self.view.isa)
+            .meta(self.view.isa.clone())
             .collapsed(self.collapsed)
             .on_toggle_opt(self.on_toggle)
             .child(body)

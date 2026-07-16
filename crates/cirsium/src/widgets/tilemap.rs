@@ -45,14 +45,13 @@ pub struct TilemapView {
 impl From<debugger_model::Tilemap> for TilemapView {
     fn from(map: debugger_model::Tilemap) -> Self {
         let tile_px = map.tile_px as u32;
-        let scale = (1024 / (map.width as u32 * tile_px).max(1)).max(1);
 
         let image = (!map.entries.is_empty()).then(|| {
             build_atlas(
                 map.width,
                 map.height,
                 tile_px,
-                scale,
+                1,
                 map.entries
                     .iter()
                     .map(|entry| (entry.pixels.as_slice(), tile_px, tile_px)),

@@ -138,14 +138,10 @@ impl<M: MemoryMap> Snes<M> {
 
     #[cfg(feature = "debug")]
     fn record_access(&self, space: &AddressSpace, write: bool) {
-        if self.mmu.access.capturing()
+        if self.mmu.access.active()
             && let Some(key) = self::space_key(space)
         {
-            if write {
-                self.mmu.access.record_write(key);
-            } else {
-                self.mmu.access.record_read(key);
-            }
+            self.mmu.access.record(key, write);
         }
     }
 
@@ -262,6 +258,15 @@ impl<M: MemoryMap> Snes<M> {
     }
 
     fn write_io(&mut self, reg: u16, value: u8) {
+        #[cfg(feature = "debug")]
+        if matches!(
+            reg,
+            SpriteSizeAndTileBase::ADDRESS | BgMode::ADDRESS | TilemapAddrAndSize::START
+                ..=TilemapAddrAndSize::END | Bg12ChrBase::ADDRESS | Bg34ChrBase::ADDRESS
+        ) {
+            self.ppu.reg_generation = self.ppu.reg_generation.wrapping_add(1);
+        }
+
         match reg {
             WRMPYA => self.math.mul_factor_a = value,
             WRMPYB => {

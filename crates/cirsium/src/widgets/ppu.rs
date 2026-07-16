@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, Div, SharedString, Stateful, Window, div, px};
@@ -49,7 +50,7 @@ impl From<debugger_model::PpuView> for PpuView {
 
 #[derive(IntoElement)]
 pub struct PpuWidget {
-    view: PpuView,
+    view: Arc<PpuView>,
     expanded: HashSet<SharedString>,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
@@ -59,7 +60,7 @@ pub struct PpuWidget {
 impl PpuWidget {
     pub const ID: &'static str = "ppu";
 
-    pub fn new(view: PpuView) -> Self {
+    pub fn new(view: Arc<PpuView>) -> Self {
         Self {
             view,
             expanded: HashSet::new(),

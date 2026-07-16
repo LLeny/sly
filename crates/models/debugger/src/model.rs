@@ -62,7 +62,6 @@ pub struct DisasmLine {
     /// Muted trailing annotation, e.g. `NMITIMEN = $4200` or a resolved branch target.
     pub note: Arc<str>,
     pub target: Option<u32>,
-    pub current: bool,
     pub flow: FlowKind,
 }
 
@@ -73,7 +72,6 @@ impl DisasmLine {
         bytes: impl Into<Arc<str>>,
         text: impl Into<Arc<str>>,
         tokens: Vec<DisasmToken>,
-        current: bool,
     ) -> Self {
         Self {
             addr,
@@ -83,7 +81,6 @@ impl DisasmLine {
             tokens,
             note: Arc::from(""),
             target: None,
-            current,
             flow: FlowKind::None,
         }
     }
@@ -388,6 +385,15 @@ pub struct PaletteView {
     pub palettes: Vec<Vec<PaletteColor>>,
     pub meta: Arc<str>,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub struct VideoGenerations {
+    pub palette: u64,
+    pub tileset: u64,
+    pub tilemap: u64,
+    pub sprites: u64,
+}
+
 #[derive(Clone, Default)]
 pub struct AudioChannel {
     pub index: u8,

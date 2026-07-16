@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use debugger_model::{
     AudioChannel, AudioScopesView, Cell, ColWidth, Column, Field, FlagView, Row, Section,
-    StructuredView, TableRow, TableView, Tone,
+    StructuredView, TableRow, TableView, Tone, hex,
 };
 
 use crate::apu::dsp::registers::{
@@ -81,6 +81,18 @@ fn field(label: &str, value: String) -> Row {
     })
 }
 
+fn section(title: &str, rows: Vec<Row>) -> Section {
+    Section {
+        title: Some(title.into()),
+        rows,
+        ..Section::default()
+    }
+}
+
+fn page_addr(page: u8) -> String {
+    hex((page as u32) << 8, 16)
+}
+
 pub fn voices_view(dsp: &Dsp) -> TableView {
     let voices: Vec<Voice> = (0..VOICE_COUNT).map(|i| voice(dsp, i)).collect();
     let active = voices.iter().filter(|v| v.active).count();
@@ -157,26 +169,23 @@ pub fn registers_view(dsp: &Dsp) -> StructuredView {
         .collect();
 
     let status = Section {
-        title: Some("Status".into()),
         leading: true,
-        group: 0,
-        basis: None,
-        rows: vec![Row::Flags {
-            flags: vec![
-                FlagView::new("RST", flg & 0x80 != 0),
-                FlagView::new("MUTE", flg & 0x40 != 0),
-                FlagView::new("ECHO", flg & 0x20 == 0),
-            ],
-            note: Some((format!("NOISE {:02}", flg & 0x1F).into(), Tone::Normal)),
-        }],
+        ..section(
+            "Status",
+            vec![Row::Flags {
+                flags: vec![
+                    FlagView::new("RST", flg & 0x80 != 0),
+                    FlagView::new("MUTE", flg & 0x40 != 0),
+                    FlagView::new("ECHO", flg & 0x20 == 0),
+                ],
+                note: Some((format!("NOISE {:02}", flg & 0x1F).into(), Tone::Normal)),
+            }],
+        )
     };
 
-    let mix = Section {
-        title: Some("Mix".into()),
-        leading: false,
-        group: 0,
-        basis: None,
-        rows: vec![
+    let mix = section(
+        "Mix",
+        vec![
             field(
                 "Master L/R",
                 format!(
@@ -198,37 +207,22 @@ pub fn registers_view(dsp: &Dsp) -> StructuredView {
                 format!("{:+}", dsp.reg(R_ECHO_FEEDBACK) as i8),
             ),
         ],
-    };
+    );
 
-    let echo = Section {
-        title: Some("Echo".into()),
-        leading: false,
-        group: 0,
-        basis: None,
-        rows: vec![
-            field("Buffer", format!("${esa:02X}00")),
+    let echo = section(
+        "Echo",
+        vec![
+            field("Buffer", page_addr(esa)),
             field("Delay", format!("{} ms", (edl as u32 & 0x0F) * 16)),
-            field(
-                "Sample table",
-                format!("${:02X}00", dsp.reg(R_SOURCE_DIRECTORY)),
-            ),
+            field("Sample table", page_addr(dsp.reg(R_SOURCE_DIRECTORY))),
         ],
-    };
+    );
 
-    let fir_taps = Section {
-        title: Some("FIR taps".into()),
-        leading: false,
-        group: 0,
-        basis: None,
-        rows: vec![Row::Tags { tags: fir }],
-    };
+    let fir_taps = section("FIR taps", vec![Row::Tags { tags: fir }]);
 
-    let per_voice = Section {
-        title: Some("Voices".into()),
-        leading: false,
-        group: 0,
-        basis: None,
-        rows: vec![
+    let per_voice = section(
+        "Voices",
+        vec![
             Row::BitHeader { bits: 8 },
             bit_grid("KON", dsp.reg(R_KEY_ON)),
             bit_grid("KOFF", dsp.reg(R_KEY_OFF)),
@@ -237,7 +231,7 @@ pub fn registers_view(dsp: &Dsp) -> StructuredView {
             bit_grid("Echo", dsp.reg(R_ECHO_ENABLE)),
             bit_grid("Pitch mod", dsp.reg(R_PITCH_MODULATION)),
         ],
-    };
+    );
 
     StructuredView {
         sections: vec![status, mix, echo, fir_taps, per_voice],
@@ -279,10 +273,7 @@ pub fn inspector_view(dsp: &Dsp, selection: Option<usize>) -> StructuredView {
     };
 
     let identity = Section {
-        title: None,
         leading: true,
-        group: 0,
-        basis: None,
         rows: vec![
             Row::Flags {
                 flags: vec![
@@ -294,53 +285,55 @@ pub fn inspector_view(dsp: &Dsp, selection: Option<usize>) -> StructuredView {
             },
             field(
                 "Echo path",
-                format!("${esa:02X}00  {echo_delay_ms} ms  FIR {fir_sum:+}"),
+                format!("{}  {echo_delay_ms} ms  FIR {fir_sum:+}", page_addr(esa)),
             ),
         ],
+        ..Section::default()
     };
 
     let signal = Section {
-        title: Some("Signal".into()),
-        leading: false,
         group: 1,
         basis: Some(0.42),
-        rows: vec![
-            meter("Source", v.vd.source_sample, v.active),
-            meter("Envelope", v.vd.output_sample, v.active),
-            meter("Mix L", v.vd.mixed_sample[0], v.active),
-            meter("Mix R", v.vd.mixed_sample[1], v.active),
-        ],
+        ..section(
+            "Signal",
+            vec![
+                meter("Source", v.vd.source_sample, v.active),
+                meter("Envelope", v.vd.output_sample, v.active),
+                meter("Mix L", v.vd.mixed_sample[0], v.active),
+                meter("Mix R", v.vd.mixed_sample[1], v.active),
+            ],
+        )
     };
 
     let state = Section {
-        title: Some("Voice state".into()),
-        leading: false,
         group: 1,
-        basis: None,
-        rows: vec![
-            field(
-                "Envelope",
-                format!(
-                    "{} {:03X}/7FF  H {:03X}",
-                    v.env_mode, v.vd.env, v.vd.hidden_env
+        ..section(
+            "Voice state",
+            vec![
+                field(
+                    "Envelope",
+                    format!(
+                        "{} {:03X}/7FF  H {:03X}",
+                        v.env_mode, v.vd.env, v.vd.hidden_env
+                    ),
                 ),
-            ),
-            field(
-                "Pitch",
-                format!("{} → {} Hz", v.pitch_hz, v.effective_pitch_hz),
-            ),
-            field(
-                "BRR cursor",
-                format!(
-                    "${:04X}+{}  R{range}/F{filter}  E{} L{}",
-                    v.vd.brr_addr, v.vd.brr_offset, end as u8, looping as u8
+                field(
+                    "Pitch",
+                    format!("{} → {} Hz", v.pitch_hz, v.effective_pitch_hz),
                 ),
-            ),
-            field(
-                "Gaussian",
-                format!("phase {:04X}", v.vd.interpolation_position & 0x3FFF),
-            ),
-        ],
+                field(
+                    "BRR cursor",
+                    format!(
+                        "${:04X}+{}  R{range}/F{filter}  E{} L{}",
+                        v.vd.brr_addr, v.vd.brr_offset, end as u8, looping as u8
+                    ),
+                ),
+                field(
+                    "Gaussian",
+                    format!("phase {:04X}", v.vd.interpolation_position & 0x3FFF),
+                ),
+            ],
+        )
     };
 
     StructuredView {

@@ -7,6 +7,9 @@ pub struct Vram {
     addr: u16,
     control: VramControl,
     prefetch: u16,
+
+    #[cfg(feature = "debug")]
+    generation: u64,
 }
 
 impl Vram {
@@ -16,7 +19,15 @@ impl Vram {
             addr: 0,
             control: VramControl::default(),
             prefetch: 0,
+
+            #[cfg(feature = "debug")]
+            generation: 0,
         }
+    }
+
+    #[cfg(feature = "debug")]
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn word(&self, index: u16) -> u16 {
@@ -58,6 +69,11 @@ impl Vram {
         let index = self.translated() as usize % WORDS;
         self.words[index] = (self.words[index] & 0xFF00) | value as u16;
 
+        #[cfg(feature = "debug")]
+        {
+            self.generation = self.generation.wrapping_add(1);
+        }
+
         if !self.increment_on_high() {
             self.increment();
         }
@@ -66,6 +82,11 @@ impl Vram {
     pub(crate) fn write_high(&mut self, value: u8) {
         let index = self.translated() as usize % WORDS;
         self.words[index] = (self.words[index] & 0x00FF) | ((value as u16) << 8);
+
+        #[cfg(feature = "debug")]
+        {
+            self.generation = self.generation.wrapping_add(1);
+        }
 
         if self.increment_on_high() {
             self.increment();

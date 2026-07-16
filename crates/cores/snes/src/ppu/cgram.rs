@@ -4,6 +4,9 @@ pub struct Cgram {
     words: [u16; 256],
     addr: u8,
     latch: WordLatch,
+
+    #[cfg(feature = "debug")]
+    generation: u64,
 }
 
 impl Cgram {
@@ -12,7 +15,15 @@ impl Cgram {
             words: [0; 256],
             addr: 0,
             latch: WordLatch::default(),
+
+            #[cfg(feature = "debug")]
+            generation: 0,
         }
+    }
+
+    #[cfg(feature = "debug")]
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn word(&self, index: u8) -> u16 {
@@ -32,6 +43,11 @@ impl Cgram {
         if let Some(word) = self.latch.write(value) {
             self.words[self.addr as usize] = word & 0x7FFF;
             self.addr = self.addr.wrapping_add(1);
+
+            #[cfg(feature = "debug")]
+            {
+                self.generation = self.generation.wrapping_add(1);
+            }
         }
     }
 

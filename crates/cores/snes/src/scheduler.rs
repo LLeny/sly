@@ -177,11 +177,6 @@ impl<M: MemoryMap> Scheduler<M> {
 }
 
 pub(crate) fn spc700_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: u64) {
-    #[cfg(feature = "debug")]
-    {
-        snes.executing = crate::Component::Spc;
-    }
-
     let cycles = crate::apu::spc700::step(&mut snes.apu);
     let delay = snes.scheduler.spc_master_clocks(cycles);
     snes.scheduler

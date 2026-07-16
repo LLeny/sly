@@ -1,6 +1,11 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::Arc;
+
 use web_time::{Duration, Instant};
 
-use cirsium::widgets::{DisassemblyView, ViewMode};
+use cirsium::widgets::{BreakpointKind, DisassemblyLayoutCache, DisassemblyView, ViewMode};
 use gpui::{
     Pixels, Point, ScrollStrategy, SharedString, Size, UniformListScrollHandle, ease_out_quint,
     size,
@@ -39,9 +44,10 @@ fn aligned_base(pc: u32, lead: u32, mut sweep: impl FnMut(u32, usize) -> Vec<u32
 }
 
 pub struct Disasm {
-    pub view: DisassemblyView,
+    pub view: Arc<DisassemblyView>,
     pub scroll: UniformListScrollHandle,
     pub menu: Option<Menu>,
+    pub layout_cache: Rc<RefCell<DisassemblyLayoutCache>>,
     cpu: CpuId,
     follow_pc: bool,
     show_bytes: bool,
@@ -54,14 +60,20 @@ pub struct Disasm {
     base: u32,
     selected: Option<u32>,
     breakpoints: Vec<BreakpointMark>,
+    fingerprint: Option<u64>,
+    current_ix: Option<usize>,
+    current_note: Option<SharedString>,
+    selected_ix: Option<usize>,
+    bp_rows: Rc<HashMap<usize, BreakpointKind>>,
 }
 
 impl Disasm {
     pub fn new(cpu: CpuId) -> Self {
         Self {
-            view: DisassemblyView::default(),
+            view: Arc::default(),
             scroll: UniformListScrollHandle::new(),
             menu: None,
+            layout_cache: Rc::default(),
             cpu,
             follow_pc: true,
             show_bytes: false,
@@ -74,6 +86,11 @@ impl Disasm {
             base: 0,
             selected: None,
             breakpoints: Vec::new(),
+            fingerprint: None,
+            current_ix: None,
+            current_note: None,
+            selected_ix: None,
+            bp_rows: Rc::default(),
         }
     }
 
@@ -85,12 +102,43 @@ impl Disasm {
         self.show_bytes
     }
 
+    pub fn current_ix(&self) -> Option<usize> {
+        self.current_ix
+    }
+
+    pub fn current_note(&self) -> Option<SharedString> {
+        self.current_note.clone()
+    }
+
+    pub fn selected_ix(&self) -> Option<usize> {
+        self.selected_ix
+    }
+
+    pub fn breakpoint_rows(&self) -> Rc<HashMap<usize, BreakpointKind>> {
+        self.bp_rows.clone()
+    }
+
     pub fn recompute(&mut self, target: &dyn DebugCore) {
         self.rebuild(target, false);
     }
 
     fn rebuild(&mut self, target: &dyn DebugCore, force_rebase: bool) {
         let pc = target.pc(&self.cpu);
+
+        let mut checked_fp = None;
+        if !force_rebase && !self.view.lines.is_empty() {
+            let holds_pc = self.view.lines.iter().any(|l| l.addr == pc);
+            if !self.follow_pc || holds_pc {
+                let fp = target.disasm_fingerprint(&self.cpu, self.base, COUNT);
+                if fp.is_some() && fp == self.fingerprint {
+                    self.refresh_row_states(target, pc);
+                    self.follow_scroll();
+                    return;
+                }
+
+                checked_fp = Some(fp);
+            }
+        }
 
         let lead = if self.view_mode == ViewMode::Graph {
             0
@@ -105,7 +153,7 @@ impl Disasm {
                 let held_lines = target.disassemble(&self.cpu, self.base, COUNT);
                 held_lines
                     .iter()
-                    .any(|line| line.current)
+                    .any(|line| line.addr == pc)
                     .then_some(held_lines)
             };
 
@@ -115,7 +163,7 @@ impl Disasm {
                     let base = self.aligned_base(target, pc, lead);
                     let lines = target.disassemble(&self.cpu, base, COUNT);
 
-                    if lines.iter().any(|line| line.current) {
+                    if lines.iter().any(|line| line.addr == pc) {
                         (lines, base)
                     } else {
                         (target.disassemble(&self.cpu, pc, COUNT), pc)
@@ -126,22 +174,55 @@ impl Disasm {
             (target.disassemble(&self.cpu, self.base, COUNT), self.base)
         };
 
+        let same_base = base == self.base;
         self.base = base;
-        self.view = DisassemblyView {
+        self.view = Arc::new(DisassemblyView {
             lines: lines.into_iter().map(Into::into).collect(),
             show_bytes: self.show_bytes,
+        });
+        self.fingerprint = match checked_fp {
+            Some(fp) if same_base => fp,
+            _ => target.disasm_fingerprint(&self.cpu, base, COUNT),
         };
-        self.apply_selection();
-        self.apply_breakpoints();
+        self.refresh_row_states(target, pc);
 
         if self.follow_pc {
             self.graph_offset = Point::default();
             self.graph_anim = None;
         }
 
+        self.follow_scroll();
+    }
+
+    fn refresh_row_states(&mut self, target: &dyn DebugCore, pc: u32) {
+        self.current_ix = self.view.lines.iter().position(|l| l.addr == pc);
+        self.current_note = self.current_ix.and_then(|_| {
+            let note = target.disassemble_one(&self.cpu, pc)?.note;
+            (!note.is_empty()).then(|| SharedString::from(note.as_ref()))
+        });
+        self.selected_ix = self
+            .selected
+            .and_then(|addr| self.view.lines.iter().position(|l| l.addr == addr));
+        self.refresh_breakpoint_rows();
+    }
+
+    fn refresh_breakpoint_rows(&mut self) {
+        self.bp_rows = Rc::new(
+            self.view
+                .lines
+                .iter()
+                .enumerate()
+                .filter_map(|(ix, line)| {
+                    mark_at(&self.breakpoints, line.addr, 0xFFFF).map(|kind| (ix, kind))
+                })
+                .collect(),
+        );
+    }
+
+    fn follow_scroll(&mut self) {
         if self.follow_pc
             && self.view_mode == ViewMode::Linear
-            && let Some(ix) = self.view.lines.iter().position(|l| l.current)
+            && let Some(ix) = self.current_ix
         {
             self.scroll.scroll_to_item_strict(ix, ScrollStrategy::Top);
         }
@@ -157,41 +238,31 @@ impl Disasm {
         })
     }
 
-    fn apply_selection(&mut self) {
-        for line in &mut self.view.lines {
-            line.selected = self.selected == Some(line.addr);
-        }
-    }
-
-    fn apply_breakpoints(&mut self) {
-        for line in &mut self.view.lines {
-            line.breakpoint = mark_at(&self.breakpoints, line.addr, 0xFFFF);
-        }
-    }
-
     pub fn set_breakpoints(&mut self, breakpoints: &[BreakpointMark]) {
         self.breakpoints = breakpoints
             .iter()
             .filter(|m| m.cpu == self.cpu)
             .cloned()
             .collect();
-        self.apply_breakpoints();
+        self.refresh_breakpoint_rows();
     }
 
     pub fn select(&mut self, ix: usize) {
         if let Some(line) = self.view.lines.get(ix) {
-            self.selected = if self.selected == Some(line.addr) {
-                None
+            if self.selected == Some(line.addr) {
+                self.selected = None;
+                self.selected_ix = None;
             } else {
-                Some(line.addr)
-            };
-            self.apply_selection();
+                self.selected = Some(line.addr);
+                self.selected_ix = Some(ix);
+            }
         }
     }
 
     pub fn open_menu(&mut self, ix: usize, position: Point<Pixels>) {
         if let Some(line) = self.view.lines.get(ix) {
             self.selected = Some(line.addr);
+            self.selected_ix = Some(ix);
             self.menu = Some(Menu {
                 position,
                 addr: line.addr,
@@ -200,7 +271,6 @@ impl Disasm {
                 bytes: line.bytes.clone(),
                 text: line.text.clone(),
             });
-            self.apply_selection();
         }
     }
 
@@ -215,7 +285,10 @@ impl Disasm {
 
     pub fn toggle_bytes(&mut self) {
         self.show_bytes = !self.show_bytes;
-        self.view.show_bytes = self.show_bytes;
+        self.view = Arc::new(DisassemblyView {
+            lines: self.view.lines.clone(),
+            show_bytes: self.show_bytes,
+        });
     }
 
     pub fn view_mode(&self) -> ViewMode {

@@ -48,8 +48,18 @@ impl Panel {
         self
     }
 
+    pub fn meta_opt(mut self, meta: Option<SharedString>) -> Self {
+        self.meta = meta;
+        self
+    }
+
     pub fn glyph(mut self, icon_path: impl Into<SharedString>) -> Self {
         self.glyph = Some(icon_path.into());
+        self
+    }
+
+    pub fn glyph_opt(mut self, icon_path: Option<SharedString>) -> Self {
+        self.glyph = icon_path;
         self
     }
 

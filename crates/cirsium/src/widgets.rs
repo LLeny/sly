@@ -33,10 +33,11 @@ pub use channel_scopes::{AudioScopesView, ChannelScopesWidget};
 pub use controls::{ControlsView, ControlsWidget};
 pub use cpu::{CpuView, CpuWidget, FlagView, RegisterView};
 pub use disassembly::{
-    DisasmLine, DisasmToken, DisassemblyView, DisassemblyWidget, TokenKind, ViewMode,
+    DisasmLine, DisasmToken, DisassemblyLayoutCache, DisassemblyView, DisassemblyWidget, TokenKind,
+    ViewMode,
 };
 pub use dma::{DmaChannelDetail, DmaChannelView, DmaView, DmaWidget};
-pub use framebuffer::{FramebufferView, FramebufferWidget};
+pub use framebuffer::{FramebufferView, FramebufferWidget, stage_bgra};
 pub use grid::{GridContent, GridOverlay, GridPanel, TilesetLayer};
 pub use log::{LogEntry, LogLevel, LogView, LogWidget, short_target};
 pub use memory::{MemoryCell, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};

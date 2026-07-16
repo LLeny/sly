@@ -39,6 +39,11 @@ impl StructuredPanel {
         self
     }
 
+    pub fn glyph_opt(mut self, glyph: Option<gpui::SharedString>) -> Self {
+        self.glyph = glyph;
+        self
+    }
+
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
         self
@@ -95,18 +100,12 @@ impl RenderOnce for StructuredPanel {
             }
         }
 
-        let mut panel = Panel::new(self.id, self.title)
+        Panel::new(self.id, self.title)
             .collapsed(self.collapsed)
             .on_toggle_opt(self.on_toggle)
-            .child(body);
-        if let Some(glyph) = self.glyph {
-            panel = panel.glyph(glyph);
-        }
-        if let Some(meta) = view.meta.clone() {
-            panel = panel.meta(meta);
-        }
-
-        panel
+            .glyph_opt(self.glyph)
+            .meta_opt(view.meta.clone().map(Into::into))
+            .child(body)
     }
 }
 

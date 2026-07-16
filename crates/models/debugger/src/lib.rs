@@ -14,7 +14,7 @@ pub use model::{
     MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView, PpuGroup, PpuProperty,
     PpuView, RegisterView, Row, Section, SpriteEntry, Sprites, StackFrame, StatusView,
     StructuredView, TableRow, TableView, Tilemap, TilemapEntry, TilemapViewport, Tileset,
-    TilesetLayer, TilesetTile, TokenKind, Tone, hex,
+    TilesetLayer, TilesetTile, TokenKind, Tone, VideoGenerations, hex,
 };
 pub use target::{
     BreakpointKind, BreakpointMark, CPU_WORKSPACE, CpuDescriptor, CpuId, DebugCore, RunOutcome,

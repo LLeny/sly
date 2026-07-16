@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{App, Bounds, ClickEvent, Hsla, Pixels, Window, canvas, div, fill, point, px, size};
 
-use crate::components::{ClickHandler, Panel, empty_state_centered};
+use crate::components::{ClickHandler, Panel, empty_state_centered, status_flag};
 use crate::theme::{Theme, with_alpha};
 use crate::widgets::scope::scope_baseline;
 
@@ -38,6 +38,11 @@ impl ChannelScopesWidget {
         self
     }
 
+    pub fn glyph_opt(mut self, glyph: Option<gpui::SharedString>) -> Self {
+        self.glyph = glyph;
+        self
+    }
+
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
         self
@@ -59,7 +64,7 @@ impl RenderOnce for ChannelScopesWidget {
 
         let has_data = self.view.channels.iter().any(|c| c.waveform.len() > 1);
 
-        let body = if self.view.channels.is_empty() || !has_data {
+        let body = if !has_data {
             empty_state_centered(t, "No audio").into_any_element()
         } else {
             self.view
@@ -75,22 +80,17 @@ impl RenderOnce for ChannelScopesWidget {
                         .gap(px(3.))
                         .pb(px(2.))
                         .overflow_y_scroll(),
-                    |col, c| {
-                        col.child(scope_row(t, c.label, c.active, c.waveform))
-                    },
+                    |col, c| col.child(scope_row(t, c.label, c.active, c.waveform)),
                 )
                 .into_any_element()
         };
 
-        let mut panel = Panel::new(self.id, self.title)
+        Panel::new(self.id, self.title)
             .grow(true)
             .collapsed(self.collapsed)
             .on_toggle_opt(self.on_toggle)
-            .child(body);
-        if let Some(glyph) = self.glyph {
-            panel = panel.glyph(glyph);
-        }
-        panel
+            .glyph_opt(self.glyph)
+            .child(body)
     }
 }
 
@@ -117,13 +117,9 @@ fn scope_row(
         .px_1()
         .h(px(34.))
         .child(
-            div()
+            status_flag(t, gpui::SharedString::from(label), active)
                 .w(px(20.))
-                .flex_shrink_0()
-                .font_family(t.mono_font)
-                .text_xs()
-                .text_color(if active { t.accent } else { t.text_dim })
-                .child(gpui::SharedString::from(label)),
+                .flex_shrink_0(),
         )
         .child(
             div()

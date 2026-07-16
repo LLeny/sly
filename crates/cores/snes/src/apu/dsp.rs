@@ -26,6 +26,9 @@ const VOICE_VOLUME_SCALE_SHIFT: u32 = 7;
 #[cfg(feature = "debug")]
 const VOICE_SCOPE: usize = 256;
 
+#[cfg(feature = "debug")]
+const DEBUG_CAPTURE_TICKS: u32 = 32_000;
+
 pub struct Dsp {
     regs: RegisterFile,
     voices: [Voice; VOICE_COUNT],
@@ -38,6 +41,8 @@ pub struct Dsp {
     voice_hist: Box<[[i16; VOICE_SCOPE]; VOICE_COUNT]>,
     #[cfg(feature = "debug")]
     voice_hist_pos: usize,
+    #[cfg(feature = "debug")]
+    debug_capture: std::cell::Cell<u32>,
 }
 
 impl Default for Dsp {
@@ -60,13 +65,21 @@ impl Dsp {
             voice_hist: Box::new([[0; VOICE_SCOPE]; VOICE_COUNT]),
             #[cfg(feature = "debug")]
             voice_hist_pos: 0,
+            #[cfg(feature = "debug")]
+            debug_capture: std::cell::Cell::new(0),
         }
+    }
+
+    #[cfg(feature = "debug")]
+    fn arm_debug_capture(&self) {
+        self.debug_capture.set(DEBUG_CAPTURE_TICKS);
     }
 
     #[cfg(feature = "debug")]
     pub fn voice_waveform(&self, i: usize) -> std::sync::Arc<[f32]> {
         const POINTS: usize = 64;
 
+        self.arm_debug_capture();
         let hist = &self.voice_hist[i];
         let start = self.voice_hist_pos;
         (0..POINTS)
@@ -85,6 +98,7 @@ impl Dsp {
 
     #[cfg(feature = "debug")]
     pub fn voice_debug(&self, i: usize) -> VoiceDebug {
+        self.arm_debug_capture();
         self.voices[i].debug_snapshot()
     }
 
@@ -100,6 +114,15 @@ impl Dsp {
     }
 
     pub fn tick(&mut self, ram: &mut [u8; 0x10000]) -> (i16, i16) {
+        #[cfg(feature = "debug")]
+        let debug_capture = {
+            let remaining = self.debug_capture.get();
+            if remaining > 0 {
+                self.debug_capture.set(remaining - 1);
+            }
+            remaining > 0
+        };
+
         let settings = SampleSettings::capture(&self.regs);
 
         let (poll_keys, key_on) = self.key_on.begin_sample();
@@ -152,7 +175,7 @@ impl Dsp {
             let (voice_output, envx_out) = self.voices[i].apply_envelope(output);
 
             #[cfg(feature = "debug")]
-            {
+            if debug_capture {
                 self.voices[i].record_signal(brr_header, pitch, output, voice_output);
                 self.voice_hist[i][self.voice_hist_pos] = voice_output as i16;
             }
@@ -190,7 +213,9 @@ impl Dsp {
                 let amp = (voice_output * volumes[ch]) >> VOICE_VOLUME_SCALE_SHIFT;
 
                 #[cfg(feature = "debug")]
-                self.voices[i].record_mixed_sample(ch, amp);
+                if debug_capture {
+                    self.voices[i].record_mixed_sample(ch, amp);
+                }
 
                 main_out[ch] = (main_out[ch] + amp).clamp(-32768, 32767);
                 if SampleSettings::enabled(settings.echo_voices, voice_id) {
@@ -211,7 +236,7 @@ impl Dsp {
         }
 
         #[cfg(feature = "debug")]
-        {
+        if debug_capture {
             self.voice_hist_pos = (self.voice_hist_pos + 1) % VOICE_SCOPE;
         }
 

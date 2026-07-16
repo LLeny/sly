@@ -10,20 +10,18 @@ use debugger_model::{
     PaletteColor, PaletteView, PanelDescriptor, PanelKind, PpuGroup, PpuProperty, PpuView,
     RefreshPolicy, RegisterView, RunOutcome, SOUND_WORKSPACE, SpriteEntry, Sprites, StackFrame,
     StatusView, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapViewport,
-    Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE, WorkspaceDescriptor,
-    WorkspaceIcon, hex, standard_manifest, strip_symbol_sigils, tokenize,
+    Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE, VideoGenerations,
+    WorkspaceDescriptor, WorkspaceIcon, hex, standard_manifest, strip_symbol_sigils, tokenize,
 };
 
 mod dsp;
-
-pub use dsp::{INSPECTOR_ID, VOICES_ID};
 
 use crate::apu::{Apu, spc700};
 use crate::callstack::CallFrame;
 use crate::cartridge::{MapMode, Speed};
 use crate::cpu::disasm::{Disasm, FlowKind as CoreFlow, InstructionClass};
 use crate::mmio::{Address, MemKind, MemoryAccess};
-use crate::{Cartridge, Component, Snes};
+use crate::{Cartridge, Snes};
 
 const WRAM_SIZE: u32 = 0x2_0000;
 const PPU_BASE: u32 = 0x2100;
@@ -35,6 +33,8 @@ const BUS_SIZE: u32 = 0x100_0000;
 const CPU_MAIN: &str = "cpu.65c816";
 const CPU_SPC: &str = "apu.spc700";
 
+const CAPTURE_FRAMES: u32 = 2;
+
 pub struct SnesDebug {
     core: Snes,
     cartridge: CartridgeView,
@@ -42,7 +42,7 @@ pub struct SnesDebug {
     label: Arc<str>,
     segments: Vec<Arc<str>>,
     last_access: MemoryAccess,
-    fault: Option<Component>,
+    capture_frames: std::cell::Cell<u32>,
 }
 
 impl SnesDebug {
@@ -63,7 +63,7 @@ impl SnesDebug {
             label: label.into(),
             segments,
             last_access: MemoryAccess::default(),
-            fault: None,
+            capture_frames: std::cell::Cell::new(0),
         }
     }
 
@@ -110,6 +110,21 @@ impl SnesDebug {
             })
     }
 
+    fn step_captured(&mut self) -> MemoryAccess {
+        self.core.mmu.access.begin(true);
+        self.core.apu.access.begin(true);
+        self.core.apu.access.resume();
+
+        self.core.step();
+
+        self.core.mmu.access.stop();
+        self.core.apu.access.stop();
+
+        let mut access = self.core.mmu.access.take();
+        access.merge(&self.core.apu.access.take());
+        access
+    }
+
     fn watch_hit(&self, breakpoints: &[BreakpointMark], access: &MemoryAccess) -> bool {
         breakpoints.iter().any(|m| {
             let set = match m.kind {
@@ -135,7 +150,6 @@ impl Core for SnesDebug {
     fn reset(&mut self) {
         self.core.reset();
         self.last_access = MemoryAccess::default();
-        self.fault = None;
     }
 
     fn step(&mut self) {
@@ -171,18 +185,14 @@ impl DebugCore for SnesDebug {
     }
 
     fn set_pc(&mut self, cpu: &CpuId, addr: u32) {
-        self.fault = None;
         match cpu.as_str() {
             CPU_SPC => self.core.apu.spc700.pc = addr as u16,
             _ => self.core.cpu.pc = addr as u16,
         }
     }
 
-    fn debug_step(&mut self) -> bool {
-        let trace = self.core.step_traced();
-        self.last_access = trace.access;
-        self.fault = trace.fault;
-        self.fault.is_none()
+    fn debug_step(&mut self) {
+        self.last_access = self.step_captured();
     }
 
     fn debug_run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome {
@@ -190,31 +200,54 @@ impl DebugCore for SnesDebug {
             .iter()
             .any(|m| matches!(m.kind, BreakpointKind::Read | BreakpointKind::Write));
 
-        let mut access = MemoryAccess::default();
-
         let frame_end = self.core.scheduler.frame_deadline();
-        while self.core.scheduler.cycles() < frame_end {
-            let trace = self.core.step_traced();
-            access.merge(&trace.access);
 
-            if let Some(component) = trace.fault {
-                self.last_access = access;
-                self.fault = Some(component);
-                return RunOutcome::Fault;
+        if watch {
+            let mut access = MemoryAccess::default();
+            while self.core.scheduler.cycles() < frame_end {
+                let step_access = self.step_captured();
+                access.merge(&step_access);
+
+                if self.watch_hit(breakpoints, &step_access) || self.execute_hit(breakpoints) {
+                    self.last_access = access;
+                    return RunOutcome::Breakpoint;
+                }
             }
 
-            if !breakpoints.is_empty()
-                && ((watch && self.watch_hit(breakpoints, &trace.access))
-                    || self.execute_hit(breakpoints))
-            {
-                self.last_access = access;
-                return RunOutcome::Breakpoint;
+            self.last_access = access;
+            return RunOutcome::Done;
+        }
+
+        let full = self.capture_frames.get() > 0;
+        if full {
+            self.capture_frames.set(self.capture_frames.get() - 1);
+        }
+
+        self.core.mmu.access.begin(full);
+        self.core.apu.access.begin(full);
+        self.core.apu.access.resume();
+
+        let mut outcome = RunOutcome::Done;
+        if breakpoints.is_empty() {
+            self.core.run_frame();
+        } else {
+            while self.core.scheduler.cycles() < frame_end {
+                self.core.step();
+                if self.execute_hit(breakpoints) {
+                    outcome = RunOutcome::Breakpoint;
+                    break;
+                }
             }
         }
 
+        self.core.mmu.access.stop();
+        self.core.apu.access.stop();
+
+        let mut access = self.core.mmu.access.take();
+        access.merge(&self.core.apu.access.take());
         self.last_access = access;
-        self.fault = None;
-        RunOutcome::Done
+
+        outcome
     }
 
     fn frame_interval(&self) -> Option<Duration> {
@@ -232,6 +265,42 @@ impl DebugCore for SnesDebug {
         match cpu.as_str() {
             CPU_SPC => self::spc_disasm_view(&self.core.apu, base as u16, count),
             _ => self::disasm_view(&self.core, base as u16, count),
+        }
+    }
+
+    fn disasm_fingerprint(&self, cpu: &CpuId, base: u32, count: usize) -> Option<u64> {
+        use std::hash::{DefaultHasher, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        let mut addr = base as u16;
+
+        match cpu.as_str() {
+            CPU_SPC => {
+                for _ in 0..count * 3 {
+                    hasher.write_u8(self.core.apu.peek(addr));
+                    addr = addr.wrapping_add(1);
+                }
+            }
+            _ => {
+                let bank = self.core.cpu.program_bank;
+                hasher.write_u8(bank);
+                hasher.write_usize(crate::cpu::mode_selectors(&self.core.cpu));
+                for _ in 0..count * 4 {
+                    hasher.write_u8(self.core.peek8(Address::new(bank, addr)));
+                    addr = addr.wrapping_add(1);
+                }
+            }
+        }
+
+        Some(hasher.finish())
+    }
+
+    fn disassemble_one(&self, cpu: &CpuId, addr: u32) -> Option<DisasmLine> {
+        match cpu.as_str() {
+            CPU_SPC => self::spc_disasm_view(&self.core.apu, addr as u16, 1)
+                .into_iter()
+                .next(),
+            _ => Some(self::disasm_line_at(&self.core, addr as u16, true).0),
         }
     }
 
@@ -318,6 +387,52 @@ impl DebugCore for SnesDebug {
         })
     }
 
+    fn video_generations(&self) -> Option<VideoGenerations> {
+        use std::hash::{DefaultHasher, Hasher};
+
+        fn mix(parts: impl IntoIterator<Item = u64>) -> u64 {
+            let mut hasher = DefaultHasher::new();
+            for part in parts {
+                hasher.write_u64(part);
+            }
+            hasher.finish()
+        }
+
+        let ppu = &self.core.ppu;
+        let vram = ppu.vram.generation();
+        let cgram = ppu.cgram.generation();
+        let regs = ppu.reg_generation;
+
+        let oam = {
+            let mut hasher = DefaultHasher::new();
+            for i in 0..128 {
+                hasher.write_u8(ppu.oam.byte(i * 4 + 2));
+                hasher.write_u8(ppu.oam.byte(i * 4 + 3));
+            }
+            for i in 0..32 {
+                hasher.write_u8(ppu.oam.byte(512 + i) & 0b1010_1010);
+            }
+            hasher.finish()
+        };
+
+        Some(VideoGenerations {
+            palette: mix([cgram, ppu.cgram.word_addr() as u64]),
+            tileset: mix([vram, cgram, regs]),
+            tilemap: mix([vram, cgram, regs]),
+            sprites: mix([vram, cgram, regs, oam]),
+        })
+    }
+
+    fn tilemap_viewport(&self, layer: usize) -> Option<TilemapViewport> {
+        let header = self.core.ppu.tilemap_header(layer)?;
+        Some(TilemapViewport {
+            x: header.scroll_x,
+            y: header.scroll_y,
+            width: crate::ppu::SCREEN_WIDTH,
+            height: crate::ppu::SCREEN_HEIGHT,
+        })
+    }
+
     fn table_view(&self, id: &str) -> TableView {
         match id {
             dsp::VOICES_ID => dsp::voices_view(&self.core.apu.dsp),
@@ -334,8 +449,11 @@ impl DebugCore for SnesDebug {
         }
     }
 
-    fn audio_scopes_view(&self) -> AudioScopesView {
-        dsp::scopes_view(&self.core.apu.dsp)
+    fn scopes_view(&self, id: &str) -> AudioScopesView {
+        match id {
+            dsp::SCOPES_ID => dsp::scopes_view(&self.core.apu.dsp),
+            _ => AudioScopesView::default(),
+        }
     }
 
     fn manifest(&self) -> ComponentManifest {
@@ -442,6 +560,19 @@ impl DebugCore for SnesDebug {
                 DockLocation::Center,
                 RefreshPolicy::Continuous,
             )
+            .companion(dsp::INSPECTOR_ID)
+            .tag(SOUND_WORKSPACE),
+        );
+        manifest.insert_after(
+            PanelKind::AudioScope,
+            PanelDescriptor::new(
+                dsp::INSPECTOR_ID,
+                "Audio Inspector",
+                PanelKind::Structured,
+                DockLocation::Center,
+                RefreshPolicy::Continuous,
+            )
+            .selection_from(dsp::VOICES_ID)
             .tag(SOUND_WORKSPACE),
         );
         manifest.insert_after(
@@ -481,9 +612,19 @@ impl DebugCore for SnesDebug {
             .tag(SOUND_WORKSPACE),
         );
 
-        manifest.relocate_after("breakpoints", PanelKind::Mmio, DockLocation::Right);
+        manifest.insert_after(
+            PanelKind::Mmio,
+            PanelDescriptor::new(
+                "breakpoints",
+                "Breakpoints",
+                PanelKind::Breakpoints,
+                DockLocation::Right,
+                RefreshPolicy::OnPause,
+            )
+            .tag(SOUND_WORKSPACE),
+        );
 
-        for id in [CPU_SPC, &format!("{CPU_SPC}.disasm"), "breakpoints", "log"] {
+        for id in [CPU_SPC, &format!("{CPU_SPC}.disasm"), "log"] {
             manifest.tag(id, SOUND_WORKSPACE);
         }
 
@@ -500,9 +641,6 @@ impl DebugCore for SnesDebug {
     }
 
     fn caption(&self, label: &str) -> String {
-        if self.fault == Some(Component::Spc) {
-            return format!("{label} @ SPC700:{:04X}", self.core.apu.spc700.pc);
-        }
         self::caption(label, &self.core)
     }
 
@@ -534,6 +672,8 @@ impl DebugCore for SnesDebug {
     }
 
     fn memory_highlights(&self, region: &str, addr: u32, len: usize) -> Vec<Highlight> {
+        self.capture_frames.set(CAPTURE_FRAMES);
+
         (0..len as u32)
             .map(|i| match self.region_key(region, addr.wrapping_add(i)) {
                 Some(key) if self.last_access.writes.contains(&key) => Highlight::Written,
@@ -645,36 +785,38 @@ fn cpu_view(cpu: &crate::Cpu) -> CpuView {
     }
 }
 
-fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
+fn disasm_line_at(snes: &Snes, addr: u16, with_ea: bool) -> (DisasmLine, u8) {
     let bank = snes.cpu.program_bank;
-    let pc = snes.cpu.pc;
+    let d = snes.disassemble_at(addr);
+    let len = d.length.max(1);
+    let text = strip_symbol_sigils(&d.text, &SNES_SYNTAX);
+    let tokens = tokenize(&text, self::mnemonic_kind(d.class), &SNES_SYNTAX);
+    let ea = with_ea
+        .then(|| crate::cpu::effective_address(snes, addr))
+        .flatten();
+    let note = self::disasm_note(&tokens, &d, bank, ea);
+
+    let line = DisasmLine::new(
+        addr as u32,
+        format!("{bank:02X}:{addr:04X}"),
+        self::read_bytes(snes, bank, addr, len),
+        &*text,
+        tokens,
+    )
+    .target(d.target)
+    .flow(self::map_flow(d.flow))
+    .note(note);
+
+    (line, len)
+}
+
+fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
     let mut addr = base;
     let mut lines = Vec::with_capacity(count);
 
     for _ in 0..count {
-        let d = snes.disassemble_at(addr);
-        let len = d.length.max(1);
-        let text = strip_symbol_sigils(&d.text, &SNES_SYNTAX);
-        let tokens = tokenize(&text, self::mnemonic_kind(d.class), &SNES_SYNTAX);
-        let ea = (addr == pc)
-            .then(|| crate::cpu::effective_address(snes, addr))
-            .flatten();
-        let note = self::disasm_note(&tokens, &d, bank, ea);
-
-        lines.push(
-            DisasmLine::new(
-                addr as u32,
-                format!("{bank:02X}:{addr:04X}"),
-                self::read_bytes(snes, bank, addr, len),
-                &*text,
-                tokens,
-                addr == pc,
-            )
-            .target(d.target)
-            .flow(self::map_flow(d.flow))
-            .note(note),
-        );
-
+        let (line, len) = self::disasm_line_at(snes, addr, false);
+        lines.push(line);
         addr = addr.wrapping_add(len as u16);
     }
 
@@ -707,7 +849,6 @@ fn spc_cpu_view(spc: &spc700::Spc700) -> CpuView {
 }
 
 fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> Vec<DisasmLine> {
-    let pc = apu.spc700.pc;
     let mut addr = base;
     let mut lines = Vec::with_capacity(count);
 
@@ -725,7 +866,6 @@ fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> Vec<DisasmLine> {
                 self::spc_read_bytes(apu, addr, len),
                 &*text,
                 tokens,
-                addr == pc,
             )
             .target(target.map(|t| t as u32))
             .flow(self::map_flow(flow))

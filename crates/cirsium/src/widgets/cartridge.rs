@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, Div, FontWeight, ObjectFit, SharedString, Window, div, img, px, svg};
 
@@ -27,7 +29,7 @@ impl From<debugger_model::CartridgeView> for CartridgeView {
 
 #[derive(IntoElement)]
 pub struct CartridgeWidget {
-    view: CartridgeView,
+    view: Arc<CartridgeView>,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
 }
@@ -35,7 +37,7 @@ pub struct CartridgeWidget {
 impl CartridgeWidget {
     pub const ID: &'static str = "cartridge";
 
-    pub fn new(view: CartridgeView) -> Self {
+    pub fn new(view: Arc<CartridgeView>) -> Self {
         Self {
             view,
             collapsed: false,

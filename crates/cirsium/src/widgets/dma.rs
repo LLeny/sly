@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, Div, SharedString, Stateful, Window, div, px};
@@ -67,7 +68,7 @@ impl From<debugger_model::DmaView> for DmaView {
 
 #[derive(IntoElement)]
 pub struct DmaWidget {
-    view: DmaView,
+    view: Arc<DmaView>,
     expanded: HashSet<SharedString>,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
@@ -77,7 +78,7 @@ pub struct DmaWidget {
 impl DmaWidget {
     pub const ID: &'static str = "dma";
 
-    pub fn new(view: DmaView) -> Self {
+    pub fn new(view: Arc<DmaView>) -> Self {
         Self {
             view,
             expanded: HashSet::new(),

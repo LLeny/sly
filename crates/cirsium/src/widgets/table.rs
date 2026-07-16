@@ -7,7 +7,7 @@ use gpui::{App, ClickEvent, Div, Window, div, px};
 use crate::components::{
     ClickHandler, Panel, empty_state_centered, label_text, meter_bar, mono_text, status_flag,
 };
-use crate::theme::{Theme, with_alpha};
+use crate::theme::Theme;
 
 pub use debugger_model::{Cell, ColWidth, Column, TableRow, TableView};
 
@@ -46,6 +46,11 @@ impl TablePanel {
 
     pub fn glyph(mut self, glyph: impl Into<gpui::SharedString>) -> Self {
         self.glyph = Some(glyph.into());
+        self
+    }
+
+    pub fn glyph_opt(mut self, glyph: Option<gpui::SharedString>) -> Self {
+        self.glyph = glyph;
         self
     }
 
@@ -97,18 +102,12 @@ impl RenderOnce for TablePanel {
             list
         };
 
-        let mut panel = Panel::new(self.id, self.title)
+        Panel::new(self.id, self.title)
             .collapsed(self.collapsed)
             .on_toggle_opt(self.on_toggle)
-            .child(body);
-        if let Some(glyph) = self.glyph {
-            panel = panel.glyph(glyph);
-        }
-        if let Some(meta) = view.meta.clone() {
-            panel = panel.meta(meta);
-        }
-
-        panel
+            .glyph_opt(self.glyph)
+            .meta_opt(view.meta.clone().map(Into::into))
+            .child(body)
     }
 }
 
@@ -159,11 +158,11 @@ fn data_row(
             .px_1()
             .h(px(ROW_HEIGHT))
             .when(selected, |d| {
-                d.bg(with_alpha(t.accent, 0.13))
+                d.bg(t.accent_soft)
                     .border_l_1()
                     .border_color(t.selection_border)
             })
-            .when(!selected && active, |d| d.bg(with_alpha(t.accent, 0.06))),
+            .when(!selected && active, |d| d.bg(t.accent_faint)),
         |el, (col_ix, cell)| {
             let column = &columns[col_ix.min(columns.len() - 1)];
             el.child(cell_frame(
@@ -174,9 +173,10 @@ fn data_row(
     );
 
     if let Some(handler) = on_select {
+        let hover_bg = t.accent_soft;
         el = el
             .cursor_pointer()
-            .hover(|style| style.bg(with_alpha(t.accent, 0.10)))
+            .hover(move |style| style.bg(hover_bg))
             .on_click(move |_, window, cx| handler(index, window, cx));
     }
 

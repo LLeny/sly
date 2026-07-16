@@ -30,6 +30,37 @@ impl From<debugger_model::Framebuffer> for FramebufferView {
     }
 }
 
+impl FramebufferView {
+    pub fn matches(&self, fb: &debugger_model::Framebuffer) -> bool {
+        let len = fb.width as usize * fb.height as usize;
+        self.image.is_some()
+            && self.width == fb.width
+            && self.height == fb.height
+            && len > 0
+            && fb.pixels.len() == len
+    }
+
+    pub fn rebuild_from_staged(&mut self, staged: &[u8]) -> Option<Arc<RenderImage>> {
+        let len = self.width as usize * self.height as usize * 4;
+        if len == 0 || staged.len() != len {
+            return None;
+        }
+
+        let buffer = image::RgbaImage::from_raw(self.width, self.height, staged.to_vec())?;
+        std::mem::replace(
+            &mut self.image,
+            Some(Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))),
+        )
+    }
+}
+
+pub fn stage_bgra(fb: &debugger_model::Framebuffer, out: &mut Vec<u8>) {
+    out.resize(fb.pixels.len() * 4, 0);
+    for (dst, &px) in out.chunks_exact_mut(4).zip(&fb.pixels) {
+        dst.copy_from_slice(&crate::widgets::grid::bgra(px));
+    }
+}
+
 #[derive(IntoElement)]
 pub struct FramebufferWidget {
     view: Option<FramebufferView>,

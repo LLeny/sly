@@ -25,24 +25,9 @@ use crate::interrupt::Irq;
 use crate::joypad::Joypads;
 use crate::math::Math;
 use crate::mmio::Address;
-#[cfg(feature = "debug")]
-use crate::mmio::MemoryAccess;
 use crate::mmio::dma::Dma;
 use crate::ppu::Ppu;
 use crate::scheduler::Scheduler;
-
-#[cfg(feature = "debug")]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Component {
-    Cpu,
-    Spc,
-}
-
-#[cfg(feature = "debug")]
-pub struct StepTrace {
-    pub access: MemoryAccess,
-    pub fault: Option<Component>,
-}
 
 pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub cpu: Cpu,
@@ -54,8 +39,6 @@ pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub math: Math,
     pub joypads: Joypads,
     pub scheduler: Scheduler<M>,
-    #[cfg(feature = "debug")]
-    pub executing: Component,
 }
 
 impl Snes {
@@ -77,8 +60,6 @@ impl<M: MemoryMap + 'static> Snes<M> {
             math: Math::new(),
             joypads: Joypads::default(),
             scheduler: Scheduler::new(tv_system),
-            #[cfg(feature = "debug")]
-            executing: Component::Cpu,
         };
         snes.reset();
         snes
@@ -140,11 +121,6 @@ impl<M: MemoryMap + 'static> Snes<M> {
     }
 
     pub fn step(&mut self) {
-        #[cfg(feature = "debug")]
-        {
-            self.executing = Component::Cpu;
-        }
-
         let clocks_before = self.mmu.clocks;
         cpu::step(self);
 
@@ -158,26 +134,6 @@ impl<M: MemoryMap + 'static> Snes<M> {
         let end = self.scheduler.frame_deadline();
         while self.scheduler.cycles() < end {
             self.step();
-        }
-    }
-
-    #[cfg(feature = "debug")]
-    pub fn step_traced(&mut self) -> StepTrace {
-        self.mmu.access.start();
-        self.apu.access.start();
-        self.apu.access.resume();
-
-        let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.step())).is_ok();
-
-        self.mmu.access.stop();
-        self.apu.access.stop();
-
-        let mut access = self.mmu.access.take();
-        access.merge(&self.apu.access.take());
-
-        StepTrace {
-            access,
-            fault: (!ok).then_some(self.executing),
         }
     }
 }

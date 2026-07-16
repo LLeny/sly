@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, Div, FontWeight, SharedString, Stateful, Window, div, px};
@@ -102,7 +103,7 @@ impl MmioView {
 
 #[derive(IntoElement)]
 pub struct MmioWidget {
-    view: MmioView,
+    view: Arc<MmioView>,
     expanded: HashSet<SharedString>,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
@@ -112,7 +113,7 @@ pub struct MmioWidget {
 impl MmioWidget {
     pub const ID: &'static str = "mmio";
 
-    pub fn new(view: MmioView) -> Self {
+    pub fn new(view: Arc<MmioView>) -> Self {
         Self {
             view,
             expanded: HashSet::new(),

@@ -20,63 +20,71 @@ impl MemoryAccess {
     }
 }
 
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum TrackMode {
+    #[default]
+    Off,
+    LastOnly,
+    Full,
+}
+
 #[derive(Default)]
 pub struct AccessTracker {
-    tracing: Cell<bool>,
-    capturing: Cell<bool>,
+    mode: Cell<TrackMode>,
+    gated: Cell<bool>,
     reads: RefCell<HashSet<(MemKind, u32)>>,
     writes: RefCell<HashSet<(MemKind, u32)>>,
     last: Cell<Option<(MemKind, u32)>>,
 }
 
 impl AccessTracker {
-    pub(crate) fn start(&self) {
-        self.tracing.set(true);
-        self.capturing.set(false);
-        self.reads.borrow_mut().clear();
-        self.writes.borrow_mut().clear();
+    pub(crate) fn begin(&self, full: bool) {
+        self.mode.set(if full {
+            TrackMode::Full
+        } else {
+            TrackMode::LastOnly
+        });
+        self.gated.set(false);
         self.last.set(None);
+        if full {
+            self.reads.borrow_mut().clear();
+            self.writes.borrow_mut().clear();
+        }
     }
 
     pub(crate) fn stop(&self) {
-        self.tracing.set(false);
-        self.capturing.set(false);
+        self.mode.set(TrackMode::Off);
+        self.gated.set(false);
     }
 
     pub(crate) fn resume(&self) {
-        if self.tracing.get() {
-            self.capturing.set(true);
+        if self.mode.get() != TrackMode::Off {
+            self.gated.set(true);
         }
     }
 
     pub(crate) fn pause(&self) {
-        self.capturing.set(false);
+        self.gated.set(false);
     }
 
-    pub(super) fn capturing(&self) -> bool {
-        self.capturing.get()
+    pub(super) fn active(&self) -> bool {
+        self.gated.get()
     }
 
     pub(crate) fn record(&self, key: (MemKind, u32), write: bool) {
-        if !self.capturing.get() {
+        if !self.gated.get() {
             return;
         }
 
-        if write {
-            self.record_write(key);
-        } else {
-            self.record_read(key);
+        self.last.set(Some(key));
+
+        if self.mode.get() == TrackMode::Full {
+            if write {
+                self.writes.borrow_mut().insert(key);
+            } else {
+                self.reads.borrow_mut().insert(key);
+            }
         }
-    }
-
-    pub(super) fn record_read(&self, key: (MemKind, u32)) {
-        self.reads.borrow_mut().insert(key);
-        self.last.set(Some(key));
-    }
-
-    pub(super) fn record_write(&self, key: (MemKind, u32)) {
-        self.writes.borrow_mut().insert(key);
-        self.last.set(Some(key));
     }
 
     pub fn take(&self) -> MemoryAccess {

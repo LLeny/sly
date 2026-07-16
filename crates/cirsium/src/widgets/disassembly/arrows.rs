@@ -44,7 +44,10 @@ fn arrow_color(index: usize) -> Hsla {
     hsla(hue, 0.62, 0.62, 1.0)
 }
 
-pub(super) fn arrow_gutters(lines: &[DisasmLine]) -> (Vec<GutterCell>, f32) {
+pub(super) fn arrow_gutters(
+    lines: &[DisasmLine],
+    selected: Option<usize>,
+) -> (Vec<GutterCell>, f32) {
     let n = lines.len();
     let by_addr = super::addr_index(lines);
 
@@ -82,8 +85,6 @@ pub(super) fn arrow_gutters(lines: &[DisasmLine]) -> (Vec<GutterCell>, f32) {
 
     let head_left = ARROW_HEAD_LEFT;
     let width = ARROW_GUTTER_WIDTH;
-
-    let selected = lines.iter().position(|l| l.selected);
 
     placed.sort_by_key(|&(from, to, _, _)| {
         usize::from(selected == Some(from) || selected == Some(to))

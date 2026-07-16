@@ -19,6 +19,15 @@ pub const ACCENT_PRESETS: [u32; 8] = [
 // Special people :)
 pub const GUEST_COLORS: &[(&str, u32)] = &[("Blody", 0xD7B4F3), ("Chicho", 0x93C572)];
 
+pub fn accent_at(index: usize) -> u32 {
+    let presets = ACCENT_PRESETS.len();
+    if index < presets {
+        ACCENT_PRESETS[index]
+    } else {
+        GUEST_COLORS[index - presets].1
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ThemeMode {
     Dark,
@@ -55,6 +64,7 @@ pub struct Theme {
 
     pub accent: Hsla,
     pub accent_soft: Hsla,
+    pub accent_faint: Hsla,
     pub accent_hover: Hsla,
     pub on_accent: Hsla,
     pub selection: Hsla,
@@ -106,6 +116,7 @@ impl Theme {
     pub fn with_accent(mut self, accent: Hsla) -> Self {
         self.accent = accent;
         self.accent_soft = with_alpha(accent, 0.23);
+        self.accent_faint = with_alpha(accent, 0.07);
         self.accent_hover = Hsla {
             l: (accent.l + 0.12).min(1.0),
             ..accent
@@ -142,6 +153,7 @@ impl Theme {
 
             accent: rgb(0xa55cff).into(),
             accent_soft: rgba(0xa55cff3a).into(),
+            accent_faint: rgba(0xa55cff12).into(),
             accent_hover: rgb(0xb985ff).into(),
             on_accent: rgb(0xffffff).into(),
             selection: rgb(0x4a2f7a).into(),
@@ -200,6 +212,7 @@ impl Theme {
 
             accent: rgb(0x7c3aed).into(),
             accent_soft: rgba(0x7c3aed26).into(),
+            accent_faint: rgba(0x7c3aed12).into(),
             accent_hover: rgb(0x6a28d9).into(),
             on_accent: rgb(0xffffff).into(),
             selection: rgb(0xcdb4f5).into(),

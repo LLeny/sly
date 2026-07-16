@@ -1,6 +1,7 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
@@ -113,9 +114,6 @@ pub struct DisasmLine {
     pub note: SharedString,
     pub target: Option<u32>,
     pub flow: FlowKind,
-    pub current: bool,
-    pub selected: bool,
-    pub breakpoint: Option<BreakpointKind>,
 }
 
 impl DisasmLine {
@@ -125,7 +123,6 @@ impl DisasmLine {
         bytes: impl Into<SharedString>,
         text: impl Into<SharedString>,
         tokens: Vec<DisasmToken>,
-        current: bool,
     ) -> Self {
         Self {
             addr,
@@ -136,9 +133,6 @@ impl DisasmLine {
             note: SharedString::default(),
             target: None,
             flow: FlowKind::None,
-            current,
-            selected: false,
-            breakpoint: None,
         }
     }
 
@@ -164,9 +158,6 @@ impl From<debugger_model::DisasmLine> for DisasmLine {
             note: SharedString::from(line.note.as_ref()),
             target: line.target,
             flow: line.flow,
-            current: line.current,
-            selected: false,
-            breakpoint: None,
         }
     }
 }
@@ -185,13 +176,100 @@ pub struct DisassemblyView {
     pub show_bytes: bool,
 }
 
+#[derive(Default)]
+pub struct DisassemblyLayoutCache {
+    gutters: Option<GutterEntry>,
+    graph: Option<GraphEntry>,
+}
+
+struct GutterEntry {
+    lines: Arc<DisassemblyView>,
+    selected: Option<usize>,
+    cells: Rc<(Vec<GutterCell>, f32)>,
+}
+
+struct GraphEntry {
+    lines: Arc<DisassemblyView>,
+    layout: Rc<GraphLayout>,
+}
+
+impl DisassemblyLayoutCache {
+    fn gutters(
+        &mut self,
+        view: &Arc<DisassemblyView>,
+        selected: Option<usize>,
+    ) -> Rc<(Vec<GutterCell>, f32)> {
+        if let Some(entry) = &self.gutters
+            && Arc::ptr_eq(&entry.lines, view)
+            && entry.selected == selected
+        {
+            return entry.cells.clone();
+        }
+
+        let cells = Rc::new(arrow_gutters(&view.lines, selected));
+        self.gutters = Some(GutterEntry {
+            lines: view.clone(),
+            selected,
+            cells: cells.clone(),
+        });
+
+        cells
+    }
+
+    fn graph(&mut self, view: &Arc<DisassemblyView>) -> Rc<GraphLayout> {
+        if let Some(entry) = &self.graph
+            && Arc::ptr_eq(&entry.lines, view)
+        {
+            return entry.layout.clone();
+        }
+
+        let layout = Rc::new(graph::build(&view.lines));
+        self.graph = Some(GraphEntry {
+            lines: view.clone(),
+            layout: layout.clone(),
+        });
+        layout
+    }
+}
+
+#[derive(Clone, Default)]
+struct RowStates {
+    current: Option<usize>,
+    current_note: Option<SharedString>,
+    selected: Option<usize>,
+    breakpoints: Rc<HashMap<usize, BreakpointKind>>,
+}
+
+impl RowStates {
+    fn is_current(&self, ix: usize) -> bool {
+        self.current == Some(ix)
+    }
+
+    fn is_selected(&self, ix: usize) -> bool {
+        self.selected == Some(ix)
+    }
+
+    fn breakpoint(&self, ix: usize) -> Option<BreakpointKind> {
+        self.breakpoints.get(&ix).copied()
+    }
+
+    fn note<'a>(&'a self, ix: usize, line: &'a DisasmLine) -> &'a SharedString {
+        match &self.current_note {
+            Some(note) if self.is_current(ix) => note,
+            _ => &line.note,
+        }
+    }
+}
+
 #[derive(IntoElement)]
 pub struct DisassemblyWidget {
-    view: DisassemblyView,
+    view: Arc<DisassemblyView>,
     scroll: UniformListScrollHandle,
     id: SharedString,
     title: SharedString,
     collapsed: bool,
+    rows: RowStates,
+    layout_cache: Option<Rc<RefCell<DisassemblyLayoutCache>>>,
     on_toggle: Option<ClickHandler>,
     on_select: Option<SelectCallback>,
     on_context: Option<ContextCallback>,
@@ -211,13 +289,15 @@ pub struct DisassemblyWidget {
 impl DisassemblyWidget {
     pub const ID: &'static str = "disassembly";
 
-    pub fn new(view: DisassemblyView, scroll: UniformListScrollHandle) -> Self {
+    pub fn new(view: Arc<DisassemblyView>, scroll: UniformListScrollHandle) -> Self {
         Self {
             view,
             scroll,
             id: Self::ID.into(),
             title: "Disassembly".into(),
             collapsed: false,
+            rows: RowStates::default(),
+            layout_cache: None,
             on_toggle: None,
             on_select: None,
             on_context: None,
@@ -233,6 +313,31 @@ impl DisassemblyWidget {
             on_edge_hover: None,
             on_jump: None,
         }
+    }
+
+    pub fn current(mut self, current: Option<usize>) -> Self {
+        self.rows.current = current;
+        self
+    }
+
+    pub fn current_note(mut self, note: Option<SharedString>) -> Self {
+        self.rows.current_note = note;
+        self
+    }
+
+    pub fn selected(mut self, selected: Option<usize>) -> Self {
+        self.rows.selected = selected;
+        self
+    }
+
+    pub fn breakpoints(mut self, breakpoints: Rc<HashMap<usize, BreakpointKind>>) -> Self {
+        self.rows.breakpoints = breakpoints;
+        self
+    }
+
+    pub fn layout_cache(mut self, cache: Rc<RefCell<DisassemblyLayoutCache>>) -> Self {
+        self.layout_cache = Some(cache);
+        self
     }
 
     pub fn id(mut self, id: impl Into<SharedString>) -> Self {
@@ -353,6 +458,8 @@ impl RenderOnce for DisassemblyWidget {
             id,
             title,
             collapsed,
+            rows,
+            layout_cache,
             view_mode,
             graph_offset,
             on_toggle,
@@ -369,10 +476,9 @@ impl RenderOnce for DisassemblyWidget {
             on_jump,
         } = self;
 
-        let current_addr = view
-            .lines
-            .iter()
-            .find(|l| l.current)
+        let current_addr = rows
+            .current
+            .and_then(|ix| view.lines.get(ix))
             .map(|l| l.address.clone());
 
         let selector = Segmented::new(SharedString::from(format!("{id}-view")))
@@ -386,16 +492,24 @@ impl RenderOnce for DisassemblyWidget {
             });
 
         let body = match view_mode {
-            ViewMode::Linear => {
-                self::render_linear(view, scroll, id.clone(), on_select, on_context)
-                    .into_any_element()
-            }
+            ViewMode::Linear => self::render_linear(
+                view,
+                scroll,
+                id.clone(),
+                rows,
+                layout_cache,
+                on_select,
+                on_context,
+            )
+            .into_any_element(),
             ViewMode::Graph => {
                 let theme = Theme::global(cx);
                 self::render_graph(
                     &theme,
                     view,
                     id.clone(),
+                    rows,
+                    layout_cache,
                     graph_offset,
                     follow,
                     graph_viewport,
@@ -430,6 +544,7 @@ impl RenderOnce for DisassemblyWidget {
 struct DisasmRowOptions {
     arrows_width: f32,
     show_bytes: bool,
+    rows: RowStates,
     on_select: Option<SelectCallback>,
     on_context: Option<ContextCallback>,
 }
@@ -441,20 +556,25 @@ fn disasm_row(
     arrows: &GutterCell,
     options: &DisasmRowOptions,
 ) -> Stateful<Div> {
+    let current = options.rows.is_current(ix);
+    let selected = options.rows.is_selected(ix);
+    let breakpoint = options.rows.breakpoint(ix);
+    let note = options.rows.note(ix, line).clone();
+
     let mut gutter = div()
         .w(px(13.))
         .flex_none()
         .flex()
         .items_center()
         .justify_center();
-    if let Some(kind) = line.breakpoint {
+    if let Some(kind) = breakpoint {
         gutter = gutter.child(
             div()
                 .size(px(8.))
                 .rounded_full()
                 .bg(breakpoint_color(theme, kind)),
         );
-    } else if line.current {
+    } else if current {
         gutter = gutter.child(
             svg()
                 .path(icon::CHEVRON_RIGHT)
@@ -472,14 +592,13 @@ fn disasm_row(
         .h(px(ROW_HEIGHT))
         .px_1()
         .rounded_md()
-        .when(line.current, |d| d.bg(theme.accent_soft))
-        .when_some(line.breakpoint.filter(|_| !line.current), |d, kind| {
+        .when(current, |d| d.bg(theme.accent_soft))
+        .when_some(breakpoint.filter(|_| !current), |d, kind| {
             d.bg(breakpoint_color(theme, kind).opacity(0.20))
         })
-        .when(
-            line.selected && !line.current && line.breakpoint.is_none(),
-            |d| d.bg(theme.bg_panel_alt),
-        )
+        .when(selected && !current && breakpoint.is_none(), |d| {
+            d.bg(theme.bg_panel_alt)
+        })
         .child(gutter);
 
     if options.arrows_width > 0. {
@@ -523,7 +642,7 @@ fn disasm_row(
         LINEAR_MNEMONIC_W,
     ));
 
-    if !line.note.is_empty() {
+    if !note.is_empty() {
         row = row.child(
             div()
                 .ml_auto()
@@ -532,11 +651,11 @@ fn disasm_row(
                 .font_family(theme.mono_font)
                 .text_sm()
                 .text_color(theme.code_comment)
-                .child(line.note.clone()),
+                .child(note),
         );
     }
 
-    if !line.current && !line.selected && line.breakpoint.is_none() {
+    if !current && !selected && breakpoint.is_none() {
         let hover_bg = theme.bg_header;
         row = row.hover(move |s| s.bg(hover_bg));
     }
@@ -555,22 +674,29 @@ fn disasm_row(
 }
 
 fn render_linear(
-    view: DisassemblyView,
+    view: Arc<DisassemblyView>,
     scroll: UniformListScrollHandle,
     id: SharedString,
+    rows: RowStates,
+    layout_cache: Option<Rc<RefCell<DisassemblyLayoutCache>>>,
     on_select: Option<SelectCallback>,
     on_context: Option<ContextCallback>,
 ) -> impl IntoElement {
     let list_id = SharedString::from(format!("{id}-list"));
-    let (gutters, arrows_width) = arrow_gutters(&view.lines);
+    let gutters = match &layout_cache {
+        Some(cache) => cache.borrow_mut().gutters(&view, rows.selected),
+        None => Rc::new(arrow_gutters(&view.lines, rows.selected)),
+    };
     let count = view.lines.len();
     let empty_gutter = GutterCell::default();
     uniform_list(list_id, count, move |range, _window, cx| {
         let theme = Theme::global(cx);
         let t = &*theme;
+        let (cells, arrows_width) = &*gutters;
         let row_options = DisasmRowOptions {
-            arrows_width,
+            arrows_width: *arrows_width,
             show_bytes: view.show_bytes,
+            rows: rows.clone(),
             on_select: on_select.clone(),
             on_context: on_context.clone(),
         };
@@ -580,7 +706,7 @@ fn render_linear(
                     t,
                     ix,
                     &view.lines[ix],
-                    gutters.get(ix).unwrap_or(&empty_gutter),
+                    cells.get(ix).unwrap_or(&empty_gutter),
                     &row_options,
                 )
             })
@@ -594,8 +720,10 @@ fn render_linear(
 #[allow(clippy::too_many_arguments)]
 fn render_graph(
     theme: &Theme,
-    view: DisassemblyView,
+    view: Arc<DisassemblyView>,
     id: SharedString,
+    rows: RowStates,
+    layout_cache: Option<Rc<RefCell<DisassemblyLayoutCache>>>,
     manual_offset: Point<Pixels>,
     follow: bool,
     viewport: Size<f32>,
@@ -608,16 +736,19 @@ fn render_graph(
     on_edge_hover: Option<EdgeHoverCallback>,
     on_jump: Option<JumpCallback>,
 ) -> impl IntoElement {
-    let GraphLayout { blocks, edges } = graph::build(&view.lines);
-    let blocks = Rc::new(blocks);
-    let edges = Rc::new(edges);
+    let layout = match &layout_cache {
+        Some(cache) => cache.borrow_mut().graph(&view),
+        None => Rc::new(graph::build(&view.lines)),
+    };
 
     let base = if follow {
-        blocks
-            .iter()
-            .find_map(|b| {
-                let li = view.lines[b.start..b.end].iter().position(|l| l.current)?;
-                Some((b, li))
+        rows.current
+            .and_then(|cur| {
+                let b = layout
+                    .blocks
+                    .iter()
+                    .find(|b| (b.start..b.end).contains(&cur))?;
+                Some((b, cur - b.start))
             })
             .map(|(b, li)| {
                 let ox = viewport.width / 2. - (b.x + b.w / 2.);
@@ -647,7 +778,7 @@ fn render_graph(
 
     let origin = Rc::new(Cell::new(point(px(0.), px(0.))));
 
-    let paint_data = edges.clone();
+    let paint_data = layout.clone();
     let origin_paint = origin.clone();
     let canvas_el = canvas(
         move |bounds, window, cx| {
@@ -666,7 +797,7 @@ fn render_graph(
                 window,
                 bounds,
                 offset,
-                &paint_data,
+                &paint_data.edges,
                 hovered_edge,
                 &theme_now,
             );
@@ -690,7 +821,7 @@ fn render_graph(
         });
     }
 
-    let move_edges = edges.clone();
+    let move_layout = layout.clone();
     let move_origin = origin.clone();
     container = container.on_mouse_move(move |e: &MouseMoveEvent, window, cx| {
         if e.dragging() {
@@ -700,21 +831,21 @@ fn render_graph(
             return;
         }
         if let Some(hover) = &on_edge_hover {
-            let hit = self::edge_at(&move_edges, e.position, move_origin.get(), offset);
+            let hit = self::edge_at(&move_layout.edges, e.position, move_origin.get(), offset);
             hover(hit, window, cx);
         }
     });
 
     if let Some(jump) = on_jump {
-        let jump_edges = edges.clone();
-        let jump_blocks = blocks.clone();
+        let jump_layout = layout.clone();
         let jump_origin = origin.clone();
         container = container.on_click(move |e, window, cx| {
-            let Some(ei) = self::edge_at(&jump_edges, e.position(), jump_origin.get(), offset)
+            let Some(ei) =
+                self::edge_at(&jump_layout.edges, e.position(), jump_origin.get(), offset)
             else {
                 return;
             };
-            let Some(block) = jump_blocks.get(jump_edges[ei].to) else {
+            let Some(block) = jump_layout.blocks.get(jump_layout.edges[ei].to) else {
                 return;
             };
             let to = point(
@@ -725,9 +856,26 @@ fn render_graph(
         });
     }
 
-    for block in blocks.iter() {
+    const CULL_MARGIN: f32 = 64.;
+
+    let cullable = viewport.width > 0. && viewport.height > 0.;
+
+    for block in layout.blocks.iter() {
+        let bx = f32::from(offset.x) + block.x;
+        let by = f32::from(offset.y) + block.y;
+        if cullable
+            && (bx + block.w < -CULL_MARGIN
+                || by + block.h < -CULL_MARGIN
+                || bx > viewport.width + CULL_MARGIN
+                || by > viewport.height + CULL_MARGIN)
+        {
+            continue;
+        }
+
         let lines = &view.lines[block.start..block.end];
-        let has_current = lines.iter().any(|l| l.current);
+        let has_current = rows
+            .current
+            .is_some_and(|cur| (block.start..block.end).contains(&cur));
         let border = if has_current {
             theme.accent
         } else {
@@ -766,6 +914,10 @@ fn render_graph(
         let mut body = div().flex().flex_col().flex_1().justify_center();
         for (k, line) in lines.iter().enumerate() {
             let ix = block.start + k;
+            let current = rows.is_current(ix);
+            let selected = rows.is_selected(ix);
+            let breakpoint = rows.breakpoint(ix);
+            let note = rows.note(ix, line).clone();
 
             let mut gutter = div()
                 .w(px(graph::BLOCK_GUTTER_W))
@@ -773,14 +925,14 @@ fn render_graph(
                 .flex()
                 .items_center()
                 .justify_center();
-            if let Some(kind) = line.breakpoint {
+            if let Some(kind) = breakpoint {
                 gutter = gutter.child(
                     div()
                         .size(px(7.))
                         .rounded_full()
                         .bg(breakpoint_color(theme, kind)),
                 );
-            } else if line.current {
+            } else if current {
                 gutter = gutter.child(
                     svg()
                         .path(icon::CHEVRON_RIGHT)
@@ -796,14 +948,13 @@ fn render_graph(
                 .pr_3()
                 .h(px(graph::BLOCK_LINE_H))
                 .flex_none()
-                .when(line.current, |d| d.bg(theme.accent_soft))
-                .when_some(line.breakpoint.filter(|_| !line.current), |d, kind| {
+                .when(current, |d| d.bg(theme.accent_soft))
+                .when_some(breakpoint.filter(|_| !current), |d, kind| {
                     d.bg(breakpoint_color(theme, kind).opacity(0.20))
                 })
-                .when(
-                    line.selected && !line.current && line.breakpoint.is_none(),
-                    |d| d.bg(theme.bg_panel_alt),
-                )
+                .when(selected && !current && breakpoint.is_none(), |d| {
+                    d.bg(theme.bg_panel_alt)
+                })
                 .child(gutter)
                 .child(self::instruction_text(
                     theme,
@@ -811,7 +962,7 @@ fn render_graph(
                     GRAPH_MNEMONIC_W,
                 ));
 
-            if !line.note.is_empty() {
+            if !note.is_empty() {
                 row = row.child(
                     div()
                         .ml_auto()
@@ -819,7 +970,7 @@ fn render_graph(
                         .font_family(theme.mono_font)
                         .text_xs()
                         .text_color(theme.code_comment)
-                        .child(line.note.clone()),
+                        .child(note),
                 );
             }
 
@@ -856,8 +1007,26 @@ fn paint_edges(
     let oy = bounds.origin.y + offset.y;
     let at = |p: (f32, f32)| point(ox + px(p.0), oy + px(p.1));
 
+    let cull_left = f32::from(-offset.x);
+    let cull_top = f32::from(-offset.y);
+    let cull_right = cull_left + f32::from(bounds.size.width);
+    let cull_bottom = cull_top + f32::from(bounds.size.height);
+
     for (ei, edge) in edges.iter().enumerate() {
         if edge.points.len() < 2 {
+            continue;
+        }
+
+        let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
+        let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
+        for &(x, y) in &edge.points {
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+
+        if max_x < cull_left || min_x > cull_right || max_y < cull_top || min_y > cull_bottom {
             continue;
         }
 

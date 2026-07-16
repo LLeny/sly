@@ -67,6 +67,10 @@ pub(super) fn build_image(
     Arc::new(RenderImage::new(vec![image::Frame::new(image)]))
 }
 
+pub(in crate::widgets) fn bgra((r, g, b): (u8, u8, u8)) -> [u8; 4] {
+    [b, g, r, 0xFF]
+}
+
 fn blit(
     atlas: &mut image::RgbaImage,
     row: &mut [u8],
@@ -85,10 +89,10 @@ fn blit(
 
     for sy in 0..height {
         for sx in 0..width {
-            let (r, g, b) = pixels[sy * width + sx];
+            let px = self::bgra(pixels[sy * width + sx]);
             for dx in 0..scale {
                 let o = (sx * scale + dx) * 4;
-                row[o..o + 4].copy_from_slice(&[b, g, r, 0xFF]);
+                row[o..o + 4].copy_from_slice(&px);
             }
         }
 
