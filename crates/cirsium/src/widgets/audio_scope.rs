@@ -33,11 +33,6 @@ impl AudioScopeWidget {
         }
     }
 
-    pub fn glyph(mut self, glyph: impl Into<gpui::SharedString>) -> Self {
-        self.glyph = Some(glyph.into());
-        self
-    }
-
     pub fn glyph_opt(mut self, glyph: Option<gpui::SharedString>) -> Self {
         self.glyph = glyph;
         self

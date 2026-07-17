@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, FontWeight, Window, div, px};
+use gpui::{App, ClickEvent, Div, Window, div, px};
 
-use crate::components::{ClickHandler, Panel, label_text, meter_bar, mono_text, status_flag};
+use crate::components::{
+    ClickHandler, Panel, label_text, meter_bar, mono_text, section_header, status_flag,
+};
 use crate::theme::Theme;
 
 pub use debugger_model::{Field, FlagView, Row, Section, StructuredView, Tone};
@@ -32,11 +34,6 @@ impl StructuredPanel {
             collapsed: false,
             on_toggle: None,
         }
-    }
-
-    pub fn glyph(mut self, glyph: impl Into<gpui::SharedString>) -> Self {
-        self.glyph = Some(glyph.into());
-        self
     }
 
     pub fn glyph_opt(mut self, glyph: Option<gpui::SharedString>) -> Self {
@@ -122,18 +119,7 @@ fn section_column(t: &Theme, section: &Section) -> Div {
 }
 
 fn heading(t: &Theme, text: &str, leading: bool) -> Div {
-    div()
-        .px_1()
-        .pt(px(if leading { 0. } else { 6. }))
-        .pb(px(3.))
-        .mb(px(3.))
-        .border_b_1()
-        .border_color(t.border_subtle)
-        .text_xs()
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(t.text_muted)
-        .whitespace_nowrap()
-        .child(text.to_uppercase())
+    section_header(t, text).pt(px(if leading { 0. } else { 6. }))
 }
 
 fn render_row(t: &Theme, row: &Row) -> Div {

@@ -37,3 +37,4 @@ opt-level = 3
 inherits = "release"
 debug = false
 strip = true
+panic = "abort"

@@ -51,7 +51,6 @@ impl From<debugger_model::Tilemap> for TilemapView {
                 map.width,
                 map.height,
                 tile_px,
-                1,
                 map.entries
                     .iter()
                     .map(|entry| (entry.pixels.as_slice(), tile_px, tile_px)),

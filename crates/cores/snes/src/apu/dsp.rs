@@ -93,7 +93,7 @@ impl Dsp {
 
     #[cfg(feature = "debug")]
     pub fn reg(&self, addr: usize) -> u8 {
-        self.regs.read_masked(addr)
+        self.read(addr as u8)
     }
 
     #[cfg(feature = "debug")]

@@ -30,7 +30,6 @@ impl From<debugger_model::Sprites> for SpritesView {
                 COLS,
                 rows,
                 cell,
-                1,
                 sprites
                     .entries
                     .iter()

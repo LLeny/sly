@@ -396,7 +396,6 @@ pub struct VideoGenerations {
 
 #[derive(Clone, Default)]
 pub struct AudioChannel {
-    pub index: u8,
     pub label: Arc<str>,
     pub active: bool,
     pub waveform: Arc<[f32]>,

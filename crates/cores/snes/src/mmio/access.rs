@@ -21,7 +21,7 @@ impl MemoryAccess {
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
-enum TrackMode {
+pub enum TrackMode {
     #[default]
     Off,
     LastOnly,
@@ -38,15 +38,11 @@ pub struct AccessTracker {
 }
 
 impl AccessTracker {
-    pub(crate) fn begin(&self, full: bool) {
-        self.mode.set(if full {
-            TrackMode::Full
-        } else {
-            TrackMode::LastOnly
-        });
+    pub(crate) fn begin(&self, mode: TrackMode) {
+        self.mode.set(mode);
         self.gated.set(false);
         self.last.set(None);
-        if full {
+        if mode == TrackMode::Full {
             self.reads.borrow_mut().clear();
             self.writes.borrow_mut().clear();
         }

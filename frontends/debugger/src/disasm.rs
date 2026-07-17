@@ -185,6 +185,7 @@ impl Disasm {
             _ => target.disasm_fingerprint(&self.cpu, base, COUNT),
         };
         self.refresh_row_states(target, pc);
+        self.refresh_breakpoint_rows();
 
         if self.follow_pc {
             self.graph_offset = Point::default();
@@ -203,7 +204,6 @@ impl Disasm {
         self.selected_ix = self
             .selected
             .and_then(|addr| self.view.lines.iter().position(|l| l.addr == addr));
-        self.refresh_breakpoint_rows();
     }
 
     fn refresh_breakpoint_rows(&mut self) {

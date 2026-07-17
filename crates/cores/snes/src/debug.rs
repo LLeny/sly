@@ -20,7 +20,7 @@ use crate::apu::{Apu, spc700};
 use crate::callstack::CallFrame;
 use crate::cartridge::{MapMode, Speed};
 use crate::cpu::disasm::{Disasm, FlowKind as CoreFlow, InstructionClass};
-use crate::mmio::{Address, MemKind, MemoryAccess};
+use crate::mmio::{Address, MemKind, MemoryAccess, TrackMode};
 use crate::{Cartridge, Snes};
 
 const WRAM_SIZE: u32 = 0x2_0000;
@@ -34,6 +34,7 @@ const CPU_MAIN: &str = "cpu.65c816";
 const CPU_SPC: &str = "apu.spc700";
 
 const CAPTURE_FRAMES: u32 = 2;
+const TRACK_FRAMES: u32 = 4;
 
 pub struct SnesDebug {
     core: Snes,
@@ -43,6 +44,7 @@ pub struct SnesDebug {
     segments: Vec<Arc<str>>,
     last_access: MemoryAccess,
     capture_frames: std::cell::Cell<u32>,
+    track_frames: std::cell::Cell<u32>,
 }
 
 impl SnesDebug {
@@ -64,6 +66,7 @@ impl SnesDebug {
             segments,
             last_access: MemoryAccess::default(),
             capture_frames: std::cell::Cell::new(0),
+            track_frames: std::cell::Cell::new(0),
         }
     }
 
@@ -110,12 +113,12 @@ impl SnesDebug {
             })
     }
 
-    fn step_captured(&mut self) -> MemoryAccess {
-        self.core.mmu.access.begin(true);
-        self.core.apu.access.begin(true);
+    fn captured(&mut self, mode: TrackMode, run: impl FnOnce(&mut Self)) -> MemoryAccess {
+        self.core.mmu.access.begin(mode);
+        self.core.apu.access.begin(mode);
         self.core.apu.access.resume();
 
-        self.core.step();
+        run(self);
 
         self.core.mmu.access.stop();
         self.core.apu.access.stop();
@@ -123,6 +126,24 @@ impl SnesDebug {
         let mut access = self.core.mmu.access.take();
         access.merge(&self.core.apu.access.take());
         access
+    }
+
+    fn step_captured(&mut self) -> MemoryAccess {
+        self.captured(TrackMode::Full, |debug| debug.core.step())
+    }
+
+    fn track_mode(&self) -> TrackMode {
+        for (frames, mode) in [
+            (&self.capture_frames, TrackMode::Full),
+            (&self.track_frames, TrackMode::LastOnly),
+        ] {
+            if frames.get() > 0 {
+                frames.set(frames.get() - 1);
+                return mode;
+            }
+        }
+
+        TrackMode::Off
     }
 
     fn watch_hit(&self, breakpoints: &[BreakpointMark], access: &MemoryAccess) -> bool {
@@ -218,34 +239,22 @@ impl DebugCore for SnesDebug {
             return RunOutcome::Done;
         }
 
-        let full = self.capture_frames.get() > 0;
-        if full {
-            self.capture_frames.set(self.capture_frames.get() - 1);
-        }
-
-        self.core.mmu.access.begin(full);
-        self.core.apu.access.begin(full);
-        self.core.apu.access.resume();
+        let mode = self.track_mode();
 
         let mut outcome = RunOutcome::Done;
-        if breakpoints.is_empty() {
-            self.core.run_frame();
-        } else {
-            while self.core.scheduler.cycles() < frame_end {
-                self.core.step();
-                if self.execute_hit(breakpoints) {
-                    outcome = RunOutcome::Breakpoint;
-                    break;
+        self.last_access = self.captured(mode, |debug| {
+            if breakpoints.is_empty() {
+                debug.core.run_frame();
+            } else {
+                while debug.core.scheduler.cycles() < frame_end {
+                    debug.core.step();
+                    if debug.execute_hit(breakpoints) {
+                        outcome = RunOutcome::Breakpoint;
+                        break;
+                    }
                 }
             }
-        }
-
-        self.core.mmu.access.stop();
-        self.core.apu.access.stop();
-
-        let mut access = self.core.mmu.access.take();
-        access.merge(&self.core.apu.access.take());
-        self.last_access = access;
+        });
 
         outcome
     }
@@ -690,6 +699,8 @@ impl DebugCore for SnesDebug {
     }
 
     fn latest_access(&self) -> Option<(Arc<str>, u32)> {
+        self.track_frames.set(TRACK_FRAMES);
+
         let (kind, offset) = self.last_access.last?;
         let region = match kind {
             MemKind::Wram => "wram",

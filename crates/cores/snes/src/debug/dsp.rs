@@ -356,7 +356,6 @@ pub fn scopes_view(dsp: &Dsp) -> AudioScopesView {
         .map(|i| {
             let active = dsp.voice_debug(i).env > 0;
             AudioChannel {
-                index: i as u8,
                 label: format!("V{i}").into(),
                 active,
                 waveform: if active {

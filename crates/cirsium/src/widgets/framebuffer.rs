@@ -14,13 +14,11 @@ pub struct FramebufferView {
     pub image: Option<Arc<RenderImage>>,
 }
 
-const SCALE: u32 = 1;
-
 impl From<debugger_model::Framebuffer> for FramebufferView {
     fn from(fb: debugger_model::Framebuffer) -> Self {
         let len = fb.width as usize * fb.height as usize;
         let image = (len > 0 && fb.pixels.len() == len)
-            .then(|| crate::widgets::grid::build_image(&fb.pixels, fb.width, fb.height, SCALE));
+            .then(|| crate::widgets::grid::build_image(&fb.pixels, fb.width, fb.height));
 
         Self {
             width: fb.width,
@@ -47,10 +45,8 @@ impl FramebufferView {
         }
 
         let buffer = image::RgbaImage::from_raw(self.width, self.height, staged.to_vec())?;
-        std::mem::replace(
-            &mut self.image,
-            Some(Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))),
-        )
+        self.image
+            .replace(Arc::new(RenderImage::new(vec![image::Frame::new(buffer)])))
     }
 }
 

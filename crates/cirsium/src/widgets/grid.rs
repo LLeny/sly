@@ -38,32 +38,24 @@ pub(super) fn build_atlas<'a>(
     cols: usize,
     rows: usize,
     cell_px: u32,
-    scale: u32,
     cells: impl Iterator<Item = (&'a [(u8, u8, u8)], u32, u32)>,
 ) -> Arc<RenderImage> {
-    let mut atlas =
-        image::RgbaImage::new(cols as u32 * cell_px * scale, rows as u32 * cell_px * scale);
+    let mut atlas = image::RgbaImage::new(cols as u32 * cell_px, rows as u32 * cell_px);
 
-    let mut row = vec![0u8; (cell_px * scale * 4) as usize];
+    let mut row = vec![0u8; (cell_px * 4) as usize];
     for (i, (pixels, width, height)) in cells.enumerate() {
-        let x = (i % cols) as u32 * cell_px * scale + (cell_px - width) / 2 * scale;
-        let y = (i / cols) as u32 * cell_px * scale + (cell_px - height) / 2 * scale;
-        self::blit(&mut atlas, &mut row, x, y, pixels, width, height, scale);
+        let x = (i % cols) as u32 * cell_px + (cell_px - width) / 2;
+        let y = (i / cols) as u32 * cell_px + (cell_px - height) / 2;
+        self::blit(&mut atlas, &mut row, x, y, pixels, width, height);
     }
 
     Arc::new(RenderImage::new(vec![image::Frame::new(atlas)]))
 }
 
-/// A single image scaled up by an integer factor (e.g. the framebuffer).
-pub(super) fn build_image(
-    pixels: &[(u8, u8, u8)],
-    width: u32,
-    height: u32,
-    scale: u32,
-) -> Arc<RenderImage> {
-    let mut image = image::RgbaImage::new(width * scale, height * scale);
-    let mut row = vec![0u8; (width * scale * 4) as usize];
-    self::blit(&mut image, &mut row, 0, 0, pixels, width, height, scale);
+pub(super) fn build_image(pixels: &[(u8, u8, u8)], width: u32, height: u32) -> Arc<RenderImage> {
+    let mut image = image::RgbaImage::new(width, height);
+    let mut row = vec![0u8; (width * 4) as usize];
+    self::blit(&mut image, &mut row, 0, 0, pixels, width, height);
     Arc::new(RenderImage::new(vec![image::Frame::new(image)]))
 }
 
@@ -79,27 +71,21 @@ fn blit(
     pixels: &[(u8, u8, u8)],
     width: u32,
     height: u32,
-    scale: u32,
 ) {
     let atlas_width = atlas.width() as usize;
     let data: &mut [u8] = atlas;
     let (x0, y0) = (x0 as usize, y0 as usize);
-    let (width, height, scale) = (width as usize, height as usize, scale as usize);
-    let row = &mut row[..width * scale * 4];
+    let (width, height) = (width as usize, height as usize);
+    let row = &mut row[..width * 4];
 
     for sy in 0..height {
         for sx in 0..width {
             let px = self::bgra(pixels[sy * width + sx]);
-            for dx in 0..scale {
-                let o = (sx * scale + dx) * 4;
-                row[o..o + 4].copy_from_slice(&px);
-            }
+            row[sx * 4..sx * 4 + 4].copy_from_slice(&px);
         }
 
-        for dy in 0..scale {
-            let o = ((y0 + sy * scale + dy) * atlas_width + x0) * 4;
-            data[o..o + row.len()].copy_from_slice(row);
-        }
+        let o = ((y0 + sy) * atlas_width + x0) * 4;
+        data[o..o + row.len()].copy_from_slice(row);
     }
 }
 

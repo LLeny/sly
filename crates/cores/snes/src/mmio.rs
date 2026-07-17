@@ -8,7 +8,7 @@ mod access;
 mod symbol;
 
 #[cfg(feature = "debug")]
-pub use access::{AccessTracker, MemoryAccess};
+pub use access::{AccessTracker, MemoryAccess, TrackMode};
 
 use crate::joypad::{JOYPAD_IO_END, JOYPAD_IO_START, JOYSER0, JOYSER1, JOYSER1_ALWAYS_SET};
 use crate::math::{RDDIVH, RDDIVL, RDMPYH, RDMPYL, WRDIVB, WRDIVH, WRDIVL, WRMPYA, WRMPYB};

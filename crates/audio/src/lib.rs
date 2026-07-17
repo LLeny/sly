@@ -1,6 +1,8 @@
+use std::time::Duration;
+
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ringbuf::HeapRb;
-use ringbuf::traits::{Consumer, Producer, Split};
+use ringbuf::traits::{Consumer, Observer, Producer, Split};
 
 pub use core_model::AudioSpec;
 
@@ -8,6 +10,7 @@ pub struct AudioPlayer {
     _stream: cpal::Stream,
     producer: ringbuf::HeapProd<i16>,
     channels: usize,
+    device_rate: u32,
     ratio: f64,
     pos: f64,
     prev: [i16; 2],
@@ -73,11 +76,25 @@ impl AudioPlayer {
             _stream: stream,
             producer,
             channels: spec.channels as usize,
+            device_rate,
             ratio: spec.sample_rate.max(1) as f64 / device_rate as f64,
             pos: 0.0,
             prev: [0; 2],
             resampled: Vec::new(),
         })
+    }
+
+    pub fn buffered(&self) -> Duration {
+        self.frames_to_duration(self.producer.occupied_len() / 2)
+    }
+
+    pub fn target_fill(&self) -> std::ops::Range<Duration> {
+        let capacity = self.frames_to_duration(self.producer.capacity().get() / 2);
+        capacity.mul_f64(0.3)..capacity.mul_f64(0.65)
+    }
+
+    fn frames_to_duration(&self, frames: usize) -> Duration {
+        Duration::from_secs_f64(frames as f64 / self.device_rate.max(1) as f64)
     }
 
     pub fn queue(&mut self, samples: &[i16]) {

@@ -98,7 +98,6 @@ pub(crate) struct Debugger {
     table_views: HashMap<SharedString, Arc<TableView>>,
     table_selection: HashMap<SharedString, usize>,
     scopes_views: HashMap<SharedString, AudioScopesView>,
-    scope: AudioScopeView,
     scope_samples: Vec<f32>,
     audio_samples: Vec<i16>,
     ppu_view: Arc<PpuView>,
@@ -134,10 +133,17 @@ pub(crate) struct Debugger {
     running: bool,
     run_task: Option<Task<()>>,
     audio: crate::audio_out::AudioOut,
+    stats: crate::stats::RunStats,
+    perf: Option<SharedString>,
+    emu_clock: Instant,
     accent: usize,
+    #[cfg(target_family = "wasm")]
+    web_tick_armed: bool,
 }
 
 const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+const MAX_CATCHUP_FRAMES: u32 = 3;
+#[cfg(not(target_family = "wasm"))]
 const FRAME_PACE_YIELD: Duration = Duration::from_millis(1);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -211,7 +217,6 @@ impl Debugger {
             table_views: HashMap::new(),
             table_selection: HashMap::new(),
             scopes_views: HashMap::new(),
-            scope: AudioScopeView::default(),
             scope_samples: Vec::new(),
             audio_samples: Vec::new(),
             ppu_view: Arc::new(target.ppu_view().into()),
@@ -252,7 +257,12 @@ impl Debugger {
             running: false,
             run_task: None,
             audio,
+            stats: crate::stats::RunStats::default(),
+            perf: None,
+            emu_clock: Instant::now(),
             accent: 0,
+            #[cfg(target_family = "wasm")]
+            web_tick_armed: false,
         }
     }
 
@@ -404,6 +414,7 @@ impl Debugger {
         }
 
         self.refresh_video_panes(live, cx);
+        self.refresh_generic_panels(live);
     }
 
     fn refresh_video_panes(&mut self, live: bool, cx: &mut Context<Self>) {
@@ -445,7 +456,9 @@ impl Debugger {
         if wants_sprites {
             self.refresh_sprites_keyed(gens, cx);
         }
+    }
 
+    fn refresh_generic_panels(&mut self, live: bool) {
         let generic = self.visible_generic_panels(live);
 
         for id in generic.tables {
@@ -476,12 +489,10 @@ impl Debugger {
             match panel.kind {
                 PanelKind::Table => refresh.tables.push(id),
                 PanelKind::Structured => {
-                    let selection = panel.selection_from.as_ref().map(|table| {
-                        self.table_selection
-                            .get(table.as_ref())
-                            .copied()
-                            .unwrap_or(0)
-                    });
+                    let selection = panel
+                        .selection_from
+                        .as_ref()
+                        .map(|table| self.table_selected(table.as_ref()));
                     refresh.structured.push((id, selection));
                 }
                 PanelKind::ChannelScopes => refresh.scopes.push(id),
@@ -490,6 +501,10 @@ impl Debugger {
         }
 
         refresh
+    }
+
+    fn table_selected(&self, id: &str) -> usize {
+        self.table_selection.get(id).copied().unwrap_or(0)
     }
 
     fn push_scope(buffer: &mut Vec<f32>, samples: &[i16]) {
@@ -659,14 +674,22 @@ impl Debugger {
         self.status.state = self.target.caption(label).into();
     }
 
+    fn status_with_perf(&self) -> StatusView {
+        let mut status = self.status.clone();
+        status.segments.extend(self.perf.clone());
+        status
+    }
+
     fn run_frame_interval(&self) -> Duration {
         self.target
             .frame_interval()
             .unwrap_or(DEFAULT_FRAME_INTERVAL)
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn next_run_wait(next_frame: &mut Instant, interval: Duration) -> Duration {
         *next_frame += interval;
+
         let now = Instant::now();
         let wait = next_frame.saturating_duration_since(now);
         if wait.is_zero() {
@@ -686,29 +709,36 @@ impl Debugger {
         self.set_state(if running { "running" } else { "paused" });
 
         if running {
-            self.run_task = Some(cx.spawn(async move |this, cx| {
-                let mut next_frame = Instant::now();
-                loop {
-                    let interval = this
-                        .update(cx, |this, cx| {
-                            if this.run_frame(cx) {
-                                Some(this.run_frame_interval())
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or(None);
-                    let Some(interval) = interval else {
-                        break;
-                    };
+            self.emu_clock = Instant::now();
 
-                    cx.background_executor()
-                        .timer(Self::next_run_wait(&mut next_frame, interval))
-                        .await;
-                }
-            }));
+            #[cfg(not(target_family = "wasm"))]
+            {
+                self.run_task = Some(cx.spawn(async move |this, cx| {
+                    let mut next_frame = Instant::now();
+                    let mut wake_late = Duration::ZERO;
+
+                    loop {
+                        let interval = this
+                            .update(cx, |this, cx| {
+                                this.run_tick(wake_late, cx)
+                                    .then(|| this.run_frame_interval())
+                            })
+                            .unwrap_or(None);
+                        let Some(interval) = interval else {
+                            break;
+                        };
+
+                        let wait = Self::next_run_wait(&mut next_frame, interval);
+                        let before = Instant::now();
+                        cx.background_executor().timer(wait).await;
+                        wake_late = before.elapsed().saturating_sub(wait);
+                    }
+                }));
+            }
         } else {
             self.run_task = None;
+            self.stats.reset();
+            self.perf = None;
             self.invalidate_video_keys();
             self.refresh_panes(CpuRefresh::Highlight, false, cx);
         }
@@ -716,23 +746,80 @@ impl Debugger {
         cx.notify();
     }
 
-    fn run_frame(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.running {
-            return false;
-        }
+    fn scope_visible(&self) -> bool {
+        self.manifest
+            .in_workspace(&self.workspace)
+            .any(|p| matches!(p.kind, PanelKind::AudioScope) && !self.is_collapsed(p.id.as_ref()))
+    }
 
+    fn emulate_frame(&mut self, scope_visible: bool) -> RunOutcome {
+        let emu_start = Instant::now();
         let outcome = self.target.debug_run_frame(self.breakpoints.marks());
+        self.stats.record_frame(emu_start.elapsed());
+        self.emu_clock += self.run_frame_interval();
+
         self.audio_samples.clear();
         self.target.drain_audio(&mut self.audio_samples);
         self.audio.queue(&self.audio_samples);
 
-        let scope_visible = self
-            .manifest
-            .in_workspace(&self.workspace)
-            .any(|p| matches!(p.kind, PanelKind::AudioScope) && !self.is_collapsed(p.id.as_ref()));
         if scope_visible {
             Self::push_scope(&mut self.scope_samples, &self.audio_samples);
-            self.scope.samples = self.scope_samples.as_slice().into();
+        }
+
+        outcome
+    }
+
+    fn frames_due(&mut self) -> u32 {
+        let interval = self.run_frame_interval();
+        let now = Instant::now();
+
+        let max_debt = interval * MAX_CATCHUP_FRAMES;
+        if now.saturating_duration_since(self.emu_clock) > max_debt {
+            self.emu_clock = now - max_debt;
+        }
+
+        let deficit = now.saturating_duration_since(self.emu_clock);
+        let mut due = (deficit.as_nanos() / interval.as_nanos().max(1)) as u32;
+
+        match self.audio.pacing() {
+            Some((buffered, band)) if buffered >= band.end => {
+                due = due.saturating_sub(1);
+
+                self.emu_clock += interval;
+                if self.emu_clock > now {
+                    self.emu_clock = now;
+                }
+            }
+            Some((buffered, band)) if buffered < band.start => {
+                due += 1;
+
+                self.emu_clock = self
+                    .emu_clock
+                    .checked_sub(interval)
+                    .unwrap_or(self.emu_clock);
+            }
+            _ => {}
+        }
+
+        due.min(MAX_CATCHUP_FRAMES)
+    }
+
+    fn run_tick(&mut self, wake_late: Duration, cx: &mut Context<Self>) -> bool {
+        if !self.running {
+            return false;
+        }
+
+        let mut outcome = RunOutcome::Done;
+        let scope_visible = self.scope_visible();
+        for _ in 0..self.frames_due() {
+            outcome = self.emulate_frame(scope_visible);
+            if outcome != RunOutcome::Done {
+                break;
+            }
+        }
+
+        if let Some(summary) = self.stats.record_tick(wake_late, self.audio.buffered()) {
+            self.perf = Some(summary.into());
         }
 
         let keep_going = outcome == RunOutcome::Done;
@@ -744,6 +831,8 @@ impl Debugger {
 
         if !keep_going {
             self.running = false;
+            self.stats.reset();
+            self.perf = None;
         }
 
         self.set_state(match outcome {
@@ -1172,29 +1261,25 @@ fn panel_column() -> Div {
     div().flex().flex_col().min_w(px(0.)).min_h(px(0.))
 }
 
-fn panel_row(left: AnyElement, right: Div) -> AnyElement {
+fn panel_row(left: AnyElement, right: Div) -> Div {
     div()
         .flex()
-        .flex_1()
-        .min_h(px(0.))
         .gap_2()
         .child(panel_column().flex_1().child(left))
         .child(right)
-        .into_any_element()
 }
 
 fn half_row(left: AnyElement, right: AnyElement) -> AnyElement {
     self::panel_row(left, panel_column().flex_1().child(right))
+        .flex_1()
+        .min_h(px(0.))
+        .into_any_element()
 }
 
 /// [`half_row`] that keeps its natural height instead of growing.
 fn half_row_fixed(left: AnyElement, right: AnyElement) -> AnyElement {
-    div()
-        .flex()
+    self::panel_row(left, panel_column().flex_1().child(right))
         .flex_none()
-        .gap_2()
-        .child(panel_column().flex_1().child(left))
-        .child(panel_column().flex_1().child(right))
         .into_any_element()
 }
 
@@ -1202,6 +1287,9 @@ fn with_screen(widget: AnyElement, screen: Option<AnyElement>) -> AnyElement {
     match screen {
         Some(screen) => {
             self::panel_row(widget, panel_column().w(px(300.)).flex_none().child(screen))
+                .flex_1()
+                .min_h(px(0.))
+                .into_any_element()
         }
         None => widget,
     }
@@ -1248,6 +1336,23 @@ impl Render for Debugger {
         }
         if graph_animating {
             window.request_animation_frame();
+        }
+
+        #[cfg(target_family = "wasm")]
+        if self.running && !self.web_tick_armed {
+            self.web_tick_armed = true;
+
+            let entity = cx.entity().downgrade();
+            window.on_next_frame(move |_, cx| {
+                entity
+                    .update(cx, |this, cx| {
+                        this.web_tick_armed = false;
+                        if this.running {
+                            this.run_tick(Duration::ZERO, cx);
+                        }
+                    })
+                    .ok();
+            });
         }
 
         let this = cx.entity();
@@ -1953,7 +2058,7 @@ impl Render for Debugger {
                 PanelKind::Table => {
                     let view = self.table_views.get(id).cloned().unwrap_or_default();
                     TablePanel::new(pid.clone(), title, view)
-                        .selected(self.table_selection.get(id).copied().unwrap_or(0))
+                        .selected(self.table_selected(id))
                         .collapsed(self.is_collapsed(id))
                         .on_toggle(on_toggle)
                         .on_select({
@@ -1984,7 +2089,10 @@ impl Render for Debugger {
                         .into_any_element()
                 }
                 PanelKind::AudioScope => {
-                    AudioScopeWidget::new(pid.clone(), title, self.scope.clone())
+                    let view = AudioScopeView {
+                        samples: self.scope_samples.as_slice().into(),
+                    };
+                    AudioScopeWidget::new(pid.clone(), title, view)
                         .collapsed(self.is_collapsed(id))
                         .on_toggle(on_toggle)
                         .glyph_opt(panel_glyph.clone())
@@ -2133,7 +2241,7 @@ impl Render for Debugger {
                     )
                     .children(bottom_panels),
             )
-            .child(status_bar(t, &self.status))
+            .child(status_bar(t, &self.status_with_perf()))
             .children(disasm_menus)
             .children(settings_popup)
             .children(bp_combo)

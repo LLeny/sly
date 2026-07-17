@@ -9,6 +9,7 @@ mod disasm;
 mod logging;
 mod memory;
 mod root;
+mod stats;
 #[cfg(target_family = "wasm")]
 mod web_dnd;
 

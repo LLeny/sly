@@ -44,4 +44,16 @@ impl AudioOut {
             player.queue(samples);
         }
     }
+
+    pub(crate) fn buffered(&self) -> Option<std::time::Duration> {
+        self.player.as_ref().map(|player| player.buffered())
+    }
+
+    pub(crate) fn pacing(
+        &self,
+    ) -> Option<(std::time::Duration, std::ops::Range<std::time::Duration>)> {
+        self.player
+            .as_ref()
+            .map(|player| (player.buffered(), player.target_fill()))
+    }
 }

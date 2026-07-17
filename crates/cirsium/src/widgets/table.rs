@@ -5,14 +5,16 @@ use gpui::prelude::*;
 use gpui::{App, ClickEvent, Div, Window, div, px};
 
 use crate::components::{
-    ClickHandler, Panel, empty_state_centered, label_text, meter_bar, mono_text, status_flag,
+    ClickHandler, Panel, empty_state_centered, header_rule, label_text, meter_bar, mono_text,
+    status_flag,
 };
 use crate::theme::Theme;
 
 pub use debugger_model::{Cell, ColWidth, Column, TableRow, TableView};
 
+use crate::widgets::grid::SelectCallback;
+
 const ROW_HEIGHT: f32 = 18.;
-type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
 
 #[derive(IntoElement)]
 pub struct TablePanel {
@@ -42,11 +44,6 @@ impl TablePanel {
             on_toggle: None,
             on_select: None,
         }
-    }
-
-    pub fn glyph(mut self, glyph: impl Into<gpui::SharedString>) -> Self {
-        self.glyph = Some(glyph.into());
-        self
     }
 
     pub fn glyph_opt(mut self, glyph: Option<gpui::SharedString>) -> Self {
@@ -122,15 +119,7 @@ fn cell_frame(column: &Column, content: impl IntoElement) -> Div {
 
 fn header_row(t: &Theme, columns: &[Column]) -> Div {
     columns.iter().fold(
-        div()
-            .flex()
-            .items_center()
-            .gap(px(3.))
-            .px_1()
-            .pb(px(3.))
-            .mb(px(3.))
-            .border_b_1()
-            .border_color(t.border_subtle),
+        header_rule(t).flex().items_center().gap(px(3.)),
         |row, column| {
             row.child(cell_frame(
                 column,

@@ -106,6 +106,27 @@ pub fn meter_bar(theme: &Theme, frac: f32, accent: bool) -> Div {
         )
 }
 
+/// The rule under a section heading or table header row: horizontal padding
+/// plus a subtle bottom border.
+pub fn header_rule(theme: &Theme) -> Div {
+    div()
+        .px_1()
+        .pb(px(3.))
+        .mb(px(3.))
+        .border_b_1()
+        .border_color(theme.border_subtle)
+}
+
+/// An uppercase section heading over a [`header_rule`].
+pub fn section_header(theme: &Theme, text: impl Into<SharedString>) -> Div {
+    header_rule(theme)
+        .text_xs()
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme.text_muted)
+        .whitespace_nowrap()
+        .child(text.into().to_uppercase())
+}
+
 /// A muted, compact field label.
 pub fn label_text(theme: &Theme, text: impl Into<SharedString>) -> Div {
     div()

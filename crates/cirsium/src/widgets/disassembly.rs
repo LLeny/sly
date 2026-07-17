@@ -269,7 +269,7 @@ pub struct DisassemblyWidget {
     title: SharedString,
     collapsed: bool,
     rows: RowStates,
-    layout_cache: Option<Rc<RefCell<DisassemblyLayoutCache>>>,
+    layout_cache: Rc<RefCell<DisassemblyLayoutCache>>,
     on_toggle: Option<ClickHandler>,
     on_select: Option<SelectCallback>,
     on_context: Option<ContextCallback>,
@@ -297,7 +297,7 @@ impl DisassemblyWidget {
             title: "Disassembly".into(),
             collapsed: false,
             rows: RowStates::default(),
-            layout_cache: None,
+            layout_cache: Rc::default(),
             on_toggle: None,
             on_select: None,
             on_context: None,
@@ -336,7 +336,7 @@ impl DisassemblyWidget {
     }
 
     pub fn layout_cache(mut self, cache: Rc<RefCell<DisassemblyLayoutCache>>) -> Self {
-        self.layout_cache = Some(cache);
+        self.layout_cache = cache;
         self
     }
 
@@ -678,15 +678,12 @@ fn render_linear(
     scroll: UniformListScrollHandle,
     id: SharedString,
     rows: RowStates,
-    layout_cache: Option<Rc<RefCell<DisassemblyLayoutCache>>>,
+    layout_cache: Rc<RefCell<DisassemblyLayoutCache>>,
     on_select: Option<SelectCallback>,
     on_context: Option<ContextCallback>,
 ) -> impl IntoElement {
     let list_id = SharedString::from(format!("{id}-list"));
-    let gutters = match &layout_cache {
-        Some(cache) => cache.borrow_mut().gutters(&view, rows.selected),
-        None => Rc::new(arrow_gutters(&view.lines, rows.selected)),
-    };
+    let gutters = layout_cache.borrow_mut().gutters(&view, rows.selected);
     let count = view.lines.len();
     let empty_gutter = GutterCell::default();
     uniform_list(list_id, count, move |range, _window, cx| {
@@ -723,7 +720,7 @@ fn render_graph(
     view: Arc<DisassemblyView>,
     id: SharedString,
     rows: RowStates,
-    layout_cache: Option<Rc<RefCell<DisassemblyLayoutCache>>>,
+    layout_cache: Rc<RefCell<DisassemblyLayoutCache>>,
     manual_offset: Point<Pixels>,
     follow: bool,
     viewport: Size<f32>,
@@ -736,10 +733,7 @@ fn render_graph(
     on_edge_hover: Option<EdgeHoverCallback>,
     on_jump: Option<JumpCallback>,
 ) -> impl IntoElement {
-    let layout = match &layout_cache {
-        Some(cache) => cache.borrow_mut().graph(&view),
-        None => Rc::new(graph::build(&view.lines)),
-    };
+    let layout = layout_cache.borrow_mut().graph(&view);
 
     let base = if follow {
         rows.current
