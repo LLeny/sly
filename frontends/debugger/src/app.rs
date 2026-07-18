@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use cirsium::assets::icon;
 use cirsium::components::{
-    CheckboxSize, MenuItem, Segmented, StatusView, TextInput, TextInputEvent, checkbox,
-    combobox_menu, context_menu, field_button, icon_button, popover, status_bar, title_bar,
+    CheckboxSize, MenuItem, PanelChrome, Segmented, StatusView, TextInput, TextInputEvent,
+    checkbox, combobox_menu, context_menu, field_button, icon_button, popover, status_bar,
+    title_bar,
 };
 use cirsium::widgets::{
     AudioScopeView, AudioScopeWidget, AudioScopesView, BreakpointKind, BreakpointsWidget,
@@ -99,6 +100,7 @@ pub(crate) struct Debugger {
     table_selection: HashMap<SharedString, usize>,
     scopes_views: HashMap<SharedString, AudioScopesView>,
     scope_samples: Vec<f32>,
+    scope_view: AudioScopeView,
     audio_samples: Vec<i16>,
     ppu_view: Arc<PpuView>,
     tileset: Option<TilesetView>,
@@ -218,6 +220,7 @@ impl Debugger {
             table_selection: HashMap::new(),
             scopes_views: HashMap::new(),
             scope_samples: Vec::new(),
+            scope_view: AudioScopeView::default(),
             audio_samples: Vec::new(),
             ppu_view: Arc::new(target.ppu_view().into()),
             tileset: target.tileset(0, 0).map(Into::into),
@@ -764,6 +767,9 @@ impl Debugger {
 
         if scope_visible {
             Self::push_scope(&mut self.scope_samples, &self.audio_samples);
+            self.scope_view = AudioScopeView {
+                samples: self.scope_samples.as_slice().into(),
+            };
         }
 
         outcome
@@ -984,6 +990,12 @@ impl Debugger {
     fn memory_close_menu(&mut self, cx: &mut Context<Self>) {
         if self.memory.close_menu() {
             cx.notify();
+        }
+    }
+
+    fn memory_dump(&mut self, cx: &mut Context<Self>) {
+        if let Some((name, bytes)) = self.memory.dump(self.target.as_ref()) {
+            crate::save::save_bin(name, bytes, cx);
         }
     }
 
@@ -1841,6 +1853,12 @@ impl Render for Debugger {
             .w(px(150.))
             .child(self.jump_input.clone())
             .child(jump_button);
+        let dump_button = field_button(
+            t,
+            "mem-dump",
+            icon::DOWNLOAD,
+            cx.listener(|this, _, _, cx| this.memory_dump(cx)),
+        );
         let follow_checkbox = checkbox(
             t,
             "mem-follow",
@@ -1853,6 +1871,7 @@ impl Render for Debugger {
             .flex()
             .items_center()
             .gap_3()
+            .child(dump_button)
             .child(follow_checkbox)
             .child(jump_field);
         let memory_widget = MemoryWidget::new(
@@ -1936,6 +1955,13 @@ impl Render for Debugger {
                 MenuItem::new(
                     "Copy ASCII",
                     self::clipboard_listener(cx, menu.ascii.clone(), Debugger::memory_close_menu),
+                ),
+                MenuItem::new(
+                    "Dump to File",
+                    cx.listener(|this, _, _, cx| {
+                        this.memory_dump(cx);
+                        this.memory_close_menu(cx);
+                    }),
                 ),
                 MenuItem::new("Add read breakpoint", {
                     let label = bp_label.clone();
@@ -2054,13 +2080,15 @@ impl Render for Debugger {
                 let id = pid.clone();
                 cx.listener(move |this, _, _, cx| this.toggle(id.clone(), cx))
             };
+            let chrome = PanelChrome::new(pid.clone(), title)
+                .collapsed(self.is_collapsed(id))
+                .on_toggle(on_toggle)
+                .glyph_opt(panel_glyph.clone());
             let element = match panel.kind {
                 PanelKind::Table => {
                     let view = self.table_views.get(id).cloned().unwrap_or_default();
-                    TablePanel::new(pid.clone(), title, view)
+                    TablePanel::new(chrome, view)
                         .selected(self.table_selected(id))
-                        .collapsed(self.is_collapsed(id))
-                        .on_toggle(on_toggle)
                         .on_select({
                             let this = this.clone();
                             let id = pid.clone();
@@ -2069,34 +2097,18 @@ impl Render for Debugger {
                                 this.update(cx, |d, cx| d.select_table_row(id, row, cx))
                             }
                         })
-                        .glyph_opt(panel_glyph.clone())
                         .into_any_element()
                 }
                 PanelKind::Structured => {
                     let view = self.structured_views.get(id).cloned().unwrap_or_default();
-                    StructuredPanel::new(pid.clone(), title, view)
-                        .collapsed(self.is_collapsed(id))
-                        .on_toggle(on_toggle)
-                        .glyph_opt(panel_glyph.clone())
-                        .into_any_element()
+                    StructuredPanel::new(chrome, view).into_any_element()
                 }
                 PanelKind::ChannelScopes => {
                     let view = self.scopes_views.get(id).cloned().unwrap_or_default();
-                    ChannelScopesWidget::new(pid.clone(), title, view)
-                        .collapsed(self.is_collapsed(id))
-                        .on_toggle(on_toggle)
-                        .glyph_opt(panel_glyph.clone())
-                        .into_any_element()
+                    ChannelScopesWidget::new(chrome, view).into_any_element()
                 }
                 PanelKind::AudioScope => {
-                    let view = AudioScopeView {
-                        samples: self.scope_samples.as_slice().into(),
-                    };
-                    AudioScopeWidget::new(pid.clone(), title, view)
-                        .collapsed(self.is_collapsed(id))
-                        .on_toggle(on_toggle)
-                        .glyph_opt(panel_glyph.clone())
-                        .into_any_element()
+                    AudioScopeWidget::new(chrome, self.scope_view.clone()).into_any_element()
                 }
                 _ => unreachable!(),
             };

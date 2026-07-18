@@ -63,7 +63,6 @@ pub struct Disasm {
     fingerprint: Option<u64>,
     current_ix: Option<usize>,
     current_note: Option<SharedString>,
-    selected_ix: Option<usize>,
     bp_rows: Rc<HashMap<usize, BreakpointKind>>,
 }
 
@@ -89,7 +88,6 @@ impl Disasm {
             fingerprint: None,
             current_ix: None,
             current_note: None,
-            selected_ix: None,
             bp_rows: Rc::default(),
         }
     }
@@ -111,7 +109,8 @@ impl Disasm {
     }
 
     pub fn selected_ix(&self) -> Option<usize> {
-        self.selected_ix
+        self.selected
+            .and_then(|addr| self.view.lines.iter().position(|l| l.addr == addr))
     }
 
     pub fn breakpoint_rows(&self) -> Rc<HashMap<usize, BreakpointKind>> {
@@ -201,9 +200,6 @@ impl Disasm {
             let note = target.disassemble_one(&self.cpu, pc)?.note;
             (!note.is_empty()).then(|| SharedString::from(note.as_ref()))
         });
-        self.selected_ix = self
-            .selected
-            .and_then(|addr| self.view.lines.iter().position(|l| l.addr == addr));
     }
 
     fn refresh_breakpoint_rows(&mut self) {
@@ -251,10 +247,8 @@ impl Disasm {
         if let Some(line) = self.view.lines.get(ix) {
             if self.selected == Some(line.addr) {
                 self.selected = None;
-                self.selected_ix = None;
             } else {
                 self.selected = Some(line.addr);
-                self.selected_ix = Some(ix);
             }
         }
     }
@@ -262,7 +256,6 @@ impl Disasm {
     pub fn open_menu(&mut self, ix: usize, position: Point<Pixels>) {
         if let Some(line) = self.view.lines.get(ix) {
             self.selected = Some(line.addr);
-            self.selected_ix = Some(ix);
             self.menu = Some(Menu {
                 position,
                 addr: line.addr,

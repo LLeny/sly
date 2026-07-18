@@ -410,7 +410,23 @@ impl DebugCore for SnesDebug {
         let ppu = &self.core.ppu;
         let vram = ppu.vram.generation();
         let cgram = ppu.cgram.generation();
-        let regs = ppu.reg_generation;
+
+        let regs = {
+            let mut hasher = DefaultHasher::new();
+            hasher.write_u8(ppu.bg_mode as u8);
+            hasher.write_u8(ppu.bg3_priority as u8);
+            for layer in &ppu.bg_layers {
+                hasher.write_u32(layer.tileset_addr);
+                hasher.write_u32(layer.tilemap_addr);
+                hasher.write_u8(layer.horizontal_tilemap_count as u8);
+                hasher.write_u8(layer.vertical_tilemap_count as u8);
+                hasher.write_u8(layer.tile_size as u8);
+            }
+            hasher.write_u32(ppu.obj.tileset_addr);
+            hasher.write_u32(ppu.obj.name_offset);
+            hasher.write_u8(ppu.obj.sprite_size as u8);
+            hasher.finish()
+        };
 
         let oam = {
             let mut hasher = DefaultHasher::new();
@@ -665,9 +681,23 @@ impl DebugCore for SnesDebug {
     }
 
     fn read_memory(&self, region: &str, addr: u32, len: usize) -> Vec<u8> {
-        (0..len as u32)
-            .map(|i| self.region_byte(region, addr.wrapping_add(i)))
-            .collect()
+        fn window(data: &[u8], addr: u32, len: usize) -> Vec<u8> {
+            let mut out = vec![0u8; len];
+
+            let start = (addr as usize).min(data.len());
+            let end = start.saturating_add(len).min(data.len());
+            out[..end - start].copy_from_slice(&data[start..end]);
+
+            out
+        }
+
+        match region {
+            "wram" => window(&self.core.mmu.wram, addr, len),
+            "rom" => window(&self.core.mmu.cartridge.rom, addr, len),
+            _ => (0..len as u32)
+                .map(|i| self.region_byte(region, addr.wrapping_add(i)))
+                .collect(),
+        }
     }
 
     fn format_address(&self, region: &str, addr: u32) -> String {

@@ -97,6 +97,11 @@ impl Dsp {
     }
 
     #[cfg(feature = "debug")]
+    pub fn voice_pitch(&self, i: usize) -> i32 {
+        VoiceRegisters::new(&self.regs, VoiceId::new(i)).pitch()
+    }
+
+    #[cfg(feature = "debug")]
     pub fn voice_debug(&self, i: usize) -> VoiceDebug {
         self.arm_debug_capture();
         self.voices[i].debug_snapshot()

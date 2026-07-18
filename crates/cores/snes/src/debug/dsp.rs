@@ -9,8 +9,8 @@ use crate::apu::dsp::registers::{
     R_ECHO_DELAY, R_ECHO_ENABLE, R_ECHO_FEEDBACK, R_ECHO_START_ADDRESS, R_ECHO_VOLUME_LEFT,
     R_ECHO_VOLUME_RIGHT, R_FIR_FIRST, R_FLAGS, R_KEY_OFF, R_KEY_ON, R_MASTER_VOLUME_LEFT,
     R_MASTER_VOLUME_RIGHT, R_NOISE_ENABLE, R_PITCH_MODULATION, R_SOURCE_DIRECTORY, R_VOICE_END,
-    V_ADSR_CONTROL, V_PITCH_HIGH, V_PITCH_LOW, V_SOURCE_NUMBER, V_VOLUME_LEFT, V_VOLUME_RIGHT,
-    VOICE_COUNT, VOICE_REGISTER_STRIDE,
+    V_ADSR_CONTROL, V_SOURCE_NUMBER, V_VOLUME_LEFT, V_VOLUME_RIGHT, VOICE_COUNT,
+    VOICE_REGISTER_STRIDE,
 };
 use crate::apu::dsp::{Dsp, VoiceDebug};
 
@@ -39,8 +39,7 @@ struct Voice {
 fn voice(dsp: &Dsp, i: usize) -> Voice {
     let base = i * VOICE_REGISTER_STRIDE;
     let bit = 1u8 << i;
-    let pitch =
-        (dsp.reg(base + V_PITCH_LOW) as u16) | ((dsp.reg(base + V_PITCH_HIGH) as u16 & 0x3F) << 8);
+    let pitch = dsp.voice_pitch(i);
     let adsr0 = dsp.reg(base + V_ADSR_CONTROL);
     let vd = dsp.voice_debug(i);
     let hz = |pitch: i32| (32_000i64 * pitch.max(0) as i64 / 4096).clamp(0, u32::MAX as i64) as u32;
@@ -49,7 +48,7 @@ fn voice(dsp: &Dsp, i: usize) -> Voice {
         index: i as u8,
         active: vd.env > 0,
         srcn: dsp.reg(base + V_SOURCE_NUMBER),
-        pitch_hz: hz(pitch as i32),
+        pitch_hz: hz(pitch),
         effective_pitch_hz: hz(vd.effective_pitch),
         vol_l: dsp.reg(base + V_VOLUME_LEFT) as i8,
         vol_r: dsp.reg(base + V_VOLUME_RIGHT) as i8,

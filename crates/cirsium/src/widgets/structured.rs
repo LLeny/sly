@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, Window, div, px};
+use gpui::{App, Div, Window, div, px};
 
 use crate::components::{
-    ClickHandler, Panel, label_text, meter_bar, mono_text, section_header, status_flag,
+    PanelChrome, label_text, meter_bar_scaled, mono_text, section_header, status_flag,
 };
 use crate::theme::Theme;
 
@@ -12,46 +12,13 @@ pub use debugger_model::{Field, FlagView, Row, Section, StructuredView, Tone};
 
 #[derive(IntoElement)]
 pub struct StructuredPanel {
-    id: gpui::SharedString,
-    title: gpui::SharedString,
+    chrome: PanelChrome,
     view: Arc<StructuredView>,
-    glyph: Option<gpui::SharedString>,
-    collapsed: bool,
-    on_toggle: Option<ClickHandler>,
 }
 
 impl StructuredPanel {
-    pub fn new(
-        id: impl Into<gpui::SharedString>,
-        title: impl Into<gpui::SharedString>,
-        view: Arc<StructuredView>,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            title: title.into(),
-            view,
-            glyph: None,
-            collapsed: false,
-            on_toggle: None,
-        }
-    }
-
-    pub fn glyph_opt(mut self, glyph: Option<gpui::SharedString>) -> Self {
-        self.glyph = glyph;
-        self
-    }
-
-    pub fn collapsed(mut self, collapsed: bool) -> Self {
-        self.collapsed = collapsed;
-        self
-    }
-
-    pub fn on_toggle(
-        mut self,
-        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        self.on_toggle = Some(Box::new(handler));
-        self
+    pub fn new(chrome: PanelChrome, view: Arc<StructuredView>) -> Self {
+        Self { chrome, view }
     }
 }
 
@@ -97,10 +64,8 @@ impl RenderOnce for StructuredPanel {
             }
         }
 
-        Panel::new(self.id, self.title)
-            .collapsed(self.collapsed)
-            .on_toggle_opt(self.on_toggle)
-            .glyph_opt(self.glyph)
+        self.chrome
+            .panel()
             .meta_opt(view.meta.clone().map(Into::into))
             .child(body)
     }
@@ -228,12 +193,6 @@ fn bit_grid(t: &Theme, label: Arc<str>, bits: u8, on_mask: u8) -> Div {
 }
 
 fn meter(t: &Theme, label: Arc<str>, value: i32, max: i32, accent: bool) -> Div {
-    let magnitude = if max > 0 {
-        value.unsigned_abs() as f32 / max as f32
-    } else {
-        0.0
-    };
-
     div()
         .flex()
         .items_center()
@@ -241,7 +200,7 @@ fn meter(t: &Theme, label: Arc<str>, value: i32, max: i32, accent: bool) -> Div 
         .px_1()
         .h(px(17.))
         .child(label_text(t, label).w(px(52.)).whitespace_nowrap())
-        .child(meter_bar(t, magnitude, accent))
+        .child(meter_bar_scaled(t, value, max, accent))
         .child(
             mono_text(t, format!("{value:+6}"))
                 .w(px(50.))

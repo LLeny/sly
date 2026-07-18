@@ -45,9 +45,6 @@ pub struct Ppu {
     pub(crate) force_blank: bool,
     pub(crate) brightness: u8,
     pub(crate) frame_buffer: Vec<(u8, u8, u8)>,
-
-    #[cfg(feature = "debug")]
-    pub(crate) reg_generation: u64,
 }
 
 impl Ppu {
@@ -69,9 +66,6 @@ impl Ppu {
             force_blank: true,
             brightness: 0,
             frame_buffer: vec![(0, 0, 0); SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize],
-
-            #[cfg(feature = "debug")]
-            reg_generation: 0,
         }
     }
 

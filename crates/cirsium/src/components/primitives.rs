@@ -106,6 +106,17 @@ pub fn meter_bar(theme: &Theme, frac: f32, accent: bool) -> Div {
         )
 }
 
+/// [`meter_bar`] fed by a raw value against a maximum: fills `|value| / max`,
+/// empty when `max` is zero.
+pub fn meter_bar_scaled(theme: &Theme, value: i32, max: i32, accent: bool) -> Div {
+    let frac = if max > 0 {
+        value.unsigned_abs() as f32 / max as f32
+    } else {
+        0.0
+    };
+    meter_bar(theme, frac, accent)
+}
+
 /// The rule under a section heading or table header row: horizontal padding
 /// plus a subtle bottom border.
 pub fn header_rule(theme: &Theme) -> Div {

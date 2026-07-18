@@ -2,10 +2,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, Window, div, px};
+use gpui::{App, Div, Window, div, px};
 
 use crate::components::{
-    ClickHandler, Panel, empty_state_centered, header_rule, label_text, meter_bar, mono_text,
+    PanelChrome, empty_state_centered, header_rule, label_text, meter_bar_scaled, mono_text,
     status_flag,
 };
 use crate::theme::Theme;
@@ -18,54 +18,24 @@ const ROW_HEIGHT: f32 = 18.;
 
 #[derive(IntoElement)]
 pub struct TablePanel {
-    id: gpui::SharedString,
-    title: gpui::SharedString,
+    chrome: PanelChrome,
     view: Arc<TableView>,
-    glyph: Option<gpui::SharedString>,
     selected: Option<usize>,
-    collapsed: bool,
-    on_toggle: Option<ClickHandler>,
     on_select: Option<SelectCallback>,
 }
 
 impl TablePanel {
-    pub fn new(
-        id: impl Into<gpui::SharedString>,
-        title: impl Into<gpui::SharedString>,
-        view: Arc<TableView>,
-    ) -> Self {
+    pub fn new(chrome: PanelChrome, view: Arc<TableView>) -> Self {
         Self {
-            id: id.into(),
-            title: title.into(),
+            chrome,
             view,
-            glyph: None,
             selected: None,
-            collapsed: false,
-            on_toggle: None,
             on_select: None,
         }
     }
 
-    pub fn glyph_opt(mut self, glyph: Option<gpui::SharedString>) -> Self {
-        self.glyph = glyph;
-        self
-    }
-
     pub fn selected(mut self, row: usize) -> Self {
         self.selected = Some(row);
-        self
-    }
-
-    pub fn collapsed(mut self, collapsed: bool) -> Self {
-        self.collapsed = collapsed;
-        self
-    }
-
-    pub fn on_toggle(
-        mut self,
-        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        self.on_toggle = Some(Box::new(handler));
         self
     }
 
@@ -99,10 +69,8 @@ impl RenderOnce for TablePanel {
             list
         };
 
-        Panel::new(self.id, self.title)
-            .collapsed(self.collapsed)
-            .on_toggle_opt(self.on_toggle)
-            .glyph_opt(self.glyph)
+        self.chrome
+            .panel()
             .meta_opt(view.meta.clone().map(Into::into))
             .child(body)
     }
@@ -187,11 +155,6 @@ fn render_cell(t: &Theme, cell: &Cell, first: bool, active: bool) -> Div {
                 .whitespace_nowrap()
         }
         Cell::Meter { value, max, label } => {
-            let frac = if *max > 0 {
-                *value as f32 / *max as f32
-            } else {
-                0.0
-            };
             let mut row = div().flex().flex_1().min_w(px(0.)).items_center().gap_1();
             if let Some(label) = label {
                 row = row.child(
@@ -201,7 +164,7 @@ fn render_cell(t: &Theme, cell: &Cell, first: bool, active: bool) -> Div {
                         .whitespace_nowrap(),
                 );
             }
-            row.child(meter_bar(t, frac, active))
+            row.child(meter_bar_scaled(t, *value, *max, active))
         }
         Cell::FlagChips(flags) => flags.iter().fold(
             div().flex().items_center().gap(px(2.)).whitespace_nowrap(),

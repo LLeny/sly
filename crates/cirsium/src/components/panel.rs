@@ -106,6 +106,51 @@ impl Panel {
     }
 }
 
+pub struct PanelChrome {
+    id: SharedString,
+    title: SharedString,
+    glyph: Option<SharedString>,
+    collapsed: bool,
+    on_toggle: Option<ClickHandler>,
+}
+
+impl PanelChrome {
+    pub fn new(id: impl Into<SharedString>, title: impl Into<SharedString>) -> Self {
+        Self {
+            id: id.into(),
+            title: title.into(),
+            glyph: None,
+            collapsed: false,
+            on_toggle: None,
+        }
+    }
+
+    pub fn glyph_opt(mut self, icon_path: Option<SharedString>) -> Self {
+        self.glyph = icon_path;
+        self
+    }
+
+    pub fn collapsed(mut self, collapsed: bool) -> Self {
+        self.collapsed = collapsed;
+        self
+    }
+
+    pub fn on_toggle(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_toggle = Some(Box::new(handler));
+        self
+    }
+
+    pub fn panel(self) -> Panel {
+        Panel::new(self.id, self.title)
+            .collapsed(self.collapsed)
+            .on_toggle_opt(self.on_toggle)
+            .glyph_opt(self.glyph)
+    }
+}
+
 impl RenderOnce for Panel {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);

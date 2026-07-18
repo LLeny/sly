@@ -114,6 +114,28 @@ impl Memory {
             .collect()
     }
 
+    fn normalized_selection(&self) -> Option<(u32, u32)> {
+        self.selection.map(|(a, b)| (a.min(b), a.max(b)))
+    }
+
+    fn read_span(&self, target: &dyn DebugCore, lo: u32, hi: u32) -> Vec<u8> {
+        target.read_memory(&self.current.id, lo, (hi - lo + 1) as usize)
+    }
+
+    pub fn dump(&self, target: &dyn DebugCore) -> Option<(String, Vec<u8>)> {
+        if self.current.size == 0 {
+            return None;
+        }
+
+        let (lo, hi) = self
+            .normalized_selection()
+            .unwrap_or((self.current.base, self.current.base + self.current.size - 1));
+        let bytes = self.read_span(target, lo, hi);
+        let name = format!("{}_{lo:06X}-{hi:06X}.bin", self.current.id);
+
+        Some((name, bytes))
+    }
+
     fn scroll_to_addr(&mut self, addr: u32) -> Option<u32> {
         let base = self.current.base;
         if self.current.size == 0 {
@@ -189,16 +211,15 @@ impl Memory {
     }
 
     pub fn open_menu(&mut self, addr: u32, position: Point<Pixels>, target: &dyn DebugCore) {
-        let (lo, hi) = match self.selection {
-            Some((a, b)) if (a.min(b)..=a.max(b)).contains(&addr) => (a.min(b), a.max(b)),
+        let (lo, hi) = match self.normalized_selection() {
+            Some((lo, hi)) if (lo..=hi).contains(&addr) => (lo, hi),
             _ => {
                 self.selection = Some((addr, addr));
                 (addr, addr)
             }
         };
 
-        let len = (hi - lo + 1) as usize;
-        let bytes = target.read_memory(&self.current.id, lo, len);
+        let bytes = self.read_span(target, lo, hi);
         let octets: Vec<String> = bytes.iter().map(|b| format!("{b:02X}")).collect();
         let hex = octets.join(" ");
         let raw = octets.concat();
