@@ -167,7 +167,9 @@ impl Render for Debugger {
         overlays.extend(self.build_auxiliary_panels(&visible, t, &mut panels, cx));
         self.insert_generic_panels(&active_workspace, &visible, &mut panels, cx);
         self.panel_frames.replace(panels);
-        let dock = self.registry.workspace_dock(&active_workspace, &visible);
+        let dock = self
+            .registry
+            .workspace_dock(&active_workspace, &visible, |id| self.is_collapsed(id));
 
         div()
             .flex()

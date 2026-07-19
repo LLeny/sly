@@ -3,11 +3,15 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{AnyElement, AnyView, App, Context, Div, Entity, Render, div, px};
+use gpui::{AnyElement, AnyView, App, Context, Div, Entity, Render, div, px, svg};
 use workspace_model::{
     ComponentManifest, DockLocation, ManifestError, PanelComposition, PanelDescriptor,
     PanelGroupLayout, RefreshPolicy,
 };
+
+use crate::assets::icon;
+use crate::components::HEADER_HEIGHT;
+use crate::theme::Theme;
 
 type RefreshCallback = dyn Fn(PanelRefresh, &mut App);
 
@@ -129,7 +133,12 @@ impl PanelRegistry {
         }
     }
 
-    pub fn workspace_dock(&self, workspace: &str, visible: &HashSet<String>) -> WorkspaceDock {
+    pub fn workspace_dock(
+        &self,
+        workspace: &str,
+        visible: &HashSet<String>,
+        is_collapsed: impl Fn(&str) -> bool,
+    ) -> WorkspaceDock {
         let compositions: HashMap<&str, &PanelComposition> = self
             .manifest
             .compositions
@@ -146,8 +155,16 @@ impl PanelRegistry {
             .map(|composition| composition.companion.as_ref())
             .collect();
 
-        let groups =
-            |location| self.groups(workspace, location, visible, &compositions, &companions);
+        let groups = |location| {
+            self.groups(
+                workspace,
+                location,
+                visible,
+                &compositions,
+                &companions,
+                &is_collapsed,
+            )
+        };
         WorkspaceDock {
             left: groups(DockLocation::Left),
             center: groups(DockLocation::Center),
@@ -160,15 +177,17 @@ impl PanelRegistry {
         self.by_id.get(id).and_then(|ix| self.entries.get(*ix))
     }
 
-    fn groups(
+    fn groups<F: Fn(&str) -> bool>(
         &self,
         workspace: &str,
         location: DockLocation,
         visible: &HashSet<String>,
         compositions: &HashMap<&str, &PanelComposition>,
         companions: &HashSet<&str>,
+        is_collapsed: &F,
     ) -> Vec<PanelGroup> {
-        self.manifest
+        let mut groups: Vec<PanelGroup> = self
+            .manifest
             .in_location(workspace, location)
             .filter(|descriptor| visible.contains(descriptor.id.as_ref()))
             .filter(|descriptor| !companions.contains(descriptor.id.as_ref()))
@@ -177,6 +196,7 @@ impl PanelRegistry {
                 let composition = compositions.get(descriptor.id.as_ref()).copied();
                 Some(PanelGroup {
                     host: host.handle.view(),
+                    host_collapsed: is_collapsed(descriptor.id.as_ref()),
                     companion: composition.and_then(|composition| {
                         self.entry(&composition.companion)
                             .map(|entry| entry.handle.view())
@@ -184,38 +204,50 @@ impl PanelRegistry {
                     layout: composition.map(|composition| composition.layout),
                 })
             })
-            .collect()
+            .collect();
+
+        groups.sort_by_key(|group| group.host_collapsed);
+        groups
     }
 }
 
 struct PanelGroup {
     host: AnyView,
+    host_collapsed: bool,
     companion: Option<AnyView>,
     layout: Option<PanelGroupLayout>,
 }
 
 impl PanelGroup {
-    fn into_element(self) -> AnyElement {
+    fn into_element(self, t: &Theme) -> AnyElement {
         let Some(companion) = self.companion else {
             return self.host.into_any_element();
         };
 
+        let grow = !self.host_collapsed;
         let host = panel_column().flex_1().child(self.host);
         let row = div().flex().gap_2().child(host);
+        let sized = |row: Div| {
+            if grow {
+                row.flex_1().min_h(px(0.))
+            } else {
+                row.flex_none()
+            }
+        };
+
         match self.layout.unwrap_or(PanelGroupLayout::EqualColumns) {
-            PanelGroupLayout::EqualColumns => row
-                .flex_1()
-                .min_h(px(0.))
-                .child(panel_column().flex_1().child(companion))
-                .into_any_element(),
-            PanelGroupLayout::CompanionRail => row
-                .flex_1()
-                .min_h(px(0.))
-                .child(panel_column().w(px(300.)).flex_none().child(companion))
-                .into_any_element(),
+            PanelGroupLayout::EqualColumns => {
+                sized(row.child(link_seam_left(t, panel_column().flex_1().child(companion))))
+                    .into_any_element()
+            }
+            PanelGroupLayout::CompanionRail => sized(row.child(link_seam_left(
+                t,
+                panel_column().w(px(300.)).flex_none().child(companion),
+            )))
+            .into_any_element(),
             PanelGroupLayout::CompactColumns => row
                 .flex_none()
-                .child(panel_column().flex_1().child(companion))
+                .child(link_seam_left(t, panel_column().flex_1().child(companion)))
                 .into_any_element(),
         }
     }
@@ -223,6 +255,31 @@ impl PanelGroup {
 
 fn panel_column() -> Div {
     div().flex().flex_col().min_w(px(0.)).min_h(px(0.))
+}
+
+fn link_chip(t: &Theme) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .size(px(14.))
+        .rounded_full()
+        .bg(t.bg_root)
+        .child(
+            svg()
+                .path(icon::LINK)
+                .size(px(10.))
+                .text_color(t.text_muted),
+        )
+}
+
+fn link_seam_left(t: &Theme, column: Div) -> Div {
+    column.relative().child(
+        link_chip(t)
+            .absolute()
+            .left(px(-11.))
+            .top(px(HEADER_HEIGHT / 2. - 7.)),
+    )
 }
 
 #[derive(IntoElement)]
@@ -234,8 +291,14 @@ pub struct WorkspaceDock {
 }
 
 impl RenderOnce for WorkspaceDock {
-    fn render(self, _window: &mut gpui::Window, _cx: &mut App) -> impl IntoElement {
-        let groups = |groups: Vec<PanelGroup>| groups.into_iter().map(PanelGroup::into_element);
+    fn render(self, _window: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
+        let theme = Theme::global(cx);
+        let groups = move |groups: Vec<PanelGroup>| {
+            let theme = theme.clone();
+            groups
+                .into_iter()
+                .map(move |group| group.into_element(&theme))
+        };
 
         div()
             .flex()

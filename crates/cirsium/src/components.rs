@@ -12,7 +12,7 @@ mod window;
 pub use combobox::{ComboOption, combobox_button, combobox_menu};
 pub use copyable::Copyable;
 pub use menu::{MenuItem, context_menu, popover};
-pub use panel::{Panel, PanelChrome};
+pub use panel::{HEADER_HEIGHT, Panel, PanelChrome};
 pub use primitives::{
     CheckboxSize, badge, bool_chip, checkbox, empty_state, empty_state_centered, field_button,
     flip_label, header_rule, hex, label_text, meter_bar, meter_bar_scaled, mono_text,

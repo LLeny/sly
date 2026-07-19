@@ -187,6 +187,13 @@ impl ComponentManifest {
             .filter(move |p| p.location == location)
     }
 
+    pub fn host_of<'a>(&'a self, workspace: &str, id: &str) -> Option<&'a str> {
+        self.compositions
+            .iter()
+            .find(|c| c.workspace.as_ref() == workspace && c.companion.as_ref() == id)
+            .map(|c| c.host.as_ref())
+    }
+
     pub fn insert_after(&mut self, anchor: PanelKind, panel: PanelDescriptor) {
         let ix = self
             .panels

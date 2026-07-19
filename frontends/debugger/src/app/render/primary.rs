@@ -163,7 +163,7 @@ impl Debugger {
                 continue;
             }
 
-            let disasm_id = SharedString::from(format!("{}-disasm", pane.id.as_str()));
+            let disasm_id = SharedString::from(disasm_panel_id.clone());
             let disasm_title = SharedString::from(format!("{} Disassembly", pane.title));
             let disassembly =
                 DisassemblyWidget::new(pane.disasm.view.clone(), pane.disasm.scroll.clone())
@@ -229,7 +229,7 @@ impl Debugger {
                         }
                     });
 
-            let cs_id = SharedString::from(format!("{}-callstack", pane.id.as_str()));
+            let cs_id = SharedString::from(format!("{}.callstack", pane.id.as_str()));
             let cs_title = SharedString::from(format!("{} Call Stack", pane.title));
             let callstack = CallStackWidget::new(pane.call_stack.clone())
                 .id(cs_id.clone())
@@ -252,10 +252,7 @@ impl Debugger {
                     .child(disassembly)
                     .into_any_element(),
             ));
-            call_stack_panels.push((
-                format!("{}.callstack", pane.id.as_str()),
-                callstack.into_any_element(),
-            ));
+            call_stack_panels.push((cs_id.to_string(), callstack.into_any_element()));
 
             if let Some(menu) = pane.disasm.menu.as_ref() {
                 let addr = menu.addr;

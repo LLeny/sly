@@ -308,6 +308,15 @@ impl Debugger {
 
     pub(super) fn is_collapsed(&self, id: &str) -> bool {
         self.collapsed.contains(id)
+            || self
+                .band_host(id)
+                .is_some_and(|h| self.collapsed.contains(h))
+    }
+
+    fn band_host(&self, id: &str) -> Option<&str> {
+        self.registry
+            .manifest()
+            .host_of(self.workspace.as_ref(), id)
     }
 
     pub(super) fn toggle_in(set: &mut HashSet<SharedString>, id: SharedString) {
@@ -318,14 +327,13 @@ impl Debugger {
 
     pub(super) fn toggle(&mut self, id: impl Into<SharedString>, cx: &mut Context<Self>) {
         let id = id.into();
+        let host = self.band_host(&id).map(SharedString::from);
+        let id = host.unwrap_or(id);
         Self::toggle_in(&mut self.collapsed, id.clone());
 
         if !self.collapsed.contains(&id) {
-            match id.as_ref() {
-                FramebufferWidget::ID => self.refresh_framebuffer(cx),
-                SpritesWidget::ID => self.refresh_sprites(cx),
-                _ => {}
-            }
+            self.refresh_framebuffer(cx);
+            self.refresh_sprites(cx);
         }
 
         cx.notify();

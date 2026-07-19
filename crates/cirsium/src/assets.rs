@@ -30,6 +30,7 @@ pub mod icon {
     pub const GHOST: &str = "icons/ghost.svg";
     pub const AUDIO: &str = "icons/audio-lines.svg";
     pub const DOWNLOAD: &str = "icons/download.svg";
+    pub const LINK: &str = "icons/link-2.svg";
 
     pub const RUN: &str = "icons/play.svg";
     pub const PAUSE: &str = "icons/pause.svg";

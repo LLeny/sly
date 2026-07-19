@@ -5,7 +5,7 @@ use super::ClickHandler;
 use crate::assets::icon;
 use crate::theme::Theme;
 
-const HEADER_HEIGHT: f32 = 36.;
+pub const HEADER_HEIGHT: f32 = 36.;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Sizing {
