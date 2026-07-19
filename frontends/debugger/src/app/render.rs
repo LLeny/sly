@@ -106,10 +106,13 @@ impl Render for Debugger {
 
         let manifest = self.registry.manifest();
         let active_workspace = self.workspace.clone();
-        let visible: HashSet<String> = manifest
+        let mut visible: HashSet<String> = manifest
             .in_workspace(&active_workspace)
             .map(|p| p.id.to_string())
             .collect();
+        if !self.show_log {
+            visible.remove(LogWidget::ID);
+        }
 
         let workspace_switcher = (manifest.workspaces.len() > 1).then(|| {
             let mut switcher = Segmented::new("workspace").selected(active_workspace.clone());
@@ -164,7 +167,7 @@ impl Render for Debugger {
         overlays.extend(self.build_auxiliary_panels(&visible, t, &mut panels, cx));
         self.insert_generic_panels(&active_workspace, &visible, &mut panels, cx);
         self.panel_frames.replace(panels);
-        let dock = self.registry.workspace_dock(&active_workspace);
+        let dock = self.registry.workspace_dock(&active_workspace, &visible);
 
         div()
             .flex()

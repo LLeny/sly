@@ -129,12 +129,16 @@ impl PanelRegistry {
         }
     }
 
-    pub fn workspace_dock(&self, workspace: &str) -> WorkspaceDock {
+    pub fn workspace_dock(&self, workspace: &str, visible: &HashSet<String>) -> WorkspaceDock {
         let compositions: HashMap<&str, &PanelComposition> = self
             .manifest
             .compositions
             .iter()
             .filter(|composition| composition.workspace.as_ref() == workspace)
+            .filter(|composition| {
+                visible.contains(composition.host.as_ref())
+                    && visible.contains(composition.companion.as_ref())
+            })
             .map(|composition| (composition.host.as_ref(), composition))
             .collect();
         let companions: HashSet<&str> = compositions
@@ -142,7 +146,8 @@ impl PanelRegistry {
             .map(|composition| composition.companion.as_ref())
             .collect();
 
-        let groups = |location| self.groups(workspace, location, &compositions, &companions);
+        let groups =
+            |location| self.groups(workspace, location, visible, &compositions, &companions);
         WorkspaceDock {
             left: groups(DockLocation::Left),
             center: groups(DockLocation::Center),
@@ -159,11 +164,13 @@ impl PanelRegistry {
         &self,
         workspace: &str,
         location: DockLocation,
+        visible: &HashSet<String>,
         compositions: &HashMap<&str, &PanelComposition>,
         companions: &HashSet<&str>,
     ) -> Vec<PanelGroup> {
         self.manifest
             .in_location(workspace, location)
+            .filter(|descriptor| visible.contains(descriptor.id.as_ref()))
             .filter(|descriptor| !companions.contains(descriptor.id.as_ref()))
             .filter_map(|descriptor| {
                 let host = self.entry(&descriptor.id)?;
