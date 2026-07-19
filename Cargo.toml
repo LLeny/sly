@@ -8,7 +8,7 @@ members = [
     "frontends/runner",
     "crates/models/core",
     "crates/models/debugger",
-    "crates/models/frontend",
+    "crates/models/workspace",
     "crates/playground",
     "crates/screenshotter",
     "crates/testrunner",

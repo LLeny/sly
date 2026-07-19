@@ -147,11 +147,13 @@ pub struct Logs {
     target: TargetFilter,
     level: Option<LogLevel>,
     message: String,
+    cached_view: LogView,
+    cached_targets: Vec<SharedString>,
 }
 
 impl Logs {
     pub fn new(buffer: LogBuffer) -> Self {
-        Self {
+        let mut logs = Self {
             scroll: UniformListScrollHandle::new(),
             target_combo: None,
             level_combo: None,
@@ -159,15 +161,23 @@ impl Logs {
             target: TargetFilter::Cores,
             level: Some(LogLevel::Warn),
             message: String::new(),
-        }
+            cached_view: LogView::default(),
+            cached_targets: Vec::new(),
+        };
+        logs.refresh();
+        logs
     }
 
     pub fn view(&self) -> LogView {
+        self.cached_view.clone()
+    }
+
+    pub fn refresh(&mut self) {
         let needle = self.message.trim().to_lowercase();
         let min_rank = self.level.map(LogLevel::rank);
         let target = &self.target;
-        let mut entries = self.buffer.with_entries(|entries| {
-            entries
+        let (mut entries, mut targets) = self.buffer.with_entries(|entries| {
+            let filtered = entries
                 .iter()
                 .filter(|entry| {
                     target.matches(&entry.target)
@@ -175,29 +185,30 @@ impl Logs {
                         && (needle.is_empty() || entry.message.to_lowercase().contains(&needle))
                 })
                 .cloned()
-                .collect::<Vec<LogEntry>>()
+                .collect::<Vec<LogEntry>>();
+            let targets = entries
+                .iter()
+                .map(|entry| entry.target.clone())
+                .collect::<Vec<_>>();
+            (filtered, targets)
         });
 
         if self.buffer.dedup() {
             entries.dedup();
         }
 
-        LogView { entries }
+        targets.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
+        targets.dedup();
+        self.cached_view = LogView { entries };
+        self.cached_targets = targets;
     }
 
     pub fn target_options(&self) -> Vec<ComboOption> {
-        let mut targets: Vec<SharedString> = self
-            .buffer
-            .with_entries(|entries| entries.iter().map(|entry| entry.target.clone()).collect());
-
-        targets.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
-        targets.dedup();
-
         let mut options = vec![
             ComboOption::new("all", "All"),
             ComboOption::new("cores", "Cores"),
         ];
-        options.extend(targets.into_iter().map(|target| {
+        options.extend(self.cached_targets.iter().cloned().map(|target| {
             let label = short_target(&target);
             ComboOption::new(target, label)
         }));
@@ -238,15 +249,18 @@ impl Logs {
             other => TargetFilter::Exact(other.to_string().into()),
         };
         self.target_combo = None;
+        self.refresh();
     }
 
     pub fn set_level(&mut self, id: &str) {
         self.level = LogLevel::from_id(id);
         self.level_combo = None;
+        self.refresh();
     }
 
     pub fn set_message(&mut self, text: String) {
         self.message = text;
+        self.refresh();
     }
 
     pub fn dedup(&self) -> bool {
@@ -255,6 +269,7 @@ impl Logs {
 
     pub fn toggle_dedup(&mut self) {
         self.buffer.toggle_dedup();
+        self.refresh();
     }
 
     pub fn open_target_combo(&mut self, position: Point<Pixels>) {
@@ -281,8 +296,9 @@ impl Logs {
         }
     }
 
-    pub fn clear(&self) {
+    pub fn clear(&mut self) {
         self.buffer.clear();
+        self.refresh();
     }
 }
 

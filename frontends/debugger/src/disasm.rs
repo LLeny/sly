@@ -36,7 +36,7 @@ pub struct Menu {
 fn aligned_base(pc: u32, lead: u32, mut sweep: impl FnMut(u32, usize) -> Vec<u32>) -> u32 {
     for start in pc.saturating_sub(lead)..pc {
         let addrs = sweep(start, (pc - start) as usize + 1);
-        if addrs.iter().any(|&addr| addr == pc) {
+        if addrs.contains(&pc) {
             return start;
         }
     }

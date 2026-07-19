@@ -1,17 +1,20 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use core_model::Core;
+use core_model::{Core, SessionInfo, SoftwareFrame};
 use debugger_model::{
     AudioScopesView, BreakpointKind, BreakpointMark, CPU_WORKSPACE, CallStackView, CartridgeField,
-    CartridgeView, ComponentManifest, CpuDescriptor, CpuId, CpuView, DebugCore, DisasmLine,
-    DisasmToken, DmaChannelDetail, DmaChannelView, DmaView, DockLocation, FlagView, FlowKind,
-    Framebuffer, Highlight, MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView,
-    PaletteColor, PaletteView, PanelDescriptor, PanelKind, PpuGroup, PpuProperty, PpuView,
-    RefreshPolicy, RegisterView, RunOutcome, SOUND_WORKSPACE, SpriteEntry, Sprites, StackFrame,
-    StatusView, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapViewport,
-    Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE, VideoGenerations,
-    WorkspaceDescriptor, WorkspaceIcon, hex, standard_manifest, strip_symbol_sigils, tokenize,
+    CartridgeView, CpuDescriptor, CpuId, CpuView, DebugCore, DisasmLine, DisasmToken,
+    DmaChannelDetail, DmaChannelView, DmaView, FlagView, FlowKind, Highlight, MemoryRegion,
+    MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView, PpuGroup,
+    PpuProperty, PpuView, RegisterView, RunOutcome, SOUND_WORKSPACE, SpriteEntry, Sprites,
+    StackFrame, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapViewport,
+    Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE, VideoGenerations, hex,
+    standard_manifest, strip_symbol_sigils, tokenize,
+};
+use workspace_model::{
+    ComponentManifest, DockLocation, PanelDescriptor, PanelGroupLayout, PanelKind, RefreshPolicy,
+    WorkspaceDescriptor, WorkspaceIcon,
 };
 
 mod dsp;
@@ -188,6 +191,26 @@ impl Core for SnesDebug {
     fn drain_audio(&mut self, out: &mut Vec<i16>) {
         self.core.drain_audio(out);
     }
+
+    fn session_info(&self) -> SessionInfo {
+        SessionInfo {
+            system: self.system.clone(),
+            session: self.label.clone(),
+            segments: self.segments.clone(),
+        }
+    }
+
+    fn software_frame(&self) -> Option<SoftwareFrame<'_>> {
+        Some(SoftwareFrame {
+            width: crate::ppu::SCREEN_WIDTH,
+            height: crate::ppu::SCREEN_HEIGHT,
+            pixels: self.core.ppu.frame_buffer(),
+        })
+    }
+
+    fn frame_interval(&self) -> Option<Duration> {
+        Some(self::frame_interval(&self.core))
+    }
 }
 
 impl DebugCore for SnesDebug {
@@ -257,10 +280,6 @@ impl DebugCore for SnesDebug {
         });
 
         outcome
-    }
-
-    fn frame_interval(&self) -> Option<Duration> {
-        Some(self::frame_interval(&self.core))
     }
 
     fn cpu_view(&self, cpu: &CpuId) -> CpuView {
@@ -386,14 +405,6 @@ impl DebugCore for SnesDebug {
 
     fn sprites(&self) -> Option<Sprites> {
         Some(self::sprites(&self.core))
-    }
-
-    fn framebuffer(&self) -> Option<Framebuffer> {
-        Some(Framebuffer {
-            width: crate::ppu::SCREEN_WIDTH,
-            height: crate::ppu::SCREEN_HEIGHT,
-            pixels: self.core.ppu.frame_buffer().to_vec(),
-        })
     }
 
     fn video_generations(&self) -> Option<VideoGenerations> {
@@ -585,7 +596,6 @@ impl DebugCore for SnesDebug {
                 DockLocation::Center,
                 RefreshPolicy::Continuous,
             )
-            .companion(dsp::INSPECTOR_ID)
             .tag(SOUND_WORKSPACE),
         );
         manifest.insert_after(
@@ -599,6 +609,12 @@ impl DebugCore for SnesDebug {
             )
             .selection_from(dsp::VOICES_ID)
             .tag(SOUND_WORKSPACE),
+        );
+        manifest.compose_in(
+            SOUND_WORKSPACE,
+            "audio_scope",
+            dsp::INSPECTOR_ID,
+            PanelGroupLayout::CompactColumns,
         );
         manifest.insert_after(
             PanelKind::AudioScope,
@@ -637,32 +653,41 @@ impl DebugCore for SnesDebug {
             .tag(SOUND_WORKSPACE),
         );
 
-        manifest.insert_after(
-            PanelKind::Mmio,
-            PanelDescriptor::new(
-                "breakpoints",
-                "Breakpoints",
-                PanelKind::Breakpoints,
-                DockLocation::Right,
-                RefreshPolicy::OnPause,
-            )
-            .tag(SOUND_WORKSPACE),
-        );
-
-        for id in [CPU_SPC, &format!("{CPU_SPC}.disasm"), "log"] {
+        for id in [
+            CPU_SPC,
+            &format!("{CPU_SPC}.disasm"),
+            &format!("{CPU_SPC}.callstack"),
+            "breakpoints",
+            "log",
+        ] {
             manifest.tag(id, SOUND_WORKSPACE);
         }
+        manifest.compose_in(
+            SOUND_WORKSPACE,
+            format!("{CPU_SPC}.disasm"),
+            format!("{CPU_SPC}.callstack"),
+            PanelGroupLayout::CompanionRail,
+        );
+        manifest.compose_in(
+            CPU_WORKSPACE,
+            "memory",
+            "framebuffer",
+            PanelGroupLayout::CompanionRail,
+        );
+        manifest.compose_in(
+            VIDEO_WORKSPACE,
+            "tileset",
+            "tilemap",
+            PanelGroupLayout::EqualColumns,
+        );
+        manifest.compose_in(
+            VIDEO_WORKSPACE,
+            "sprites",
+            "framebuffer",
+            PanelGroupLayout::EqualColumns,
+        );
 
         manifest
-    }
-
-    fn status(&self, label: &str) -> StatusView {
-        StatusView {
-            system: self.system.clone(),
-            session: self.label.clone(),
-            segments: self.segments.clone(),
-            state: self::caption(label, &self.core).into(),
-        }
     }
 
     fn caption(&self, label: &str) -> String {

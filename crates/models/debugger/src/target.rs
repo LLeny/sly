@@ -1,16 +1,15 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use core_model::Core;
-use frontend_model::{
-    ComponentManifest, DockLocation, PanelDescriptor, PanelKind, RefreshPolicy,
+use workspace_model::{
+    ComponentManifest, DockLocation, PanelDescriptor, PanelGroupLayout, PanelKind, RefreshPolicy,
     WorkspaceDescriptor, WorkspaceIcon,
 };
 
 use crate::model::{
-    AudioScopesView, CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Framebuffer,
-    Highlight, MemoryRegion, MmioView, PaletteView, PpuView, Sprites, StatusView, StructuredView,
-    TableView, Tilemap, TilemapViewport, Tileset, TilesetLayer, VideoGenerations,
+    AudioScopesView, CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Highlight,
+    MemoryRegion, MmioView, PaletteView, PpuView, Sprites, StructuredView, TableView, Tilemap,
+    TilemapViewport, Tileset, TilesetLayer, VideoGenerations,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -148,10 +147,6 @@ pub trait DebugCore: Core {
     fn debug_step(&mut self);
     fn debug_run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome;
 
-    fn frame_interval(&self) -> Option<Duration> {
-        None
-    }
-
     fn cartridge(&self) -> &CartridgeView;
     fn mmio_view(&self) -> MmioView;
 
@@ -187,10 +182,6 @@ pub trait DebugCore: Core {
         None
     }
 
-    fn framebuffer(&self) -> Option<Framebuffer> {
-        None
-    }
-
     fn video_generations(&self) -> Option<VideoGenerations> {
         None
     }
@@ -207,7 +198,6 @@ pub trait DebugCore: Core {
         AudioScopesView::default()
     }
 
-    fn status(&self, label: &str) -> StatusView;
     fn caption(&self, label: &str) -> String;
     fn memory_regions(&self) -> Vec<MemoryRegion>;
     fn read_memory(&self, region: &str, addr: u32, len: usize) -> Vec<u8>;
@@ -248,11 +238,23 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
     ];
 
     for c in cpus {
+        let disassembly_id = format!("{}.disasm", c.id.as_str());
+        let call_stack_id = format!("{}.callstack", c.id.as_str());
         panels.push(
             PanelDescriptor::new(
-                format!("{}.disasm", c.id.as_str()),
+                disassembly_id,
                 format!("{} Disassembly", c.title),
                 PanelKind::Disassembly { cpu: c.id.arc() },
+                Center,
+                OnPause,
+            )
+            .tag(CPU_WORKSPACE),
+        );
+        panels.push(
+            PanelDescriptor::new(
+                call_stack_id,
+                format!("{} Call Stack", c.title),
+                PanelKind::CallStack { cpu: c.id.arc() },
                 Center,
                 OnPause,
             )
@@ -292,7 +294,7 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
         PanelDescriptor::new("log", "Log", PanelKind::Log, Bottom, Continuous).tag(CPU_WORKSPACE),
     );
 
-    ComponentManifest {
+    let mut manifest = ComponentManifest {
         system: Arc::from(""),
         workspaces: vec![WorkspaceDescriptor::new(
             CPU_WORKSPACE,
@@ -300,5 +302,15 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
             WorkspaceIcon::Cpu,
         )],
         panels,
+        compositions: Vec::new(),
+    };
+    for c in cpus {
+        manifest.compose_in(
+            CPU_WORKSPACE,
+            format!("{}.disasm", c.id.as_str()),
+            format!("{}.callstack", c.id.as_str()),
+            PanelGroupLayout::CompanionRail,
+        );
     }
+    manifest
 }

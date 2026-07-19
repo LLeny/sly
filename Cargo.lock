@@ -1123,11 +1123,13 @@ dependencies = [
 name = "cirsium"
 version = "0.1.0"
 dependencies = [
+ "core-model",
  "debugger-model",
  "gpui",
  "image",
  "rust-embed",
  "rust-sugiyama",
+ "workspace-model",
 ]
 
 [[package]]
@@ -1678,7 +1680,6 @@ dependencies = [
  "core-model",
  "crc32fast",
  "debugger-model",
- "frontend-model",
  "gpui",
  "gpui_platform",
  "js-sys",
@@ -1691,6 +1692,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "web-time",
+ "workspace-model",
 ]
 
 [[package]]
@@ -1698,8 +1700,8 @@ name = "debugger-model"
 version = "0.1.0"
 dependencies = [
  "core-model",
- "frontend-model",
  "logos",
+ "workspace-model",
 ]
 
 [[package]]
@@ -2214,10 +2216,6 @@ dependencies = [
  "libc",
  "pkg-config",
 ]
-
-[[package]]
-name = "frontend-model"
-version = "0.1.0"
 
 [[package]]
 name = "fs_extra"
@@ -5837,6 +5835,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "core-model",
  "crc32fast",
  "gif 0.14.2",
  "owo-colors",
@@ -6285,6 +6284,7 @@ dependencies = [
  "inventory",
  "thiserror 2.0.18",
  "tracing",
+ "workspace-model",
 ]
 
 [[package]]
@@ -8402,6 +8402,10 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "workspace-model"
+version = "0.1.0"
 
 [[package]]
 name = "writeable"

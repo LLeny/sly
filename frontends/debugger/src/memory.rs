@@ -1,4 +1,6 @@
+use std::collections::VecDeque;
 use std::ops::Range;
+use std::sync::Arc;
 
 use cirsium::components::ComboOption;
 use cirsium::widgets::{MemoryCell, MemoryRow, ascii_glyph};
@@ -6,6 +8,15 @@ use debugger_model::{BreakpointKind, BreakpointMark, DebugCore, MemoryRegion, ma
 use gpui::{Pixels, Point, ScrollStrategy, SharedString, UniformListScrollHandle};
 
 pub const BYTES_PER_ROW: usize = 16;
+pub const DEBUG_PAGE_SIZE: usize = 0x1000;
+const PAGE_ROWS: usize = DEBUG_PAGE_SIZE / BYTES_PER_ROW;
+const MAX_CACHED_PAGES: usize = 8;
+
+struct MemoryPage {
+    region: Arc<str>,
+    first_row: usize,
+    rows: Arc<[MemoryRow]>,
+}
 
 pub struct MemMenu {
     pub position: Point<Pixels>,
@@ -26,6 +37,7 @@ pub struct Memory {
     drag_anchor: Option<u32>,
     follow: bool,
     breakpoints: Vec<BreakpointMark>,
+    pages: VecDeque<MemoryPage>,
 }
 
 impl Memory {
@@ -35,7 +47,7 @@ impl Memory {
             .first()
             .cloned()
             .unwrap_or_else(|| MemoryRegion::new("", "", 0, 0));
-        Self {
+        let mut memory = Self {
             scroll: UniformListScrollHandle::new(),
             combo_open: None,
             menu: None,
@@ -45,7 +57,10 @@ impl Memory {
             drag_anchor: None,
             follow: false,
             breakpoints: Vec::new(),
-        }
+            pages: VecDeque::new(),
+        };
+        memory.load_page(0, target);
+        memory
     }
 
     pub fn set_breakpoints(&mut self, breakpoints: Vec<BreakpointMark>) {
@@ -82,7 +97,7 @@ impl Memory {
         (self.current.size as usize).div_ceil(BYTES_PER_ROW)
     }
 
-    pub fn rows_for(&self, range: Range<usize>, target: &dyn DebugCore) -> Vec<MemoryRow> {
+    fn build_rows(&self, range: Range<usize>, target: &dyn DebugCore) -> Vec<MemoryRow> {
         let region = self.current.id.as_ref();
         range
             .map(|row_ix| {
@@ -112,6 +127,68 @@ impl Memory {
                 }
             })
             .collect()
+    }
+
+    pub fn cached_rows(&self, range: Range<usize>) -> Vec<MemoryRow> {
+        range
+            .map(|row| {
+                let page = self.pages.iter().find(|page| {
+                    page.region == self.current.id
+                        && (page.first_row..page.first_row + page.rows.len()).contains(&row)
+                })?;
+                page.rows.get(row - page.first_row).cloned()
+            })
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default()
+    }
+
+    pub fn missing_pages(&self, range: Range<usize>) -> Vec<usize> {
+        if range.is_empty() {
+            return Vec::new();
+        }
+        let mut pages = Vec::new();
+        let first = range.start / PAGE_ROWS * PAGE_ROWS;
+        let last = range.end.saturating_sub(1) / PAGE_ROWS * PAGE_ROWS;
+        for first_row in (first..=last).step_by(PAGE_ROWS) {
+            let cached = self
+                .pages
+                .iter()
+                .any(|page| page.region == self.current.id && page.first_row == first_row);
+            if !cached {
+                pages.push(first_row);
+            }
+        }
+        pages
+    }
+
+    pub fn load_page(&mut self, first_row: usize, target: &dyn DebugCore) {
+        let first_row = first_row / PAGE_ROWS * PAGE_ROWS;
+        let end = (first_row + PAGE_ROWS).min(self.row_count());
+        if first_row >= end {
+            return;
+        }
+
+        self.pages
+            .retain(|page| page.region != self.current.id || page.first_row != first_row);
+        let rows = self.build_rows(first_row..end, target).into();
+        self.pages.push_front(MemoryPage {
+            region: self.current.id.clone(),
+            first_row,
+            rows,
+        });
+        self.pages.truncate(MAX_CACHED_PAGES);
+    }
+
+    pub fn refresh_cached(&mut self, target: &dyn DebugCore) {
+        let pages: Vec<usize> = self
+            .pages
+            .iter()
+            .filter(|page| page.region == self.current.id)
+            .map(|page| page.first_row)
+            .collect();
+        for first_row in pages.into_iter().rev() {
+            self.load_page(first_row, target);
+        }
     }
 
     fn normalized_selection(&self) -> Option<(u32, u32)> {
@@ -175,6 +252,7 @@ impl Memory {
             self.selection = None;
             self.drag_anchor = None;
             self.scroll.scroll_to_item_strict(0, ScrollStrategy::Top);
+            self.pages.clear();
         }
 
         self.combo_open = None;

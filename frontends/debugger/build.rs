@@ -52,10 +52,10 @@ fn parse(text: &str) -> BTreeMap<u32, String> {
         let line = line.trim_start();
         if let Some(rest) = line.strip_prefix("name \"") {
             current = rest.split('"').next();
-        } else if line.starts_with("rom (") {
-            if let (Some(name), Some(crc)) = (current, self::extract_crc(line)) {
-                titles.entry(crc).or_insert_with(|| name.to_string());
-            }
+        } else if line.starts_with("rom (")
+            && let (Some(name), Some(crc)) = (current, self::extract_crc(line))
+        {
+            titles.entry(crc).or_insert_with(|| name.to_string());
         }
     }
 

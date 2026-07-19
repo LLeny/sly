@@ -12,6 +12,7 @@ use super::CONTROL_HEIGHT;
 use crate::theme::Theme;
 
 mod element;
+mod input;
 
 const CONTEXT: &str = "TextInput";
 
@@ -114,7 +115,7 @@ impl TextInput {
         cx.notify();
     }
 
-    fn left(&mut self, _: &MoveLeft, _: &mut Window, cx: &mut Context<Self>) {
+    fn left(&mut self, _action: &MoveLeft, _window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.move_to(self.previous_boundary(self.cursor_offset()), cx);
         } else {
@@ -122,7 +123,7 @@ impl TextInput {
         }
     }
 
-    fn right(&mut self, _: &MoveRight, _: &mut Window, cx: &mut Context<Self>) {
+    fn right(&mut self, _action: &MoveRight, _window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.move_to(self.next_boundary(self.selected_range.end), cx);
         } else {
@@ -130,42 +131,47 @@ impl TextInput {
         }
     }
 
-    fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
+    fn select_left(&mut self, _action: &SelectLeft, _window: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.previous_boundary(self.cursor_offset()), cx);
     }
 
-    fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
+    fn select_right(
+        &mut self,
+        _action: &SelectRight,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.select_to(self.next_boundary(self.cursor_offset()), cx);
     }
 
-    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+    fn select_all(&mut self, _action: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
         self.move_to(0, cx);
         self.select_to(self.content.len(), cx)
     }
 
-    fn home(&mut self, _: &MoveHome, _: &mut Window, cx: &mut Context<Self>) {
+    fn home(&mut self, _action: &MoveHome, _window: &mut Window, cx: &mut Context<Self>) {
         self.move_to(0, cx);
     }
 
-    fn end(&mut self, _: &MoveEnd, _: &mut Window, cx: &mut Context<Self>) {
+    fn end(&mut self, _action: &MoveEnd, _window: &mut Window, cx: &mut Context<Self>) {
         self.move_to(self.content.len(), cx);
     }
 
-    fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+    fn backspace(&mut self, _action: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.select_to(self.previous_boundary(self.cursor_offset()), cx)
         }
         self.replace_text_in_range(None, "", window, cx)
     }
 
-    fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
+    fn delete(&mut self, _action: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.select_to(self.next_boundary(self.cursor_offset()), cx)
         }
         self.replace_text_in_range(None, "", window, cx)
     }
 
-    fn submit(&mut self, _: &Submit, _: &mut Window, cx: &mut Context<Self>) {
+    fn submit(&mut self, _action: &Submit, _window: &mut Window, cx: &mut Context<Self>) {
         cx.emit(TextInputEvent::Submit);
     }
 
@@ -184,17 +190,27 @@ impl TextInput {
         }
     }
 
-    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    fn on_mouse_up(
+        &mut self,
+        _event: &MouseUpEvent,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
         self.is_selecting = false;
     }
 
-    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.is_selecting {
             self.select_to(self.index_for_mouse_position(event.position), cx);
         }
     }
 
-    fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+    fn copy(&mut self, _action: &Copy, _window: &mut Window, cx: &mut Context<Self>) {
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
@@ -202,7 +218,7 @@ impl TextInput {
         }
     }
 
-    fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
+    fn cut(&mut self, _action: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
@@ -211,7 +227,7 @@ impl TextInput {
         }
     }
 
-    fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+    fn paste(&mut self, _action: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.replace_text_in_range(None, &text.replace('\n', " "), window, cx);
         }
@@ -337,138 +353,8 @@ impl TextInput {
 
 impl EventEmitter<TextInputEvent> for TextInput {}
 
-impl EntityInputHandler for TextInput {
-    fn text_for_range(
-        &mut self,
-        range_utf16: Range<usize>,
-        actual_range: &mut Option<Range<usize>>,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<String> {
-        let range = self.range_from_utf16(&range_utf16);
-        actual_range.replace(self.range_to_utf16(&range));
-        Some(self.content[range].to_string())
-    }
-
-    fn selected_text_range(
-        &mut self,
-        _: bool,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<UTF16Selection> {
-        Some(UTF16Selection {
-            range: self.range_to_utf16(&self.selected_range),
-            reversed: self.selection_reversed,
-        })
-    }
-
-    fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
-        self.marked_range
-            .as_ref()
-            .map(|range| self.range_to_utf16(range))
-    }
-
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
-        self.marked_range = None;
-    }
-
-    fn replace_text_in_range(
-        &mut self,
-        range_utf16: Option<Range<usize>>,
-        new_text: &str,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let range = range_utf16
-            .as_ref()
-            .map(|range_utf16| self.range_from_utf16(range_utf16))
-            .or(self.marked_range.clone())
-            .unwrap_or(self.selected_range.clone());
-
-        let head = self.content[0..range.start].to_owned();
-        let tail = self.content[range.end..].to_owned();
-        let inserted = self.sanitize(&head, &tail, new_text);
-        let cursor = range.start + inserted.len();
-
-        self.content = format!("{head}{inserted}{tail}").into();
-        self.selected_range = cursor..cursor;
-        self.marked_range.take();
-        cx.emit(TextInputEvent::Changed);
-        cx.notify();
-    }
-
-    fn replace_and_mark_text_in_range(
-        &mut self,
-        range_utf16: Option<Range<usize>>,
-        new_text: &str,
-        new_selected_range_utf16: Option<Range<usize>>,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let range = range_utf16
-            .as_ref()
-            .map(|range_utf16| self.range_from_utf16(range_utf16))
-            .or(self.marked_range.clone())
-            .unwrap_or(self.selected_range.clone());
-
-        let head = self.content[0..range.start].to_owned();
-        let tail = self.content[range.end..].to_owned();
-        let inserted = self.sanitize(&head, &tail, new_text);
-
-        self.content = format!("{head}{inserted}{tail}").into();
-        self.marked_range = if inserted.is_empty() {
-            None
-        } else {
-            Some(range.start..range.start + inserted.len())
-        };
-        self.selected_range = new_selected_range_utf16
-            .as_ref()
-            .map(|range_utf16| self.range_from_utf16(range_utf16))
-            .map(|new_range| new_range.start + range.start..new_range.end + range.start)
-            .unwrap_or_else(|| {
-                let cursor = range.start + inserted.len();
-                cursor..cursor
-            });
-        cx.emit(TextInputEvent::Changed);
-        cx.notify();
-    }
-
-    fn bounds_for_range(
-        &mut self,
-        range_utf16: Range<usize>,
-        bounds: Bounds<Pixels>,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<Bounds<Pixels>> {
-        let last_layout = self.last_layout.as_ref()?;
-        let range = self.range_from_utf16(&range_utf16);
-        Some(Bounds::from_corners(
-            point(
-                bounds.left() + last_layout.x_for_index(range.start),
-                bounds.top(),
-            ),
-            point(
-                bounds.left() + last_layout.x_for_index(range.end),
-                bounds.bottom(),
-            ),
-        ))
-    }
-
-    fn character_index_for_point(
-        &mut self,
-        point: Point<Pixels>,
-        _: &mut Window,
-        _: &mut Context<Self>,
-    ) -> Option<usize> {
-        let line_point = self.last_bounds?.localize(&point)?;
-        let last_layout = self.last_layout.as_ref()?;
-        let utf8_index = last_layout.index_for_x(point.x - line_point.x)?;
-        Some(self.offset_to_utf16(utf8_index))
-    }
-}
-
 impl Focusable for TextInput {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
+    fn focus_handle(&self, _app: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }

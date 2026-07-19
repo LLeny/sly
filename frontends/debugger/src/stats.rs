@@ -27,7 +27,7 @@ impl RunStats {
         &mut self,
         wake_late: Duration,
         buffered: Option<Duration>,
-    ) -> Option<String> {
+    ) -> Option<Vec<String>> {
         let now = Instant::now();
 
         if let Some(last) = self.last_tick {
@@ -46,15 +46,19 @@ impl RunStats {
 
         let ms = |d: Duration| d.as_secs_f64() * 1e3;
         let fps = self.frames as f64 / elapsed.as_secs_f64();
-        let audio = buffered.map_or(String::new(), |b| format!(" | buf {:.0}ms", ms(b)));
-        let summary = format!(
-            "core {:.1}ms (max {:.1}) | tick {:.1}ms | wake +{:.1}ms{audio} | {:.1} fps",
-            ms(self.emu_total) / self.frames as f64,
-            ms(self.emu_max),
-            ms(self.tick_total) / self.ticks as f64,
-            ms(self.wake_total) / self.ticks as f64,
-            fps
-        );
+        let mut segments = vec![
+            format!(
+                "core {:.1}ms (max {:.1})",
+                ms(self.emu_total) / self.frames as f64,
+                ms(self.emu_max)
+            ),
+            format!("tick {:.1}ms", ms(self.tick_total) / self.ticks as f64),
+            format!("wake +{:.1}ms", ms(self.wake_total) / self.ticks as f64),
+        ];
+        if let Some(buffered) = buffered {
+            segments.push(format!("buf {:.0}ms", ms(buffered)));
+        }
+        segments.push(format!("{fps:.1} fps"));
 
         *self = Self {
             last_tick: Some(now),
@@ -62,7 +66,7 @@ impl RunStats {
             ..Self::default()
         };
 
-        Some(summary)
+        Some(segments)
     }
 
     pub fn reset(&mut self) {

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use snes::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
+use core_model::Core;
 use snes::{Cartridge, Snes};
 
 use crate::capture::{CaptureConfig, Frame, ScreenshotCore};
@@ -83,15 +83,15 @@ impl ScreenshotCore for SnesScreenshotter {
     }
 
     fn frame(&self) -> Frame {
-        let frame_buffer = self.snes.ppu.frame_buffer();
-        let mut pixels = Vec::with_capacity(frame_buffer.len() * 3);
-        for &(r, g, b) in frame_buffer {
+        let frame = self.snes.software_frame().expect("SNES must expose video");
+        let mut pixels = Vec::with_capacity(frame.pixels.len() * 3);
+        for &(r, g, b) in frame.pixels {
             pixels.extend_from_slice(&[r, g, b]);
         }
 
         Frame {
-            width: SCREEN_WIDTH,
-            height: SCREEN_HEIGHT,
+            width: frame.width,
+            height: frame.height,
             pixels,
         }
     }

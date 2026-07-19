@@ -161,4 +161,29 @@ impl<M: MemoryMap + 'static> core_model::Core for Snes<M> {
     fn drain_audio(&mut self, out: &mut Vec<i16>) {
         self.apu.drain_audio(out);
     }
+
+    fn session_info(&self) -> core_model::SessionInfo {
+        core_model::SessionInfo {
+            system: "SNES".into(),
+            session: self.mmu.cartridge.title().into(),
+            segments: vec![
+                self.mmu.cartridge.region().to_string().into(),
+                format!("{} KB", self.mmu.cartridge.rom.len() / 1024).into(),
+            ],
+        }
+    }
+
+    fn software_frame(&self) -> Option<core_model::SoftwareFrame<'_>> {
+        Some(core_model::SoftwareFrame {
+            width: ppu::SCREEN_WIDTH,
+            height: ppu::SCREEN_HEIGHT,
+            pixels: self.ppu.frame_buffer(),
+        })
+    }
+
+    fn frame_interval(&self) -> Option<std::time::Duration> {
+        let nanos = self.scheduler.cycles_per_frame() as u128 * 1_000_000_000
+            / self.scheduler.master_clock_hz() as u128;
+        Some(std::time::Duration::from_nanos(nanos as u64))
+    }
 }

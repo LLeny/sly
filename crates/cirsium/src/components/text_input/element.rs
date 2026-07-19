@@ -52,10 +52,10 @@ impl Element for TextElement {
 
     fn prepaint(
         &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
+        _global_id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
+        _request_layout: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
@@ -152,10 +152,10 @@ impl Element for TextElement {
 
     fn paint(
         &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
+        _global_id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
+        _request_layout: &mut Self::RequestLayoutState,
         prepaint: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,

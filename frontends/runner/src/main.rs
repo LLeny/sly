@@ -6,31 +6,25 @@ use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
 use sdl3::pixels::PixelFormat;
 use sdl3::render::ScaleMode;
-use snes::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use snes::{Cartridge, Snes};
 
 const SCALE: u32 = 2;
-const RECORD_FRAME_STEP: u32 = 1;
 
 struct Recorder {
     encoder: gif::Encoder<BufWriter<File>>,
     path: String,
+    width: u16,
+    height: u16,
     hundredths_per_frame: f64,
     delay_accum: f64,
-    frame_index: u32,
 }
 
 impl Recorder {
-    fn new(path: String, target_fps: f64) -> Self {
+    fn new(path: String, target_fps: f64, width: u32, height: u32) -> Self {
         let file = File::create(&path).expect("Failed to create gif file");
 
-        let mut encoder = gif::Encoder::new(
-            BufWriter::new(file),
-            SCREEN_WIDTH as u16,
-            SCREEN_HEIGHT as u16,
-            &[],
-        )
-        .expect("Failed to create gif encoder");
+        let mut encoder = gif::Encoder::new(BufWriter::new(file), width as u16, height as u16, &[])
+            .expect("Failed to create gif encoder");
         encoder
             .set_repeat(gif::Repeat::Infinite)
             .expect("Failed to set gif repeat");
@@ -38,25 +32,19 @@ impl Recorder {
         Self {
             encoder,
             path,
+            width: width as u16,
+            height: height as u16,
             hundredths_per_frame: 100.0 / target_fps,
             delay_accum: 0.0,
-            frame_index: 0,
         }
     }
 
     fn push(&mut self, rgb: &[u8]) {
-        let take = self.frame_index % RECORD_FRAME_STEP == 0;
-        self.frame_index += 1;
         self.delay_accum += self.hundredths_per_frame;
-        if !take {
-            return;
-        }
-
         let delay = self.delay_accum.round().max(1.0);
         self.delay_accum -= delay;
 
-        let mut frame =
-            gif::Frame::from_rgb_speed(SCREEN_WIDTH as u16, SCREEN_HEIGHT as u16, rgb, 30);
+        let mut frame = gif::Frame::from_rgb_speed(self.width, self.height, rgb, 30);
         frame.delay = delay as u16;
 
         self.encoder
@@ -96,8 +84,12 @@ fn main() {
     let title = cartridge.title().trim().to_string();
     let tv_system = cartridge.region().tv_system();
     let target_fps = tv_system.frame_rate();
-    let frame_duration = Duration::from_secs_f64(1.0 / target_fps);
     let mut snes = Snes::new(cartridge);
+    let initial_frame = snes.software_frame().expect("SNES must expose video");
+    let (frame_width, frame_height) = (initial_frame.width, initial_frame.height);
+    let frame_duration = snes
+        .frame_interval()
+        .unwrap_or_else(|| Duration::from_secs_f64(1.0 / target_fps));
 
     let mut recorder = record.then(|| {
         let name: String = title
@@ -107,13 +99,13 @@ fn main() {
         let name = name.trim_matches('_');
         let path = format!("{}.gif", if name.is_empty() { "recording" } else { name });
         println!("Recording to {path}");
-        Recorder::new(path, target_fps)
+        Recorder::new(path, target_fps, frame_width, frame_height)
     });
 
     let sdl = sdl3::init().expect("Failed to init SDL");
     let video = sdl.video().expect("Failed to init SDL video");
     let window = video
-        .window(&title, SCREEN_WIDTH * SCALE, SCREEN_HEIGHT * SCALE)
+        .window(&title, frame_width * SCALE, frame_height * SCALE)
         .position_centered()
         .build()
         .expect("Failed to create window");
@@ -121,7 +113,7 @@ fn main() {
     let mut canvas = window.into_canvas();
     let texture_creator = canvas.texture_creator();
     let mut texture = texture_creator
-        .create_texture_streaming(PixelFormat::RGB24, SCREEN_WIDTH, SCREEN_HEIGHT)
+        .create_texture_streaming(PixelFormat::RGB24, frame_width, frame_height)
         .expect("Failed to create texture");
     texture.set_scale_mode(ScaleMode::Nearest);
 
@@ -135,7 +127,7 @@ fn main() {
     };
     let mut audio_buffer: Vec<i16> = Vec::new();
 
-    let mut buffer = vec![0u8; SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize * 3];
+    let mut buffer = vec![0u8; frame_width as usize * frame_height as usize * 3];
     let mut frames = 0u32;
     let mut core_time = Duration::ZERO;
     let mut stats_since = Instant::now();
@@ -164,7 +156,8 @@ fn main() {
             audio_buffer.clear();
         }
 
-        for (dst, &(r, g, b)) in buffer.chunks_exact_mut(3).zip(snes.ppu.frame_buffer()) {
+        let frame = snes.software_frame().expect("SNES video disappeared");
+        for (dst, &(r, g, b)) in buffer.chunks_exact_mut(3).zip(frame.pixels) {
             dst[0] = r;
             dst[1] = g;
             dst[2] = b;
@@ -174,7 +167,7 @@ fn main() {
         }
 
         texture
-            .update(None, &buffer, SCREEN_WIDTH as usize * 3)
+            .update(None, &buffer, frame_width as usize * 3)
             .expect("Failed to update texture");
         canvas.clear();
         canvas

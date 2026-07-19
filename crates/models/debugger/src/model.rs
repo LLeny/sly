@@ -367,13 +367,6 @@ pub struct Sprites {
     pub entries: Vec<SpriteEntry>,
 }
 
-#[derive(Clone)]
-pub struct Framebuffer {
-    pub width: u32,
-    pub height: u32,
-    pub pixels: Vec<(u8, u8, u8)>,
-}
-
 #[derive(Clone, Copy)]
 pub struct PaletteColor {
     pub raw: u16,
@@ -513,14 +506,6 @@ impl MemoryRegion {
             size,
         }
     }
-}
-
-#[derive(Clone, Default)]
-pub struct StatusView {
-    pub system: Arc<str>,
-    pub session: Arc<str>,
-    pub segments: Vec<Arc<str>>,
-    pub state: Arc<str>,
 }
 
 #[derive(Clone)]

@@ -14,11 +14,11 @@ pub struct FramebufferView {
     pub image: Option<Arc<RenderImage>>,
 }
 
-impl From<debugger_model::Framebuffer> for FramebufferView {
-    fn from(fb: debugger_model::Framebuffer) -> Self {
-        let len = fb.width as usize * fb.height as usize;
-        let image = (len > 0 && fb.pixels.len() == len)
-            .then(|| crate::widgets::grid::build_image(&fb.pixels, fb.width, fb.height));
+impl From<core_model::SoftwareFrame<'_>> for FramebufferView {
+    fn from(fb: core_model::SoftwareFrame<'_>) -> Self {
+        let image = fb
+            .is_valid()
+            .then(|| crate::widgets::grid::build_image(fb.pixels, fb.width, fb.height));
 
         Self {
             width: fb.width,
@@ -29,13 +29,8 @@ impl From<debugger_model::Framebuffer> for FramebufferView {
 }
 
 impl FramebufferView {
-    pub fn matches(&self, fb: &debugger_model::Framebuffer) -> bool {
-        let len = fb.width as usize * fb.height as usize;
-        self.image.is_some()
-            && self.width == fb.width
-            && self.height == fb.height
-            && len > 0
-            && fb.pixels.len() == len
+    pub fn matches(&self, fb: &core_model::SoftwareFrame<'_>) -> bool {
+        self.image.is_some() && self.width == fb.width && self.height == fb.height && fb.is_valid()
     }
 
     pub fn rebuild_from_staged(&mut self, staged: &[u8]) -> Option<Arc<RenderImage>> {
@@ -50,9 +45,9 @@ impl FramebufferView {
     }
 }
 
-pub fn stage_bgra(fb: &debugger_model::Framebuffer, out: &mut Vec<u8>) {
+pub fn stage_bgra(fb: &core_model::SoftwareFrame<'_>, out: &mut Vec<u8>) {
     out.resize(fb.pixels.len() * 4, 0);
-    for (dst, &px) in out.chunks_exact_mut(4).zip(&fb.pixels) {
+    for (dst, &px) in out.chunks_exact_mut(4).zip(fb.pixels) {
         dst.copy_from_slice(&crate::widgets::grid::bgra(px));
     }
 }

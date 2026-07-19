@@ -25,13 +25,13 @@ pub struct StatusView {
     pub state: SharedString,
 }
 
-impl From<debugger_model::StatusView> for StatusView {
-    fn from(view: debugger_model::StatusView) -> Self {
+impl From<core_model::SessionInfo> for StatusView {
+    fn from(view: core_model::SessionInfo) -> Self {
         Self {
             system: view.system.into(),
             session: view.session.into(),
             segments: view.segments.into_iter().map(Into::into).collect(),
-            state: view.state.into(),
+            state: SharedString::default(),
         }
     }
 }
@@ -54,7 +54,11 @@ pub fn status_bar(theme: &Theme, status: &StatusView) -> Div {
         left = left.child(separator(theme)).child(div().child(seg.clone()));
     }
 
-    let mut right = div().flex().items_center().gap_3();
+    let mut right = div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .font_family(theme.mono_font);
     if !status.state.is_empty() {
         right = right.child(
             div()
