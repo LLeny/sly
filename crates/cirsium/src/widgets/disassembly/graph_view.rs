@@ -20,6 +20,7 @@ pub(super) fn render_graph(
     on_jump: Option<JumpCallback>,
 ) -> impl IntoElement {
     let layout = layout_cache.borrow_mut().graph(&view);
+    let measured = viewport.width > 0. && viewport.height > 0.;
 
     let base = if follow {
         rows.current
@@ -72,6 +73,10 @@ pub(super) fn render_graph(
             }
         },
         move |bounds, _, window, cx| {
+            if !measured {
+                return;
+            }
+
             let theme_now = Theme::global(cx);
             graph_paint::paint_edges(
                 window,
@@ -139,16 +144,18 @@ pub(super) fn render_graph(
 
     const CULL_MARGIN: f32 = 64.;
 
-    let cullable = viewport.width > 0. && viewport.height > 0.;
-
-    for block in layout.blocks.iter() {
+    let blocks = if measured {
+        layout.blocks.as_slice()
+    } else {
+        &[]
+    };
+    for block in blocks {
         let bx = f32::from(offset.x) + block.x;
         let by = f32::from(offset.y) + block.y;
-        if cullable
-            && (bx + block.w < -CULL_MARGIN
-                || by + block.h < -CULL_MARGIN
-                || bx > viewport.width + CULL_MARGIN
-                || by > viewport.height + CULL_MARGIN)
+        if bx + block.w < -CULL_MARGIN
+            || by + block.h < -CULL_MARGIN
+            || bx > viewport.width + CULL_MARGIN
+            || by > viewport.height + CULL_MARGIN
         {
             continue;
         }

@@ -79,7 +79,7 @@ impl Disasm {
             view_mode: ViewMode::Linear,
             graph_offset: Point::default(),
             graph_drag: None,
-            graph_viewport: size(600., 400.),
+            graph_viewport: size(0., 0.),
             graph_anim: None,
             hovered_edge: None,
             base: 0,
@@ -289,6 +289,10 @@ impl Disasm {
     }
 
     pub fn set_view_mode(&mut self, mode: ViewMode, target: &dyn DebugCore) {
+        if mode == ViewMode::Graph {
+            self.graph_viewport = size(0., 0.);
+        }
+
         self.view_mode = mode;
         self.rebuild(target, true);
     }
@@ -318,6 +322,7 @@ impl Disasm {
 
     pub fn jump(&mut self, from: Point<Pixels>, to: Point<Pixels>) {
         self.follow_pc = false;
+        self.hovered_edge = None;
         self.graph_anim = Some(GraphAnim {
             from,
             to,
