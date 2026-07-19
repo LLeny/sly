@@ -4,14 +4,16 @@ members = [
     "crates/audio",
     "crates/cirsium",
     "crates/cores/snes",
-    "frontends/debugger",
-    "frontends/runner",
     "crates/models/core",
     "crates/models/debugger",
     "crates/models/workspace",
     "crates/playground",
     "crates/screenshotter",
     "crates/testrunner",
+
+    "frontends/debugger",
+    "frontends/runner",
+    "frontends/main-launcher",
 ]
 
 [workspace.dependencies]
