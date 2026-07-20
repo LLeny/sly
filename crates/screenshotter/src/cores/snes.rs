@@ -33,7 +33,7 @@ impl SnesScreenshotter {
 
         let cartridge = Cartridge::new(rom).context("parsing cartridge header")?;
         let game_id = Self::game_id(&cartridge);
-        let frame_rate = cartridge.region().tv_system().frame_rate();
+        let frame_rate = snes::cartridge::frame_rate(cartridge.region().tv_system());
 
         Ok(Self {
             snes: Snes::new(cartridge),

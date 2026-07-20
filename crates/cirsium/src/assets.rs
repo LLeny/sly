@@ -4,43 +4,46 @@ use gpui::{App, AssetSource, Result, SharedString};
 use rust_embed::RustEmbed;
 
 pub mod icon {
-    pub const CHEVRON_DOWN: &str = "icons/chevron-down.svg";
-    pub const CHEVRON_RIGHT: &str = "icons/chevron-right.svg";
-    pub const THEME: &str = "icons/sun-moon.svg";
-    pub const SETTINGS: &str = "icons/settings.svg";
+    pub const CHEVRON_DOWN: &str = "icons/lucide/chevron-down.svg";
+    pub const CHEVRON_RIGHT: &str = "icons/lucide/chevron-right.svg";
+    pub const THEME: &str = "icons/lucide/sun-moon.svg";
+    pub const SETTINGS: &str = "icons/lucide/sliders-horizontal.svg";
     pub const MINIMIZE: &str = "icons/titlebar-minimize.svg";
     pub const MAXIMIZE: &str = "icons/titlebar-maximize.svg";
     pub const CLOSE: &str = "icons/titlebar-close.svg";
-    pub const LOGO: &str = "icons/raccoon.svg";
-    pub const CPU: &str = "icons/cpu.svg";
-    pub const CARTRIDGE: &str = "icons/memory-stick.svg";
-    pub const CHECK: &str = "icons/check.svg";
-    pub const CODE: &str = "icons/code.svg";
-    pub const PLUS: &str = "icons/plus.svg";
-    pub const TRASH: &str = "icons/trash-2.svg";
-    pub const CONTROLS: &str = "icons/circle-play.svg";
-    pub const BREAKPOINT: &str = "icons/bug.svg";
-    pub const LOG: &str = "icons/scroll-text.svg";
-    pub const LIST: &str = "icons/list.svg";
-    pub const GRAPH: &str = "icons/workflow.svg";
-    pub const PALETTE: &str = "icons/palette.svg";
-    pub const MONITOR: &str = "icons/monitor.svg";
-    pub const GRID: &str = "icons/grid-3x3.svg";
-    pub const MAP: &str = "icons/map.svg";
-    pub const GHOST: &str = "icons/ghost.svg";
-    pub const AUDIO: &str = "icons/audio-lines.svg";
-    pub const DOWNLOAD: &str = "icons/download.svg";
-    pub const LINK: &str = "icons/link-2.svg";
+    pub const CPU: &str = "icons/lucide/cpu.svg";
+    pub const CARTRIDGE: &str = "icons/lucide/memory-stick.svg";
+    pub const CHECK: &str = "icons/lucide/check.svg";
+    pub const CODE: &str = "icons/lucide/code.svg";
+    pub const PLUS: &str = "icons/lucide/plus.svg";
+    pub const TRASH: &str = "icons/lucide/trash-2.svg";
+    pub const CONTROLS: &str = "icons/lucide/circle-play.svg";
+    pub const BREAKPOINT: &str = "icons/lucide/bug.svg";
+    pub const LOG: &str = "icons/lucide/scroll-text.svg";
+    pub const LIST: &str = "icons/lucide/list.svg";
+    pub const GRAPH: &str = "icons/lucide/workflow.svg";
+    pub const PALETTE: &str = "icons/lucide/palette.svg";
+    pub const MONITOR: &str = "icons/lucide/monitor.svg";
+    pub const GRID: &str = "icons/lucide/grid-3x3.svg";
+    pub const MAP: &str = "icons/lucide/map.svg";
+    pub const GHOST: &str = "icons/lucide/ghost.svg";
+    pub const AUDIO: &str = "icons/lucide/audio-lines.svg";
+    pub const DOWNLOAD: &str = "icons/lucide/download.svg";
+    pub const LINK: &str = "icons/lucide/link-2.svg";
 
-    pub const RUN: &str = "icons/play.svg";
-    pub const PAUSE: &str = "icons/pause.svg";
-    pub const STEP: &str = "icons/step.svg";
-    pub const RESET: &str = "icons/reset.svg";
+    pub const RUN: &str = "icons/lucide/play.svg";
+    pub const PAUSE: &str = "icons/lucide/pause.svg";
+    pub const STEP: &str = "icons/lucide/step-forward.svg";
+    pub const RESET: &str = "icons/lucide/rotate-ccw.svg";
 }
 
 #[derive(RustEmbed)]
 #[folder = "assets"]
 struct Embedded;
+
+#[derive(RustEmbed)]
+#[folder = "../../vendor"]
+struct Vendored;
 
 pub struct Assets;
 
@@ -60,11 +63,14 @@ impl Assets {
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        Ok(Embedded::get(path).map(|file| file.data))
+        Ok(Embedded::get(path)
+            .or_else(|| Vendored::get(path))
+            .map(|file| file.data))
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         Ok(Embedded::iter()
+            .chain(Vendored::iter())
             .filter(|p| p.starts_with(path))
             .map(|p| SharedString::from(p.into_owned()))
             .collect())

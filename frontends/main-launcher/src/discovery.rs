@@ -1,0 +1,138 @@
+use bevy::prelude::*;
+use bevy::tasks::futures::check_ready;
+use bevy::tasks::{IoTaskPool, Task};
+
+use crate::art_processing::{ProcessedArtwork, process_artwork};
+use crate::artwork;
+use crate::assets::Models;
+use crate::cartridge::{DetailCart, spawn_detail_cart};
+use crate::library::{self, LibraryEntry};
+use crate::scene_textures::{BoxTextures, CartLabelTexture};
+use crate::shelf::{RowRoot, spawn_box};
+use crate::state::{LauncherMode, LauncherState};
+
+#[derive(Resource, Default)]
+pub struct Library {
+    pub entries: Vec<LibraryEntry>,
+    pub art: Vec<CartArt>,
+    pub box_entities: Vec<Entity>,
+}
+
+#[derive(Clone, Default)]
+pub struct CartArt {
+    pub label: Option<Handle<Image>>,
+    pub dominant_color: Option<Vec3>,
+}
+
+#[derive(Component)]
+pub struct DiscoveryTask(Task<Result<Vec<LibraryEntry>, String>>);
+
+#[derive(Component)]
+pub struct ArtworkTask {
+    index: usize,
+    task: Task<Result<ProcessedArtwork, String>>,
+}
+
+pub fn start_discovery(mut commands: Commands) {
+    let root = std::env::args_os()
+        .nth(1)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("private"));
+    let task = IoTaskPool::get().spawn(async move { library::discover(&root) });
+    commands.spawn(DiscoveryTask(task));
+}
+
+pub fn poll_discovery(
+    mut commands: Commands,
+    mut tasks: Query<(Entity, &mut DiscoveryTask)>,
+    mut state: ResMut<LauncherState>,
+    mut next_mode: ResMut<NextState<LauncherMode>>,
+    mut library: ResMut<Library>,
+    models: Res<Models>,
+    row: Single<Entity, With<RowRoot>>,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = check_ready(&mut task.0) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+
+        next_mode.set(LauncherMode::Browsing);
+        match result {
+            Ok(entries) if !entries.is_empty() => {
+                let library = &mut *library;
+                library.entries = entries;
+                library.art = vec![CartArt::default(); library.entries.len()];
+                library.box_entities.clear();
+
+                for (index, entry) in library.entries.iter().enumerate() {
+                    let box_entity =
+                        spawn_box(&mut commands, *row, index, entry.box_style(), &models);
+                    library.box_entities.push(box_entity);
+
+                    let sha1 = entry.sha1.clone();
+                    let region = entry.region;
+                    let task = IoTaskPool::get().spawn(async move {
+                        artwork::fetch_bundle(&sha1, region)
+                            .map(|bundle| process_artwork(bundle, region))
+                    });
+                    commands.spawn(ArtworkTask { index, task });
+                }
+
+                spawn_detail_cart(&mut commands, 0, library, &models);
+                state.status = format!("{} games indexed", library.entries.len());
+            }
+            Ok(_) => state.status = "No valid .sfc or .smc files found".into(),
+            Err(err) => state.status = err,
+        }
+    }
+}
+
+pub fn poll_artwork(
+    mut commands: Commands,
+    mut tasks: Query<(Entity, &mut ArtworkTask)>,
+    mut library: ResMut<Library>,
+    mut images: ResMut<Assets<Image>>,
+    mut boxes: Query<&mut BoxTextures>,
+    mut carts: Query<(&DetailCart, &mut CartLabelTexture)>,
+) {
+    for (task_entity, mut task) in &mut tasks {
+        let Some(result) = check_ready(&mut task.task) else {
+            continue;
+        };
+        commands.entity(task_entity).despawn();
+        let Ok(processed) = result else {
+            continue;
+        };
+
+        let textures = BoxTextures {
+            front: processed.front.map(|image| images.add(image)),
+            back: processed.back.map(|image| images.add(image)),
+            spine: processed.spine.map(|image| images.add(image)),
+            edges: processed.edges.map(|image| images.add(image)),
+        };
+        let label = processed.label.map(|image| images.add(image));
+
+        if let Some(entry) = library.entries.get_mut(task.index) {
+            entry.title = processed.title;
+        }
+        if let Some(slot) = library.art.get_mut(task.index) {
+            *slot = CartArt {
+                label: label.clone(),
+                dominant_color: processed.dominant_color,
+            };
+        }
+
+        if let Some(&box_entity) = library.box_entities.get(task.index)
+            && let Ok(mut box_textures) = boxes.get_mut(box_entity)
+        {
+            *box_textures = textures;
+        }
+
+        for (cart, mut cart_label) in &mut carts {
+            if cart.index == task.index {
+                cart_label.0 = label.clone();
+            }
+        }
+    }
+}

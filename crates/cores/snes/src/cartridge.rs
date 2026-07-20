@@ -1,8 +1,10 @@
 use chapa::{BitEnum, BitField};
+pub use core_model::{Region, TvSystem};
 
 use crate::error::SnesError;
 
 pub const TITLE_LENGTH: usize = 21;
+const HEADER_LENGTH: usize = 0x20;
 
 pub struct Cartridge {
     pub rom: Vec<u8>,
@@ -63,26 +65,63 @@ impl Cartridge {
             .get(self.header_offset + REGION_OFFSET)
             .copied()
             .unwrap_or(0xFF);
-        Region::from_code(code)
+        region_from_code(code)
     }
 
     fn search_header(rom: &[u8]) -> Option<usize> {
         const OFFSETS: [usize; 3] = [0x007FC0, 0x00FFC0, 0x40FFC0];
 
+        let mut best: Option<(usize, i32)> = None;
         for offset in OFFSETS {
-            if rom.len() < offset + TITLE_LENGTH {
+            if rom.len() < offset + HEADER_LENGTH {
                 continue;
             }
 
-            if rom[offset..offset + TITLE_LENGTH]
-                .iter()
-                .all(|&b| b.is_ascii() || b == 0)
-            {
-                return Some(offset);
+            let score = Self::score_header(rom, offset);
+            if best.is_none_or(|(_, best_score)| score > best_score) {
+                best = Some((offset, score));
             }
         }
 
-        None
+        best.filter(|&(_, score)| score > 0)
+            .map(|(offset, _)| offset)
+    }
+
+    fn score_header(rom: &[u8], offset: usize) -> i32 {
+        let header = &rom[offset..offset + HEADER_LENGTH];
+        let mut score = 0;
+
+        let complement = u16::from_le_bytes([header[0x1C], header[0x1D]]);
+        let checksum = u16::from_le_bytes([header[0x1E], header[0x1F]]);
+        if complement ^ checksum == 0xFFFF && checksum != 0 && complement != 0 {
+            score += 8;
+        }
+
+        let map_mode = header[0x15];
+        if map_mode & 0xE0 == 0x20 {
+            score += 2;
+        }
+        let mode_matches_offset = match offset {
+            0x007FC0 => matches!(map_mode & 0x0F, 0x00 | 0x02 | 0x03),
+            0x00FFC0 => matches!(map_mode & 0x0F, 0x01 | 0x0A),
+            0x40FFC0 => map_mode & 0x0F == 0x05,
+            _ => false,
+        };
+        if mode_matches_offset {
+            score += 2;
+        }
+
+        if header[..TITLE_LENGTH]
+            .iter()
+            .all(|&b| b == 0 || (0x20..=0x7E).contains(&b))
+        {
+            score += 1;
+        }
+        if header[0x19] <= 0x11 {
+            score += 1;
+        }
+
+        score
     }
 }
 
@@ -114,114 +153,35 @@ pub struct MemoryMap {
     pub map_mode: MapMode,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TvSystem {
-    Ntsc,
-    Pal,
-}
-
-impl TvSystem {
-    pub fn frame_rate(self) -> f64 {
-        match self {
-            TvSystem::Ntsc => 60.0988,
-            TvSystem::Pal => 50.007,
-        }
+pub fn frame_rate(system: TvSystem) -> f64 {
+    match system {
+        TvSystem::Ntsc => 60.0988,
+        TvSystem::Pal => 50.007,
     }
 }
 
-impl std::fmt::Display for TvSystem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            TvSystem::Ntsc => "NTSC",
-            TvSystem::Pal => "PAL",
-        })
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Region {
-    Japan,        // $00
-    NorthAmerica, // $01
-    Europe,       // $02
-    Scandinavia,  // $03 (originally specific to Sweden)
-    Finland,      // $04
-    Denmark,      // $05
-    France,       // $06 (Europe, French only)
-    Netherlands,  // $07
-    Spain,        // $08
-    Germany,      // $09
-    Italy,        // $0A
-    China,        // $0B
-    Indonesia,    // $0C
-    SouthKorea,   // $0D
-    Common,       // $0E
-    Canada,       // $0F
-    Brazil,       // $10
-    Australia,    // $11
-    Other(u8),
-}
-
-impl Region {
-    pub fn from_code(code: u8) -> Self {
-        match code {
-            0x00 => Region::Japan,
-            0x01 => Region::NorthAmerica,
-            0x02 => Region::Europe,
-            0x03 => Region::Scandinavia,
-            0x04 => Region::Finland,
-            0x05 => Region::Denmark,
-            0x06 => Region::France,
-            0x07 => Region::Netherlands,
-            0x08 => Region::Spain,
-            0x09 => Region::Germany,
-            0x0A => Region::Italy,
-            0x0B => Region::China,
-            0x0C => Region::Indonesia,
-            0x0D => Region::SouthKorea,
-            0x0E => Region::Common,
-            0x0F => Region::Canada,
-            0x10 => Region::Brazil,
-            0x11 => Region::Australia,
-            other => Region::Other(other),
-        }
-    }
-
-    pub fn tv_system(self) -> TvSystem {
-        match self {
-            Region::Japan
-            | Region::NorthAmerica
-            | Region::SouthKorea
-            | Region::Canada
-            | Region::Common
-            | Region::Other(_) => TvSystem::Ntsc,
-            _ => TvSystem::Pal,
-        }
-    }
-}
-
-impl std::fmt::Display for Region {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            Region::Japan => "Japan",
-            Region::NorthAmerica => "North America",
-            Region::Europe => "Europe",
-            Region::Scandinavia => "Scandinavia",
-            Region::Finland => "Finland",
-            Region::Denmark => "Denmark",
-            Region::France => "France",
-            Region::Netherlands => "Netherlands",
-            Region::Spain => "Spain",
-            Region::Germany => "Germany",
-            Region::Italy => "Italy",
-            Region::China => "China",
-            Region::Indonesia => "Indonesia",
-            Region::SouthKorea => "South Korea",
-            Region::Common => "Common",
-            Region::Canada => "Canada",
-            Region::Brazil => "Brazil",
-            Region::Australia => "Australia",
-            Region::Other(code) => return write!(f, "Region ${code:02X}"),
-        };
-        write!(f, "{name} ({})", self.tv_system())
+// SNES header destination codes ($FFD9): $00 Japan .. $11 Australia,
+// $03 Scandinavia was originally specific to Sweden, $06 France is Europe French-only.
+fn region_from_code(code: u8) -> Region {
+    match code {
+        0x00 => Region::Japan,
+        0x01 => Region::NorthAmerica,
+        0x02 => Region::Europe,
+        0x03 => Region::Scandinavia,
+        0x04 => Region::Finland,
+        0x05 => Region::Denmark,
+        0x06 => Region::France,
+        0x07 => Region::Netherlands,
+        0x08 => Region::Spain,
+        0x09 => Region::Germany,
+        0x0A => Region::Italy,
+        0x0B => Region::China,
+        0x0C => Region::Indonesia,
+        0x0D => Region::SouthKorea,
+        0x0E => Region::Common,
+        0x0F => Region::Canada,
+        0x10 => Region::Brazil,
+        0x11 => Region::Australia,
+        other => Region::Other(other),
     }
 }

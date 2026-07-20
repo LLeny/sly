@@ -20,6 +20,86 @@ impl ExecutionState {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TvSystem {
+    Ntsc,
+    Pal,
+}
+
+impl std::fmt::Display for TvSystem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            TvSystem::Ntsc => "NTSC",
+            TvSystem::Pal => "PAL",
+        })
+    }
+}
+
+/// The market a game was released for, as declared by its ROM/disc metadata.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Region {
+    Japan,
+    NorthAmerica,
+    Europe,
+    Scandinavia,
+    Finland,
+    Denmark,
+    France,
+    Netherlands,
+    Spain,
+    Germany,
+    Italy,
+    China,
+    Indonesia,
+    SouthKorea,
+    Common,
+    Canada,
+    Brazil,
+    Australia,
+    Other(u8),
+}
+
+impl Region {
+    pub fn tv_system(self) -> TvSystem {
+        match self {
+            Region::Japan
+            | Region::NorthAmerica
+            | Region::SouthKorea
+            | Region::Canada
+            | Region::Common
+            | Region::Other(_) => TvSystem::Ntsc,
+            _ => TvSystem::Pal,
+        }
+    }
+}
+
+impl std::fmt::Display for Region {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Region::Japan => "Japan",
+            Region::NorthAmerica => "North America",
+            Region::Europe => "Europe",
+            Region::Scandinavia => "Scandinavia",
+            Region::Finland => "Finland",
+            Region::Denmark => "Denmark",
+            Region::France => "France",
+            Region::Netherlands => "Netherlands",
+            Region::Spain => "Spain",
+            Region::Germany => "Germany",
+            Region::Italy => "Italy",
+            Region::China => "China",
+            Region::Indonesia => "Indonesia",
+            Region::SouthKorea => "South Korea",
+            Region::Common => "Common",
+            Region::Canada => "Canada",
+            Region::Brazil => "Brazil",
+            Region::Australia => "Australia",
+            Region::Other(code) => return write!(f, "Region ${code:02X}"),
+        };
+        write!(f, "{name} ({})", self.tv_system())
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SessionInfo {
     pub system: Arc<str>,

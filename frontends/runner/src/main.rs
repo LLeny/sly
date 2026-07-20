@@ -83,7 +83,7 @@ fn main() {
     let cartridge = Cartridge::new(rom).expect("Failed to parse cartridge");
     let title = cartridge.title().trim().to_string();
     let tv_system = cartridge.region().tv_system();
-    let target_fps = tv_system.frame_rate();
+    let target_fps = snes::cartridge::frame_rate(tv_system);
     let mut snes = Snes::new(cartridge);
     let initial_frame = snes.software_frame().expect("SNES must expose video");
     let (frame_width, frame_height) = (initial_frame.width, initial_frame.height);
