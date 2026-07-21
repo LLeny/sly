@@ -39,4 +39,6 @@ pub struct LauncherState {
 pub struct ModeTimers {
     pub launch_elapsed: f32,
     pub playing_elapsed: f32,
+    pub return_elapsed: f32,
+    pub return_active: bool,
 }

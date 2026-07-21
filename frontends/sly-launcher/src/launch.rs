@@ -21,6 +21,7 @@ const LAUNCH_IRIS_START: f32 = 0.76;
 const LAUNCH_IRIS_DURATION: f32 = 0.68;
 const LAUNCH_DURATION: f32 = 1.54;
 pub const PLAYING_FADE_DURATION: f32 = 0.26;
+const RETURN_IRIS_DURATION: f32 = 0.58;
 pub const IRIS_DEFAULT_CENTER: Vec2 = Vec2::new(0.5, 0.36);
 const LAUNCH_VIEWPORT_Z: i32 = 10;
 
@@ -111,6 +112,7 @@ pub fn update_launch_viewport(
     state: Res<LauncherState>,
     timers: Res<ModeTimers>,
     window: Single<&Window>,
+    ui_scale: Res<UiScale>,
     mut viewport: Single<
         (&mut Node, &mut GlobalZIndex),
         (With<DetailViewport>, Without<DetailFacts>),
@@ -119,7 +121,7 @@ pub fn update_launch_viewport(
     mut camera: Single<&mut Transform, With<DetailCamera>>,
 ) {
     let progress = launch_viewport_progress(timers.launch_elapsed);
-    let window_size = Vec2::new(window.width(), window.height());
+    let window_size = Vec2::new(window.width(), window.height()) / ui_scale.0;
     let (origin, idle_size) = viewport_idle_rect(state.view_mode, window_size);
 
     viewport.0.left = px(-origin.x * progress);
@@ -160,25 +162,39 @@ fn launch_iris_progress(elapsed: f32) -> f32 {
     EaseFunction::SmoothStep.sample_clamped((elapsed - LAUNCH_IRIS_START) / LAUNCH_IRIS_DURATION)
 }
 
+fn return_iris_progress(elapsed: f32) -> f32 {
+    EaseFunction::SmoothStep.sample_clamped(elapsed / RETURN_IRIS_DURATION)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn update_blackout(
+    time: Res<Time>,
     mode: Res<State<LauncherMode>>,
     state: Res<LauncherState>,
-    timers: Res<ModeTimers>,
+    mut timers: ResMut<ModeTimers>,
     blackout: Single<&MaterialNode<IrisBlackoutMaterial>, With<Blackout>>,
     mut materials: ResMut<Assets<IrisBlackoutMaterial>>,
     window: Single<&Window>,
+    ui_scale: Res<UiScale>,
     detail_camera: Single<(&Camera, &GlobalTransform), With<DetailCamera>>,
     viewport: Single<(&ComputedNode, &UiGlobalTransform), With<DetailViewport>>,
     label_surfaces: Query<(&CartridgeLabelSurface, &GlobalTransform, &Aabb)>,
     carts: Query<&DetailCart>,
 ) {
+    let returning = *mode.get() == LauncherMode::Browsing && timers.return_active;
     let (iris, opacity) = match mode.get() {
         LauncherMode::Launching => (launch_iris_progress(timers.launch_elapsed), 1.0),
         LauncherMode::Playing => (
             1.0,
             (1.0 - timers.playing_elapsed / PLAYING_FADE_DURATION).clamp(0.0, 1.0),
         ),
+        LauncherMode::Browsing if returning => {
+            timers.return_elapsed += time.delta_secs();
+            if timers.return_elapsed >= RETURN_IRIS_DURATION {
+                timers.return_active = false;
+            }
+            (1.0 - return_iris_progress(timers.return_elapsed), 1.0)
+        }
         _ => (0.0, 1.0),
     };
 
@@ -186,6 +202,12 @@ pub fn update_blackout(
         .get(&**blackout)
         .map(|material| Vec2::new(material.parameters.y, material.parameters.z))
         .unwrap_or(IRIS_DEFAULT_CENTER);
+
+    let window_size = Vec2::new(window.width(), window.height()) / ui_scale.0;
+    let (viewport_node, viewport_transform) = *viewport;
+    let inverse_scale = viewport_node.inverse_scale_factor();
+    let viewport_size = viewport_node.size() * inverse_scale;
+    let viewport_center = viewport_transform.translation * inverse_scale;
 
     if *mode.get() == LauncherMode::Launching {
         let (camera, camera_transform) = *detail_camera;
@@ -204,15 +226,12 @@ pub fn update_blackout(
                 ),
             )
         {
-            let (viewport_node, viewport_transform) = *viewport;
-            let inverse_scale = viewport_node.inverse_scale_factor();
-            let viewport_size = viewport_node.size() * inverse_scale;
-            let viewport_center = viewport_transform.translation * inverse_scale;
             let viewport_top_left = viewport_center - viewport_size * 0.5;
             let screen_position = viewport_top_left + label_position / camera_size * viewport_size;
-            center = (screen_position / Vec2::new(window.width(), window.height()))
-                .clamp(Vec2::splat(0.01), Vec2::splat(0.99));
+            center = (screen_position / window_size).clamp(Vec2::splat(0.01), Vec2::splat(0.99));
         }
+    } else if returning {
+        center = (viewport_center / window_size).clamp(Vec2::splat(0.01), Vec2::splat(0.99));
     }
 
     let parameters = Vec4::new(iris, center.x, center.y, opacity);

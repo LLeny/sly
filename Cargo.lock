@@ -5922,23 +5922,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
-name = "main-launcher"
-version = "0.1.0"
-dependencies = [
- "audio",
- "bevy",
- "core-model",
- "crc32fast",
- "dirs",
- "image",
- "serde",
- "sha1",
- "snes",
- "ureq",
- "walkdir",
-]
-
-[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8731,6 +8714,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
 dependencies = [
  "version_check",
+]
+
+[[package]]
+name = "sly-launcher"
+version = "0.1.0"
+dependencies = [
+ "audio",
+ "bevy",
+ "core-model",
+ "crc32fast",
+ "dirs",
+ "image",
+ "serde",
+ "sha1",
+ "snes",
+ "ureq",
+ "walkdir",
 ]
 
 [[package]]

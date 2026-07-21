@@ -70,4 +70,4 @@ jobs:
         with:
           key: launcher-native
       - name: Build launcher (native)
-        run: cargo build -p main-launcher
+        run: cargo build -p sly-launcher

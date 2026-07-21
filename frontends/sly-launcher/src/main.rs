@@ -26,16 +26,26 @@ use camera::{
 use game::AudioState;
 use materials::{
     BackgroundUiMaterial, CardboardMaterial, FrostedBubbleMaterial, IrisBlackoutMaterial,
-    PATTERN_NEUTRAL_TINT, contour_parameters, pattern_tint_uniform,
+    PATTERN_NEUTRAL_TINT, contour_parameters, frosted_bubble_parameters, pattern_tint_uniform,
 };
 use state::{LauncherMode, LauncherState, ModeTimers};
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(LogPlugin {
-            filter: "info".into(),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(LogPlugin {
+                    filter: "info".into(),
+                    ..default()
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Sly Launcher".into(),
+                        ..default()
+                    }),
+                    ..default()
+                }),
+        )
         .add_plugins(MaterialPlugin::<CardboardMaterial>::default())
         .add_plugins(UiMaterialPlugin::<BackgroundUiMaterial>::default())
         .add_plugins(UiMaterialPlugin::<FrostedBubbleMaterial>::default())
@@ -79,6 +89,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                ui::update_ui_scale,
                 discovery::poll_discovery,
                 discovery::poll_artwork,
                 scene_textures::refresh_scene_materials,
@@ -140,7 +151,7 @@ fn setup_scene(
     commands.entity(detail_camera).insert(DetailCamera);
 
     let frosted_bubble = frosted_materials.add(FrostedBubbleMaterial {
-        parameters: Vec4::new(24.0, 0.86, 26.0, 1.0),
+        parameters: frosted_bubble_parameters(1.0),
         backdrop_tint: pattern_tint_uniform(PATTERN_NEUTRAL_TINT),
         backdrop_parameters: contour_parameters(),
         shelf_view: library_view,

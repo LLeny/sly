@@ -103,15 +103,19 @@ pub fn exit_playing(
     swap_detail_cart(&mut commands, &mut carts, state.selected, &library, &models);
 }
 
-pub fn resize_game_frame(window: Single<&Window>, mut frame: Single<&mut Node, With<GameFrame>>) {
+pub fn resize_game_frame(
+    window: Single<&Window>,
+    ui_scale: Res<UiScale>,
+    mut frame: Single<&mut Node, With<GameFrame>>,
+) {
     let scale = (window.width() / FRAME_WIDTH as f32)
         .min(window.height() / FRAME_HEIGHT as f32)
         .max(1.0)
         .floor();
 
-    let width = px(FRAME_WIDTH as f32 * scale);
+    let width = px(FRAME_WIDTH as f32 * scale / ui_scale.0);
     if frame.width != width {
         frame.width = width;
-        frame.height = px(FRAME_HEIGHT as f32 * scale);
+        frame.height = px(FRAME_HEIGHT as f32 * scale / ui_scale.0);
     }
 }

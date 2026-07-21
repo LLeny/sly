@@ -96,6 +96,7 @@ pub fn handle_keyboard(
 
                 next_mode.set(LauncherMode::Launching);
                 timers.launch_elapsed = 0.0;
+                timers.return_active = false;
                 state.status = "Booting selected cartridge".into();
 
                 for mut cart in &mut carts {
@@ -107,6 +108,8 @@ pub fn handle_keyboard(
         }
         LauncherMode::Playing if keyboard.just_pressed(KeyCode::Escape) => {
             next_mode.set(LauncherMode::Browsing);
+            timers.return_elapsed = 0.0;
+            timers.return_active = true;
         }
         _ => {}
     }

@@ -1,5 +1,5 @@
 [package]
-name = "main-launcher"
+name = "sly-launcher"
 version = "0.1.0"
 edition = "2024"
 

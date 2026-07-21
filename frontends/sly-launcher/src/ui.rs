@@ -46,10 +46,43 @@ const KEY_SPRITE_BORDER_FRACTION: f32 = 16.0 / 128.0;
 const HINT_BAR_BOTTOM_PX: f32 = EDGE_MARGIN_PX - HINT_KEY_PX * KEY_SPRITE_BORDER_FRACTION;
 const GAME_HINT: Color = Color::srgba(1.0, 1.0, 1.0, 0.30);
 
-const TITLE_BASE_PX: f32 = 27.0;
-const TITLE_RIBBON_BASE_PX: f32 = 34.0;
+const TITLE_BASE_PX: f32 = 31.0;
+const TITLE_RIBBON_BASE_PX: f32 = 38.0;
 const TITLE_SHRINK_REF_CHARS: f32 = 22.0;
-const TITLE_SHRINK_MIN: f32 = 0.6;
+const TITLE_SHRINK_MIN: f32 = 0.72;
+
+const FACT_LABEL_PX: f32 = 15.0;
+const FACT_VALUE_PX: f32 = 16.0;
+const BUBBLE_PILL_PX: f32 = 12.0;
+
+const UI_REFERENCE_SIZE: Vec2 = Vec2::new(1280.0, 720.0);
+const UI_SCALE_MIN: f32 = 0.85;
+const UI_SCALE_MAX: f32 = 2.75;
+
+fn layout_scale(window: Vec2) -> f32 {
+    (window / UI_REFERENCE_SIZE)
+        .min_element()
+        .clamp(UI_SCALE_MIN, UI_SCALE_MAX)
+}
+
+pub fn update_ui_scale(
+    window: Single<&Window>,
+    mut ui_scale: ResMut<UiScale>,
+    bubbles: Query<&MaterialNode<FrostedBubbleMaterial>, With<DetailBubble>>,
+    mut frosted_materials: ResMut<Assets<FrostedBubbleMaterial>>,
+) {
+    let scale = layout_scale(Vec2::new(window.width(), window.height()));
+    if (ui_scale.0 - scale).abs() < 1e-3 {
+        return;
+    }
+    ui_scale.0 = scale;
+
+    for handle in &bubbles {
+        if let Some(mut material) = frosted_materials.get_mut(handle) {
+            material.parameters = crate::materials::frosted_bubble_parameters(scale);
+        }
+    }
+}
 
 #[derive(Component, Default, Clone)]
 pub struct LauncherUi;
@@ -437,7 +470,7 @@ fn detail_bubble(
                     bottom: px(22),
                     padding: UiRect::new(px(2), px(2), px(18), px(0)),
                     flex_direction: FlexDirection::Column,
-                    row_gap: px(9),
+                    row_gap: px(11),
                     border: UiRect::top(px(1)),
                 }
                 template_value(BorderColor::all(Color::srgba(0.42, 0.39, 0.48, 0.28)))
@@ -538,7 +571,7 @@ fn pill_row(mono: Handle<Font>) -> impl Scene {
         Children [
             (
                 Node {
-                    padding: UiRect::axes(px(10), px(3)),
+                    padding: UiRect::axes(px(11), px(4)),
                     border_radius: BorderRadius::MAX,
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
@@ -549,7 +582,7 @@ fn pill_row(mono: Handle<Font>) -> impl Scene {
                     (
                         Text("NTSC")
                         Node { top: px(1) }
-                        text_font(mono.clone(), 11.0)
+                        text_font(mono.clone(), BUBBLE_PILL_PX)
                         TextColor(Color::srgb(0.97, 0.96, 0.99))
                         TvPillText
                     )
@@ -557,7 +590,7 @@ fn pill_row(mono: Handle<Font>) -> impl Scene {
             ),
             (
                 Node {
-                    padding: UiRect::axes(px(10), px(3)),
+                    padding: UiRect::axes(px(11), px(4)),
                     border_radius: BorderRadius::MAX,
                     align_items: AlignItems::Center,
                     justify_content: JustifyContent::Center,
@@ -569,7 +602,7 @@ fn pill_row(mono: Handle<Font>) -> impl Scene {
                     (
                         Text("Region")
                         Node { top: px(1) }
-                        text_font(mono, 11.0)
+                        text_font(mono, BUBBLE_PILL_PX)
                         TextColor(ACCENT)
                         RegionPillText
                         TintedPillText
@@ -628,12 +661,12 @@ fn fact_row(
         Children [
             (
                 Text(label)
-                text_font(sans, 13.0)
+                text_font(sans, FACT_LABEL_PX)
                 TextColor(TEXT_MUTED)
             ),
             (
                 Text("-")
-                text_font(mono, 14.0)
+                text_font(mono, FACT_VALUE_PX)
                 TextColor(TEXT_PRIMARY)
                 FactValue(kind)
             ),
@@ -865,7 +898,7 @@ fn style_facts(mode: ViewMode, node: &mut Node) {
             node.padding = UiRect::new(px(2), px(2), px(18), px(0));
             node.flex_direction = FlexDirection::Column;
             node.align_items = AlignItems::Default;
-            node.row_gap = px(9);
+            node.row_gap = px(11);
             node.column_gap = px(0);
             node.border = UiRect::top(px(1));
         }

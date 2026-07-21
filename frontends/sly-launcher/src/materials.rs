@@ -17,6 +17,19 @@ pub const CONTOURS_SHADER_PATH: &str = "embedded://shaders/contours.wgsl";
 pub const PATTERN_NEUTRAL_TINT: Vec3 = Vec3::new(0.44, 0.46, 0.49);
 const CONTOUR_SCALE_PX: f32 = 430.0;
 
+const FROSTED_BLUR_RADIUS_PX: f32 = 24.0;
+const FROSTED_LIFT: f32 = 0.86;
+const FROSTED_CORNER_RADIUS_PX: f32 = 26.0;
+
+pub fn frosted_bubble_parameters(ui_scale: f32) -> Vec4 {
+    Vec4::new(
+        FROSTED_BLUR_RADIUS_PX * ui_scale,
+        FROSTED_LIFT,
+        FROSTED_CORNER_RADIUS_PX * ui_scale,
+        ui_scale.max(1.0),
+    )
+}
+
 pub type CardboardMaterial = ExtendedMaterial<StandardMaterial, CardboardExtension>;
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
