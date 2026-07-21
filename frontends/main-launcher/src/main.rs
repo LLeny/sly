@@ -5,6 +5,7 @@ mod camera;
 mod cartridge;
 mod discovery;
 mod game;
+mod gamedb;
 mod input;
 mod launch;
 mod library;
@@ -81,9 +82,11 @@ fn main() {
                 discovery::poll_artwork,
                 scene_textures::refresh_scene_materials,
                 input::handle_keyboard,
+                ui::apply_view_mode,
                 shelf::animate_library,
                 cartridge::animate_carts,
                 materials::animate_background_pattern,
+                ui::tint_pills,
                 launch::poll_game_load,
                 launch::advance_launch.run_if(in_state(LauncherMode::Launching)),
                 launch::update_launch_viewport.run_if(in_state(LauncherMode::Launching)),

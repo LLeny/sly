@@ -184,24 +184,37 @@ fn cart_label_image(source: image::RgbaImage, shell: CartShell) -> Image {
     }
 }
 
-fn fit_cover(source: &image::RgbaImage, width: u32, height: u32) -> image::RgbaImage {
-    let scale = (width as f32 / source.width() as f32).max(height as f32 / source.height() as f32);
-    let scaled_width = ((source.width() as f32 * scale).round() as u32).max(width);
-    let scaled_height = ((source.height() as f32 * scale).round() as u32).max(height);
+fn fit_label(source: &image::RgbaImage, width: u32, height: u32) -> image::RgbaImage {
+    let scale = width as f32 / source.width() as f32;
+    let scaled_height = ((source.height() as f32 * scale).round() as u32).max(1);
     let resized = image::imageops::resize(
         source,
-        scaled_width,
+        width,
         scaled_height,
         image::imageops::FilterType::Lanczos3,
     );
-    image::imageops::crop_imm(
-        &resized,
-        (scaled_width - width) / 2,
-        (scaled_height - height) / 2,
-        width,
-        height,
-    )
-    .to_image()
+    if scaled_height >= height {
+        return image::imageops::crop_imm(&resized, 0, (scaled_height - height) / 2, width, height)
+            .to_image();
+    }
+
+    let mut padded = image::RgbaImage::new(width, height);
+    let top_pad = (height - scaled_height) / 2;
+    for y in 0..top_pad {
+        for x in 0..width {
+            padded.put_pixel(x, y, *resized.get_pixel(x, 0));
+        }
+    }
+
+    image::imageops::replace(&mut padded, &resized, 0, top_pad as i64);
+
+    for y in top_pad + scaled_height..height {
+        for x in 0..width {
+            padded.put_pixel(x, y, *resized.get_pixel(x, scaled_height - 1));
+        }
+    }
+
+    padded
 }
 
 fn us_label_image(source: &image::RgbaImage) -> Image {
@@ -209,7 +222,7 @@ fn us_label_image(source: &image::RgbaImage) -> Image {
     const FRONT_HEIGHT: u32 = 374;
     const FOLD_HEIGHT: u32 = 86;
 
-    let front = fit_cover(source, WIDTH, FRONT_HEIGHT);
+    let front = fit_label(source, WIDTH, FRONT_HEIGHT);
     let mut unfolded = image::RgbaImage::new(WIDTH, FRONT_HEIGHT + FOLD_HEIGHT);
     for y in 0..FOLD_HEIGHT {
         for x in 0..WIDTH {
@@ -222,7 +235,7 @@ fn us_label_image(source: &image::RgbaImage) -> Image {
 }
 
 fn jp_pal_label_image(source: &image::RgbaImage) -> Image {
-    mipmapped_artwork_image(fit_cover(source, 1040, 361))
+    mipmapped_artwork_image(fit_label(source, 1040, 361))
 }
 
 fn edge_texture_image(source: &image::RgbaImage, style: BoxStyle) -> Image {

@@ -5,28 +5,45 @@ use bevy::text::{FontSize, FontSourceTemplate};
 use bevy::ui::widget::ViewportNode;
 
 use crate::assets::{Fonts, GameTexture};
+use crate::camera::DetailCamera;
 use crate::discovery::Library;
 use crate::game::{FRAME_HEIGHT, FRAME_WIDTH};
+use crate::gamedb::GameMeta;
 use crate::launch::Blackout;
 use crate::materials::{
     BackgroundPattern, BackgroundUiMaterial, FrostedBubbleMaterial, IrisBlackoutMaterial,
 };
-use crate::state::LauncherState;
+use crate::state::{LauncherState, ViewMode};
 
 pub const BG_ROOT: Color = Color::srgb(0.955, 0.957, 0.962);
 pub const TEXT_PRIMARY: Color = Color::srgb(0.125, 0.11, 0.15);
 pub const TEXT_SECONDARY: Color = Color::srgb(0.21, 0.19, 0.25);
 pub const TEXT_MUTED: Color = Color::srgb(0.33, 0.30, 0.38);
 pub const ACCENT: Color = Color::srgb(0.34, 0.19, 0.52);
+const ACCENT_SOFT: Color = Color::srgba(0.34, 0.19, 0.52, 0.14);
 const CELL_ACTIVE: Color = Color::srgba(0.975, 0.965, 0.99, 0.95);
 const CELL_LETTER: Color = Color::srgba(0.86, 0.83, 0.9, 0.72);
 const CELL_LETTER_EMPTY: Color = Color::srgba(0.86, 0.83, 0.9, 0.26);
 pub const GAME_BLACK: Color = Color::srgb(0.008, 0.008, 0.012);
 
 pub const BUBBLE_MARGIN_PX: f32 = 28.0;
+const ALPHABET_TOP_PX: f32 = 18.0;
+const ALPHABET_HEIGHT_PX: f32 = 30.0;
+pub const BUBBLE_VMARGIN_PX: f32 = ALPHABET_TOP_PX + ALPHABET_HEIGHT_PX + ALPHABET_TOP_PX;
 pub const BUBBLE_WIDTH_FRACTION: f32 = 0.38;
 pub const BUBBLE_VIEWPORT_FRACTION: f32 = 0.52;
 pub const VIEWPORT_Z_IDLE: i32 = 4;
+
+pub const RIBBON_STRIP_LEFT_FRACTION: f32 = 0.20;
+pub const RIBBON_STRIP_TOP_FRACTION: f32 = 0.68;
+pub const RIBBON_STRIP_WIDTH_FRACTION: f32 = 0.60;
+pub const RIBBON_STRIP_HEIGHT_FRACTION: f32 = 0.24;
+pub const RIBBON_VIEWPORT_FRACTION: f32 = 0.30;
+
+const TITLE_BASE_PX: f32 = 27.0;
+const TITLE_RIBBON_BASE_PX: f32 = 34.0;
+const TITLE_SHRINK_REF_CHARS: f32 = 22.0;
+const TITLE_SHRINK_MIN: f32 = 0.6;
 
 #[derive(Component, Default, Clone)]
 pub struct LauncherUi;
@@ -41,12 +58,6 @@ pub struct GameFrame;
 pub struct TitleText;
 
 #[derive(Component, Default, Clone)]
-pub struct RegionText;
-
-#[derive(Component, Default, Clone)]
-pub struct CountText;
-
-#[derive(Component, Default, Clone)]
 pub struct StatusText;
 
 #[derive(Component, Default, Clone)]
@@ -59,7 +70,53 @@ pub struct DetailFacts;
 pub struct DetailBubble;
 
 #[derive(Component, Default, Clone)]
+pub struct AlphabetRail;
+
+#[derive(Component, Default, Clone)]
 pub struct AlphabetIndex;
+
+#[derive(Component, Default, Clone)]
+pub struct FactRow;
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum FactKind {
+    #[default]
+    Released,
+    Developer,
+    Publisher,
+    Genre,
+    Players,
+}
+
+#[derive(Component, Default, Clone)]
+pub struct FactValue(pub FactKind);
+
+impl FactKind {
+    fn value(&self, meta: &GameMeta) -> Option<String> {
+        match self {
+            FactKind::Released => meta.released_label(),
+            FactKind::Developer => meta.developer.clone(),
+            FactKind::Publisher => meta.publisher.clone(),
+            FactKind::Genre => meta.genre.clone(),
+            FactKind::Players => meta.players_label(),
+        }
+    }
+}
+
+#[derive(Component, Default, Clone)]
+pub struct PillRow;
+
+#[derive(Component, Default, Clone)]
+pub struct TvPill;
+
+#[derive(Component, Default, Clone)]
+pub struct RegionPill;
+
+#[derive(Component, Default, Clone)]
+pub struct TvPillText;
+
+#[derive(Component, Default, Clone)]
+pub struct RegionPillText;
 
 #[derive(Component, Default, Clone)]
 pub struct AlphabetLetter(usize);
@@ -150,6 +207,7 @@ fn alphabet_rail(mono: Handle<Font>) -> impl Scene {
             justify_content: JustifyContent::Center,
         }
         GlobalZIndex(5)
+        AlphabetRail
         template_value(Pickable::IGNORE)
         Children [
             (
@@ -213,14 +271,14 @@ fn detail_bubble(
     let sans_semibold = fonts.sans_semibold.clone();
     let mono = fonts.mono_medium.clone();
     let details: Vec<_> = [
-        ("Released", "21 Nov 1994"),
-        ("Developer", "Nintendo R&D4"),
-        ("Publisher", "Nintendo"),
-        ("Genre", "Action / Adventure"),
-        ("Players", "1-2"),
+        ("Released", FactKind::Released),
+        ("Developer", FactKind::Developer),
+        ("Publisher", FactKind::Publisher),
+        ("Genre", FactKind::Genre),
+        ("Players", FactKind::Players),
     ]
     .into_iter()
-    .map(|(label, value)| fact_row(label, value, sans.clone(), mono.clone()))
+    .map(|(label, kind)| fact_row(label, kind, sans.clone(), mono.clone()))
     .collect();
 
     bsn! {
@@ -275,25 +333,24 @@ fn detail_bubble(
                 DetailFacts
                 Children [
                     (
-                        Text("No game selected")
-                        text_font(sans_semibold, 27.0)
-                        TextColor(TEXT_PRIMARY)
-                        TitleText
-                    ),
-                    (
-                        Text("Waiting for library")
-                        text_font(mono.clone(), 13.0)
-                        TextColor(ACCENT)
-                        RegionText
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            flex_wrap: FlexWrap::Wrap,
+                            align_items: AlignItems::Center,
+                            column_gap: px(12),
+                            row_gap: px(6),
+                        }
+                        Children [
+                            (
+                                Text("No game selected")
+                                text_font(sans_semibold, TITLE_BASE_PX)
+                                TextColor(TEXT_PRIMARY)
+                                TitleText
+                            ),
+                            pill_row(mono.clone()),
+                        ]
                     ),
                     {details},
-                    (
-                        Text("00 / 00  -  arrows or A/D browse  -  F flip  -  Enter launch")
-                        text_font(mono.clone(), 12.0)
-                        TextColor(TEXT_MUTED)
-                        Node { margin: UiRect::top(px(8)) }
-                        CountText
-                    ),
                 ]
             ),
         ]
@@ -341,9 +398,88 @@ pub fn blackout_ui(material: Handle<IrisBlackoutMaterial>) -> impl Scene {
     }
 }
 
+fn pill_row(mono: Handle<Font>) -> impl Scene {
+    bsn! {
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: px(8),
+        }
+        PillRow
+        Children [
+            (
+                Node {
+                    padding: UiRect::axes(px(10), px(3)),
+                    border_radius: BorderRadius::MAX,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                }
+                BackgroundColor(ACCENT)
+                TvPill
+                Children [
+                    (
+                        Text("NTSC")
+                        Node { top: px(1) }
+                        text_font(mono.clone(), 11.0)
+                        TextColor(Color::srgb(0.97, 0.96, 0.99))
+                        TvPillText
+                    )
+                ]
+            ),
+            (
+                Node {
+                    padding: UiRect::axes(px(10), px(3)),
+                    border_radius: BorderRadius::MAX,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                }
+                BackgroundColor(ACCENT_SOFT)
+                RegionPill
+                Children [
+                    (
+                        Text("Region")
+                        Node { top: px(1) }
+                        text_font(mono, 11.0)
+                        TextColor(ACCENT)
+                        RegionPillText
+                    )
+                ]
+            ),
+        ]
+    }
+}
+
+pub fn tint_pills(
+    pattern: Res<BackgroundPattern>,
+    mut applied: Local<Option<Vec3>>,
+    mut backgrounds: ParamSet<(
+        Query<&mut BackgroundColor, With<TvPill>>,
+        Query<&mut BackgroundColor, With<RegionPill>>,
+    )>,
+    mut region_text: Query<&mut TextColor, With<RegionPillText>>,
+) {
+    let tint = pattern.tint;
+    if *applied == Some(tint) {
+        return;
+    }
+    *applied = Some(tint);
+
+    let solid = tint * 0.72;
+    let dark = tint * 0.48;
+    if let Ok(mut background) = backgrounds.p0().single_mut() {
+        background.0 = Color::srgb(solid.x, solid.y, solid.z);
+    }
+    if let Ok(mut background) = backgrounds.p1().single_mut() {
+        background.0 = Color::srgba(tint.x, tint.y, tint.z, 0.20);
+    }
+    if let Ok(mut color) = region_text.single_mut() {
+        color.0 = Color::srgb(dark.x, dark.y, dark.z);
+    }
+}
+
 fn fact_row(
     label: &'static str,
-    value: &'static str,
+    kind: FactKind,
     sans: Handle<Font>,
     mono: Handle<Font>,
 ) -> impl Scene {
@@ -352,6 +488,7 @@ fn fact_row(
             width: percent(100),
             justify_content: JustifyContent::SpaceBetween,
         }
+        FactRow
         Children [
             (
                 Text(label)
@@ -359,9 +496,10 @@ fn fact_row(
                 TextColor(TEXT_MUTED)
             ),
             (
-                Text(value)
+                Text("-")
                 text_font(mono, 14.0)
                 TextColor(TEXT_PRIMARY)
+                FactValue(kind)
             ),
         ]
     }
@@ -415,32 +553,249 @@ pub fn update_ui(
     state: Res<LauncherState>,
     library: Res<Library>,
     mut texts: ParamSet<(
-        Query<&mut Text, With<TitleText>>,
-        Query<&mut Text, With<RegionText>>,
-        Query<&mut Text, With<CountText>>,
+        Query<(&mut Text, &mut TextFont), With<TitleText>>,
         Query<&mut Text, With<StatusText>>,
+        Query<&mut Text, With<TvPillText>>,
+        Query<&mut Text, With<RegionPillText>>,
+        Query<(&FactValue, &mut Text)>,
     )>,
 ) {
     if !state.is_changed() && !library.is_changed() {
         return;
     }
 
-    set_text_if_changed(&mut texts.p3(), &state.status);
+    set_text_if_changed(&mut texts.p1(), &state.status);
 
     let Some(entry) = library.entries.get(state.selected) else {
         return;
     };
 
-    set_text_if_changed(&mut texts.p0(), &entry.title);
-    set_text_if_changed(&mut texts.p1(), &entry.region.to_string());
-    set_text_if_changed(
-        &mut texts.p2(),
-        &format!(
-            "{:02} / {:02}  -  arrows or A/D browse  -  F flip  -  Enter launch",
-            state.selected + 1,
-            library.entries.len()
-        ),
-    );
+    let region = entry.region.to_string();
+    let region_name = region.split(" (").next().unwrap_or(&region).to_string();
+
+    if let Ok((mut text, mut font)) = texts.p0().single_mut() {
+        if text.0 != entry.title {
+            entry.title.clone_into(&mut text.0);
+        }
+
+        let size = title_font_size(state.view_mode, entry.title.chars().count());
+        if font.font_size != FontSize::Px(size) {
+            font.font_size = FontSize::Px(size);
+        }
+    }
+    set_text_if_changed(&mut texts.p2(), &entry.region.tv_system().to_string());
+    set_text_if_changed(&mut texts.p3(), &region_name);
+
+    let meta = &entry.meta;
+    for (fact, mut text) in texts.p4().iter_mut() {
+        let value = fact.0.value(meta).unwrap_or_else(|| "-".to_string());
+        if text.0 != value {
+            text.0 = value;
+        }
+    }
+}
+
+fn title_font_size(mode: ViewMode, title_length: usize) -> f32 {
+    let base = if mode == ViewMode::Ribbon {
+        TITLE_RIBBON_BASE_PX
+    } else {
+        TITLE_BASE_PX
+    };
+    let factor = (TITLE_SHRINK_REF_CHARS / title_length.max(1) as f32).clamp(TITLE_SHRINK_MIN, 1.0);
+    base * factor
+}
+
+pub fn viewport_idle_rect(mode: ViewMode, window: Vec2) -> (Vec2, Vec2) {
+    match mode {
+        ViewMode::Row | ViewMode::Column => {
+            let width = window.x * BUBBLE_WIDTH_FRACTION;
+            let origin = Vec2::new(window.x - BUBBLE_MARGIN_PX - width, BUBBLE_VMARGIN_PX);
+            let size = Vec2::new(
+                width,
+                (window.y - 2.0 * BUBBLE_VMARGIN_PX).max(1.0) * BUBBLE_VIEWPORT_FRACTION,
+            );
+            (origin, size)
+        }
+        ViewMode::Ribbon => {
+            let origin = Vec2::new(
+                window.x * RIBBON_STRIP_LEFT_FRACTION,
+                window.y * RIBBON_STRIP_TOP_FRACTION,
+            );
+            let size = Vec2::new(
+                window.x * RIBBON_STRIP_WIDTH_FRACTION * RIBBON_VIEWPORT_FRACTION,
+                window.y * RIBBON_STRIP_HEIGHT_FRACTION,
+            );
+            (origin, size)
+        }
+    }
+}
+
+pub fn detail_camera_transform(mode: ViewMode) -> Transform {
+    let focus = Vec3::new(0.0, 0.025, 0.0);
+    match mode {
+        ViewMode::Row | ViewMode::Column => {
+            Transform::from_xyz(0.0, 0.035, 0.50).looking_at(focus, Vec3::Y)
+        }
+        ViewMode::Ribbon => Transform::from_xyz(0.0, 0.030, 0.50).looking_at(focus, Vec3::Y),
+    }
+}
+
+pub fn style_viewport_idle(mode: ViewMode, node: &mut Node) {
+    node.left = percent(0);
+    node.top = percent(0);
+
+    match mode {
+        ViewMode::Row | ViewMode::Column => {
+            node.width = percent(100);
+            node.height = percent(BUBBLE_VIEWPORT_FRACTION * 100.0);
+        }
+        ViewMode::Ribbon => {
+            node.width = percent(RIBBON_VIEWPORT_FRACTION * 100.0);
+            node.height = percent(100);
+        }
+    }
+}
+
+fn style_alphabet_outer(mode: ViewMode, node: &mut Node) {
+    match mode {
+        ViewMode::Column => {
+            node.left = px(18);
+            node.right = Val::Auto;
+            node.top = px(0);
+            node.bottom = px(0);
+            node.width = px(30);
+            node.height = Val::Auto;
+        }
+        ViewMode::Row | ViewMode::Ribbon => {
+            node.left = px(0);
+            node.right = px(0);
+            node.top = px(18);
+            node.bottom = Val::Auto;
+            node.width = Val::Auto;
+            node.height = px(30);
+        }
+    }
+}
+
+fn style_alphabet_inner(mode: ViewMode, node: &mut Node) {
+    match mode {
+        ViewMode::Column => {
+            node.width = px(30);
+            node.height = Val::Auto;
+            node.flex_direction = FlexDirection::Column;
+            node.padding = UiRect::vertical(px(4));
+            node.row_gap = px(2);
+            node.column_gap = px(0);
+        }
+        ViewMode::Row | ViewMode::Ribbon => {
+            node.width = Val::Auto;
+            node.height = px(30);
+            node.flex_direction = FlexDirection::Row;
+            node.padding = UiRect::horizontal(px(4));
+            node.row_gap = px(0);
+            node.column_gap = px(2);
+        }
+    }
+}
+
+fn style_bubble(mode: ViewMode, node: &mut Node) {
+    match mode {
+        ViewMode::Row | ViewMode::Column => {
+            node.left = Val::Auto;
+            node.right = px(BUBBLE_MARGIN_PX);
+            node.top = px(BUBBLE_VMARGIN_PX);
+            node.bottom = px(BUBBLE_VMARGIN_PX);
+            node.width = percent(BUBBLE_WIDTH_FRACTION * 100.0);
+            node.height = Val::Auto;
+        }
+        ViewMode::Ribbon => {
+            node.left = percent(RIBBON_STRIP_LEFT_FRACTION * 100.0);
+            node.right = Val::Auto;
+            node.top = percent(RIBBON_STRIP_TOP_FRACTION * 100.0);
+            node.bottom = Val::Auto;
+            node.width = percent(RIBBON_STRIP_WIDTH_FRACTION * 100.0);
+            node.height = percent(RIBBON_STRIP_HEIGHT_FRACTION * 100.0);
+        }
+    }
+}
+
+fn style_facts(mode: ViewMode, node: &mut Node) {
+    match mode {
+        ViewMode::Row | ViewMode::Column => {
+            node.left = px(26);
+            node.right = px(26);
+            node.top = percent(53);
+            node.bottom = px(22);
+            node.padding = UiRect::new(px(2), px(2), px(18), px(0));
+            node.flex_direction = FlexDirection::Column;
+            node.align_items = AlignItems::Default;
+            node.row_gap = px(9);
+            node.column_gap = px(0);
+            node.border = UiRect::top(px(1));
+        }
+        ViewMode::Ribbon => {
+            node.left = percent(RIBBON_VIEWPORT_FRACTION * 100.0 + 2.0);
+            node.right = px(24);
+            node.top = px(0);
+            node.bottom = px(0);
+            node.padding = UiRect::all(px(0));
+            node.flex_direction = FlexDirection::Row;
+            node.align_items = AlignItems::Center;
+            node.row_gap = px(0);
+            node.column_gap = px(14);
+            node.border = UiRect::all(px(0));
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+pub fn apply_view_mode(
+    state: Res<LauncherState>,
+    mut applied: Local<Option<ViewMode>>,
+    mut nodes: ParamSet<(
+        Query<&mut Node, With<AlphabetRail>>,
+        Query<&mut Node, With<AlphabetIndex>>,
+        Query<&mut Node, With<DetailBubble>>,
+        Query<&mut Node, With<DetailViewport>>,
+        Query<&mut Node, With<DetailFacts>>,
+        Query<&mut Node, With<FactRow>>,
+    )>,
+    mut detail_camera: Query<&mut Transform, With<DetailCamera>>,
+) {
+    let mode = state.view_mode;
+    if *applied == Some(mode) {
+        return;
+    }
+    *applied = Some(mode);
+
+    if let Ok(mut camera) = detail_camera.single_mut() {
+        *camera = detail_camera_transform(mode);
+    }
+
+    if let Ok(mut outer) = nodes.p0().single_mut() {
+        style_alphabet_outer(mode, &mut outer);
+    }
+    if let Ok(mut inner) = nodes.p1().single_mut() {
+        style_alphabet_inner(mode, &mut inner);
+    }
+    if let Ok(mut bubble) = nodes.p2().single_mut() {
+        style_bubble(mode, &mut bubble);
+    }
+    if let Ok(mut viewport) = nodes.p3().single_mut() {
+        style_viewport_idle(mode, &mut viewport);
+    }
+    if let Ok(mut facts) = nodes.p4().single_mut() {
+        style_facts(mode, &mut facts);
+    }
+
+    let bubble_details = if mode == ViewMode::Ribbon {
+        Display::None
+    } else {
+        Display::Flex
+    };
+    for mut node in nodes.p5().iter_mut() {
+        node.display = bubble_details;
+    }
 }
 
 fn title_alphabet_index(title: &str) -> usize {

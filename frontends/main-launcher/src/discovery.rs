@@ -113,7 +113,9 @@ pub fn poll_artwork(
         };
         let label = processed.label.map(|image| images.add(image));
 
-        if let Some(entry) = library.entries.get_mut(task.index) {
+        if let Some(entry) = library.entries.get_mut(task.index)
+            && !entry.meta.has_normalized_title()
+        {
             entry.title = processed.title;
         }
         if let Some(slot) = library.art.get_mut(task.index) {

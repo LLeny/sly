@@ -5928,6 +5928,7 @@ dependencies = [
  "audio",
  "bevy",
  "core-model",
+ "crc32fast",
  "image",
  "serde",
  "sha1",

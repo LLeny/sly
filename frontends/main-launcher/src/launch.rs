@@ -10,10 +10,10 @@ use crate::cartridge::{CartMotion, DetailCart};
 use crate::game::{AudioState, GameSession};
 use crate::materials::IrisBlackoutMaterial;
 use crate::scene_textures::CartridgeLabelSurface;
-use crate::state::{LauncherMode, LauncherState, ModeTimers};
+use crate::state::{LauncherMode, LauncherState, ModeTimers, ViewMode};
 use crate::ui::{
-    BUBBLE_MARGIN_PX, BUBBLE_VIEWPORT_FRACTION, BUBBLE_WIDTH_FRACTION, DetailFacts, DetailViewport,
-    GameUi, LauncherUi, VIEWPORT_Z_IDLE, show_game_screen,
+    DetailFacts, DetailViewport, GameUi, LauncherUi, VIEWPORT_Z_IDLE, detail_camera_transform,
+    show_game_screen, style_viewport_idle, viewport_idle_rect,
 };
 
 pub const LAUNCH_CLOSEUP_DURATION: f32 = 0.64;
@@ -108,6 +108,7 @@ pub fn enter_playing(
 
 #[allow(clippy::type_complexity)]
 pub fn update_launch_viewport(
+    state: Res<LauncherState>,
     timers: Res<ModeTimers>,
     window: Single<&Window>,
     mut viewport: Single<
@@ -115,37 +116,40 @@ pub fn update_launch_viewport(
         (With<DetailViewport>, Without<DetailFacts>),
     >,
     mut facts: Single<&mut Node, (With<DetailFacts>, Without<DetailViewport>)>,
+    mut camera: Single<&mut Transform, With<DetailCamera>>,
 ) {
     let progress = launch_viewport_progress(timers.launch_elapsed);
-    let window_width = window.width();
-    let window_height = window.height();
-    let bubble_width = window_width * BUBBLE_WIDTH_FRACTION;
-    let bubble_height = (window_height - 2.0 * BUBBLE_MARGIN_PX).max(1.0);
-    let bubble_left = window_width - BUBBLE_MARGIN_PX - bubble_width;
-    let initial_height = bubble_height * BUBBLE_VIEWPORT_FRACTION;
+    let window_size = Vec2::new(window.width(), window.height());
+    let (origin, idle_size) = viewport_idle_rect(state.view_mode, window_size);
 
-    viewport.0.left = px(-bubble_left * progress);
-    viewport.0.top = px(-BUBBLE_MARGIN_PX * progress);
-    viewport.0.width = px(bubble_width + (window_width - bubble_width) * progress);
-    viewport.0.height = px(initial_height + (window_height - initial_height) * progress);
+    viewport.0.left = px(-origin.x * progress);
+    viewport.0.top = px(-origin.y * progress);
+    viewport.0.width = px(idle_size.x + (window_size.x - idle_size.x) * progress);
+    viewport.0.height = px(idle_size.y + (window_size.y - idle_size.y) * progress);
     viewport.1.0 = LAUNCH_VIEWPORT_Z;
     facts.display = Display::None;
+
+    let default_camera = detail_camera_transform(ViewMode::Row);
+    camera.translation = camera
+        .translation
+        .lerp(default_camera.translation, progress);
+    camera.rotation = camera.rotation.slerp(default_camera.rotation, progress);
 }
 
 #[allow(clippy::type_complexity)]
 pub fn restore_detail_viewport(
+    state: Res<LauncherState>,
     mut viewport: Single<
         (&mut Node, &mut GlobalZIndex),
         (With<DetailViewport>, Without<DetailFacts>),
     >,
     mut facts: Single<&mut Node, (With<DetailFacts>, Without<DetailViewport>)>,
+    mut camera: Single<&mut Transform, With<DetailCamera>>,
 ) {
-    viewport.0.left = percent(0);
-    viewport.0.top = percent(0);
-    viewport.0.width = percent(100);
-    viewport.0.height = percent(BUBBLE_VIEWPORT_FRACTION * 100.0);
+    style_viewport_idle(state.view_mode, &mut viewport.0);
     viewport.1.0 = VIEWPORT_Z_IDLE;
     facts.display = Display::Flex;
+    **camera = detail_camera_transform(state.view_mode);
 }
 
 fn launch_viewport_progress(elapsed: f32) -> f32 {

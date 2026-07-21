@@ -6,6 +6,8 @@ use sha1::{Digest, Sha1};
 use snes::Cartridge;
 use walkdir::WalkDir;
 
+use crate::gamedb::{self, GameMeta};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CartShell {
     Us,
@@ -42,6 +44,7 @@ pub struct LibraryEntry {
     pub sha1: String,
     pub title: String,
     pub region: Region,
+    pub meta: GameMeta,
 }
 
 impl LibraryEntry {
@@ -108,16 +111,21 @@ fn read_entry(path: &Path) -> Result<LibraryEntry, String> {
             write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
             hex
         });
+    let crc = crc32fast::hash(&bytes);
     let cartridge = Cartridge::new(bytes).map_err(|err| format!("invalid SNES ROM: {err}"))?;
+    let meta = gamedb::lookup(&sha1, crc);
+    let normalized_title = meta.display_title();
     let header_title = cartridge.title().trim().to_string();
-    let title = if header_title.is_empty() {
-        path.file_stem()
-            .unwrap_or(path.as_os_str())
-            .to_string_lossy()
-            .into_owned()
-    } else {
-        header_title
-    };
+    let title = normalized_title.unwrap_or_else(|| {
+        if header_title.is_empty() {
+            path.file_stem()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            header_title
+        }
+    });
     let region = cartridge.region();
 
     Ok(LibraryEntry {
@@ -125,6 +133,7 @@ fn read_entry(path: &Path) -> Result<LibraryEntry, String> {
         sha1,
         title,
         region,
+        meta,
     })
 }
 

@@ -30,6 +30,11 @@ pub fn handle_keyboard(
                 state.box_flipped = !state.box_flipped;
             }
 
+            if keyboard.just_pressed(KeyCode::Tab) {
+                state.view_mode = state.view_mode.next();
+                commands.spawn(ui_sound(ui_sounds.scroll.clone()));
+            }
+
             if library.entries.is_empty() {
                 return;
             }

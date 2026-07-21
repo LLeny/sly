@@ -6,13 +6,22 @@ use crate::assets::Models;
 use crate::camera::SHELF_LAYER;
 use crate::library::BoxStyle;
 use crate::scene_textures::{BoxTextures, SceneRenderLayer};
-use crate::state::LauncherState;
+use crate::state::{LauncherState, ViewMode};
 
 const BOX_PITCH: f32 = 0.053;
 const BOX_SCALE: f32 = 1.48;
 const ROW_FOCUS_ANCHOR_X: f32 = -0.155;
 const BOX_FOCUS_X: f32 = 0.018;
 const BOX_FOCUS_Z: f32 = 0.135;
+const COLUMN_PITCH: f32 = 0.050;
+const COLUMN_X: f32 = -0.16;
+const COLUMN_TOP_Y: f32 = 0.26;
+const COLUMN_Z: f32 = 0.02;
+const COLUMN_FOCUS: Vec3 = Vec3::new(-0.12, -0.05, 0.175);
+const COLUMN_SPINE_TILT: f32 = 0.12;
+const JP_SPINE_ALIGN: f32 = 0.0155;
+const RIBBON_ROW_Y: f32 = 0.073;
+const RIBBON_ROW_SCALE: f32 = 0.95;
 const BOX_WAVE_HEIGHT: f32 = 0.004;
 const BOX_FOCUS_WAVE_HEIGHT: f32 = 0.007;
 const BOX_SWAY_ANGLE: f32 = 0.028;
@@ -68,54 +77,120 @@ pub fn animate_library(
 ) {
     let dt = time.delta_secs();
     let elapsed = time.elapsed_secs();
+    let mode = state.view_mode;
+    let row_target = row_focus_target(mode, state.selected);
 
     if let Ok(mut transform) = row.single_mut() {
-        let target = ROW_FOCUS_ANCHOR_X - state.selected as f32 * BOX_PITCH;
         transform
             .translation
-            .x
-            .smooth_nudge(&target, APPROACH_RATE, dt);
+            .smooth_nudge(&row_target, APPROACH_RATE, dt);
+        transform
+            .scale
+            .smooth_nudge(&Vec3::splat(row_display_scale(mode)), APPROACH_RATE, dt);
     }
 
+    let slot_axis = match mode {
+        ViewMode::Row | ViewMode::Ribbon => Vec3::new(BOX_PITCH, 0.0, 0.0),
+        ViewMode::Column => Vec3::new(0.0, -COLUMN_PITCH, 0.0),
+    };
+    let idle_western = mode_idle_rotation(mode, BoxStyle::Western);
+    let idle_japanese = mode_idle_rotation(mode, BoxStyle::Japanese);
+    let base_western = box_base_scale(BoxStyle::Western) * BOX_SCALE;
+    let base_japanese = box_base_scale(BoxStyle::Japanese) * BOX_SCALE;
+
     for (index, style, mut transform) in &mut boxes {
+        let slot = slot_axis * (index.0 as f32);
+        let (idle_rotation, base_scale, depth_nudge) = match style.0 {
+            BoxStyle::Western => (idle_western, base_western, 0.0),
+            BoxStyle::Japanese => (idle_japanese, base_japanese, JP_SPINE_ALIGN),
+        };
+
         if index.0.abs_diff(state.selected) > ANIMATED_WINDOW {
+            transform.translation = slot + Vec3::new(0.0, 0.0, depth_nudge);
+            transform.rotation = idle_rotation;
+            transform.scale = base_scale;
             continue;
         }
 
         let selected = index.0 == state.selected;
         let sway = box_sway(index.0, elapsed, selected);
-        let target_rotation = if selected {
+        let wave = box_wave(index.0, elapsed, selected);
+        let target_translation;
+        let target_rotation;
+        let target_scale;
+
+        if selected {
             let face = if state.box_flipped {
-                Quat::from_rotation_y(PI) * focused_box_rotation(style.0)
+                Quat::from_rotation_y(PI) * flipped_box_rotation(style.0)
             } else {
                 focused_box_rotation(style.0)
             };
-            Quat::from_rotation_y(sway)
+            target_rotation = Quat::from_rotation_y(sway)
                 * face
-                * Quat::from_rotation_z((elapsed * 0.65).cos() * 0.008)
+                * Quat::from_rotation_z((elapsed * 0.65).cos() * 0.008);
+            let bob_z = (elapsed * 1.05).cos() * 0.003;
+            target_translation = match mode {
+                ViewMode::Row => Vec3::new(slot.x + BOX_FOCUS_X, wave, BOX_FOCUS_Z + bob_z),
+                ViewMode::Ribbon => Vec3::new(slot.x, wave, BOX_FOCUS_Z + bob_z),
+                ViewMode::Column => COLUMN_FOCUS - row_target + Vec3::new(0.0, wave, bob_z),
+            };
+            target_scale = base_scale * 1.065;
         } else {
-            Quat::from_rotation_y(sway) * idle_box_rotation()
-        };
-        let target_x = index.0 as f32 * BOX_PITCH + if selected { BOX_FOCUS_X } else { 0.0 };
-        let target_y = box_wave(index.0, elapsed, selected);
-        let target_z = if selected {
-            BOX_FOCUS_Z + (elapsed * 1.05).cos() * 0.003
-        } else {
-            0.0
-        };
-        let target_scale = box_base_scale(style.0) * BOX_SCALE * if selected { 1.065 } else { 1.0 };
+            target_rotation = Quat::from_rotation_y(sway) * idle_rotation;
+            target_translation = match mode {
+                ViewMode::Row | ViewMode::Ribbon => Vec3::new(slot.x, wave, depth_nudge),
+                ViewMode::Column => Vec3::new(wave, slot.y, depth_nudge),
+            };
+            target_scale = base_scale;
+        }
 
-        transform.translation.smooth_nudge(
-            &Vec3::new(target_x, target_y, target_z),
-            APPROACH_RATE,
-            dt,
-        );
+        transform
+            .translation
+            .smooth_nudge(&target_translation, APPROACH_RATE, dt);
         transform
             .rotation
             .smooth_nudge(&target_rotation, APPROACH_RATE, dt);
         transform
             .scale
             .smooth_nudge(&target_scale, APPROACH_RATE, dt);
+    }
+}
+
+fn row_focus_target(mode: ViewMode, selected: usize) -> Vec3 {
+    match mode {
+        ViewMode::Row => Vec3::new(ROW_FOCUS_ANCHOR_X - selected as f32 * BOX_PITCH, 0.0, 0.0),
+        ViewMode::Column => Vec3::new(
+            COLUMN_X,
+            COLUMN_TOP_Y + selected as f32 * COLUMN_PITCH,
+            COLUMN_Z,
+        ),
+        ViewMode::Ribbon => Vec3::new(
+            -(selected as f32) * BOX_PITCH * RIBBON_ROW_SCALE,
+            RIBBON_ROW_Y,
+            0.0,
+        ),
+    }
+}
+
+fn row_display_scale(mode: ViewMode) -> f32 {
+    match mode {
+        ViewMode::Ribbon => RIBBON_ROW_SCALE,
+        _ => 1.0,
+    }
+}
+
+fn mode_idle_rotation(mode: ViewMode, style: BoxStyle) -> Quat {
+    match mode {
+        ViewMode::Column => {
+            let flatten = match style {
+                BoxStyle::Western => -FRAC_PI_2,
+                BoxStyle::Japanese => FRAC_PI_2,
+            };
+            Quat::from_rotation_x(COLUMN_SPINE_TILT)
+                * Quat::from_rotation_z(flatten)
+                * idle_box_rotation()
+        }
+        _ => idle_box_rotation(),
     }
 }
 
@@ -150,6 +225,14 @@ fn focused_box_rotation(style: BoxStyle) -> Quat {
     match style {
         BoxStyle::Western => tilt,
         BoxStyle::Japanese => tilt * Quat::from_rotation_z(FRAC_PI_2),
+    }
+}
+
+fn flipped_box_rotation(style: BoxStyle) -> Quat {
+    let tilt = Quat::from_euler(EulerRot::XYZ, 0.018, 0.11, 0.026);
+    match style {
+        BoxStyle::Western => tilt,
+        BoxStyle::Japanese => tilt * Quat::from_rotation_z(-FRAC_PI_2),
     }
 }
 
