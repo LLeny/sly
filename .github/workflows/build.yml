@@ -9,8 +9,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  web:
-    name: Build (wasm)
+  debugger-wasm:
+    name: Build debugger (WASM)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,15 +19,15 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
-          key: web
+          key: debugger-wasm
       - name: Format check
         run: cargo fmt --all --check
       - name: Build debugger (wasm32)
         if: github.event_name == 'pull_request'
         run: cargo build -p debugger --target wasm32-unknown-unknown
 
-  native:
-    name: Build (native Linux)
+  debugger-native:
+    name: Build debugger (Linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +44,30 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
-          key: native
+          key: debugger-native
       - name: Build debugger (native)
         run: cargo build -p debugger
+
+  launcher:
+    name: Build launcher
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init --depth 1 submodules/chipi-spec submodules/libretro-database
+      - name: Install Bevy native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libasound2-dev libudev-dev \
+            libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxrandr-dev \
+            libxcursor-dev libxext-dev libxfixes-dev \
+            libfontconfig1-dev libfreetype6-dev \
+            libegl-dev libgl1-mesa-dev
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: launcher-native
+      - name: Build launcher (native)
+        run: cargo build -p main-launcher

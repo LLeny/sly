@@ -45,6 +45,7 @@ fn main() {
         .init_resource::<LauncherState>()
         .init_resource::<ModeTimers>()
         .init_resource::<discovery::Library>()
+        .init_resource::<shelf::RevealBurst>()
         .init_resource::<launch::PendingGame>()
         .insert_non_send(AudioState(None))
         .add_systems(
@@ -101,9 +102,11 @@ fn main() {
         .run();
 }
 
+#[allow(clippy::too_many_arguments)]
 fn setup_scene(
     mut commands: Commands,
     fonts: Res<assets::Fonts>,
+    prompts: Res<assets::PromptIcons>,
     game_texture: Res<assets::GameTexture>,
     background_pattern: Res<materials::BackgroundPattern>,
     mut images: ResMut<Assets<Image>>,
@@ -156,11 +159,12 @@ fn setup_scene(
 
     commands.spawn_scene(ui::launcher_ui(
         &fonts,
+        &prompts,
         &background_pattern,
         library_camera,
         detail_camera,
         frosted_bubble,
     ));
-    commands.spawn_scene(ui::game_ui(&game_texture));
+    commands.spawn_scene(ui::game_ui(&game_texture, &fonts, &prompts));
     commands.spawn_scene(ui::blackout_ui(iris_blackout));
 }

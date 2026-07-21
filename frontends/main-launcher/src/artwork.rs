@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -33,6 +34,10 @@ struct Metadata {
 }
 
 pub fn fetch_bundle(sha1: &str, region: Region) -> Result<ArtworkBundle, String> {
+    if let Some(cached) = load_cached_bundle(sha1) {
+        return Ok(cached);
+    }
+
     let metadata: Metadata = get(sha1)
         .map_err(|err| format!("metadata unavailable: {err}"))?
         .body_mut()
@@ -40,13 +45,70 @@ pub fn fetch_bundle(sha1: &str, region: Region) -> Result<ArtworkBundle, String>
         .map_err(|err| format!("invalid artwork metadata: {err}"))?;
 
     let variants = preferred_art_variants(region);
-    Ok(ArtworkBundle {
+    let bundle = ArtworkBundle {
         title: metadata.title,
         front: fetch_kind(sha1, &metadata.art, "box-front", variants),
         back: fetch_kind(sha1, &metadata.art, "box-back", variants),
         spine: fetch_kind(sha1, &metadata.art, "box-spine", variants),
         label: fetch_kind(sha1, &metadata.art, "support-texture", variants),
+    };
+
+    if bundle.front.is_some() {
+        write_cached_bundle(sha1, &bundle);
+    }
+    Ok(bundle)
+}
+
+fn cache_root() -> PathBuf {
+    dirs::cache_dir()
+        .map(|dir| dir.join("sly").join("artwork"))
+        .unwrap_or_else(|| PathBuf::from("artwork"))
+}
+
+fn bundle_cache_dir(sha1: &str) -> PathBuf {
+    cache_root().join(sha1)
+}
+
+fn load_cached_bundle(sha1: &str) -> Option<ArtworkBundle> {
+    let dir = bundle_cache_dir(sha1);
+    let front = read_cache_bytes(&dir.join("front"))?;
+    let title = std::fs::read_to_string(dir.join("title"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    Some(ArtworkBundle {
+        title,
+        front: Some(front),
+        back: read_cache_bytes(&dir.join("back")),
+        spine: read_cache_bytes(&dir.join("spine")),
+        label: read_cache_bytes(&dir.join("label")),
     })
+}
+
+fn read_cache_bytes(path: &std::path::Path) -> Option<Vec<u8>> {
+    std::fs::read(path).ok().filter(|bytes| !bytes.is_empty())
+}
+
+fn write_cached_bundle(sha1: &str, bundle: &ArtworkBundle) {
+    let dir = bundle_cache_dir(sha1);
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        eprintln!("artwork cache: failed to create {}: {err}", dir.display());
+        return;
+    }
+    let write = |name: &str, bytes: &Option<Vec<u8>>| {
+        if let Some(bytes) = bytes
+            && let Err(err) = std::fs::write(dir.join(name), bytes)
+        {
+            eprintln!("artwork cache: failed to write {name} for {sha1}: {err}");
+        }
+    };
+    write("front", &bundle.front);
+    write("back", &bundle.back);
+    write("spine", &bundle.spine);
+    write("label", &bundle.label);
+    if let Err(err) = std::fs::write(dir.join("title"), &bundle.title) {
+        eprintln!("artwork cache: failed to write title for {sha1}: {err}");
+    }
 }
 
 fn get(path_and_query: &str) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {

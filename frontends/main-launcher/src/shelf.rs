@@ -30,6 +30,12 @@ const ANIMATED_WINDOW: usize = 16;
 const BOB_SPEED: f32 = 1.35;
 const BOB_STAGGER: f32 = 0.58;
 const APPROACH_RATE: f32 = 11.0;
+const ENTER_RATE: f32 = 2.4;
+const ENTER_SCALE_FLOOR: f32 = 0.62;
+const ENTER_DEPTH: f32 = 0.045;
+const STAGGER_PER: f32 = 0.03;
+const STAGGER_CAP: usize = 24;
+const REVEAL_BURST_WINDOW: f32 = 0.3;
 
 #[derive(Component)]
 pub struct RowRoot;
@@ -39,6 +45,39 @@ pub struct BoxIndex(pub usize);
 
 #[derive(Component, Clone, Copy)]
 pub struct ShelfBoxStyle(pub BoxStyle);
+
+#[derive(Component)]
+pub struct BoxEntrance {
+    pub progress: f32,
+    pub delay: f32,
+}
+
+#[derive(Resource)]
+pub struct RevealBurst {
+    last_reveal: f32,
+    count: usize,
+}
+
+impl Default for RevealBurst {
+    fn default() -> Self {
+        Self {
+            last_reveal: f32::NEG_INFINITY,
+            count: 0,
+        }
+    }
+}
+
+impl RevealBurst {
+    pub fn next_delay(&mut self, now: f32) -> f32 {
+        if now - self.last_reveal <= REVEAL_BURST_WINDOW {
+            self.count += 1;
+        } else {
+            self.count = 0;
+        }
+        self.last_reveal = now;
+        self.count.min(STAGGER_CAP) as f32 * STAGGER_PER
+    }
+}
 
 pub fn spawn_row(commands: &mut Commands) {
     commands.spawn((Transform::default(), Visibility::default(), RowRoot));
@@ -54,9 +93,9 @@ pub fn spawn_box(
     let entity = commands
         .spawn((
             WorldAssetRoot(models.box_scene.clone()),
-            Transform::from_xyz(index as f32 * BOX_PITCH, 0.0, 0.0)
+            Transform::from_xyz(0.0, 0.0, -ENTER_DEPTH)
                 .with_rotation(idle_box_rotation())
-                .with_scale(box_base_scale(style) * BOX_SCALE),
+                .with_scale(box_base_scale(style) * BOX_SCALE * ENTER_SCALE_FLOOR),
             BoxIndex(index),
             ShelfBoxStyle(style),
             BoxTextures::default(),
@@ -73,12 +112,32 @@ pub fn animate_library(
     time: Res<Time>,
     state: Res<LauncherState>,
     mut row: Query<&mut Transform, (With<RowRoot>, Without<BoxIndex>)>,
-    mut boxes: Query<(&BoxIndex, &ShelfBoxStyle, &mut Transform), Without<RowRoot>>,
+    mut boxes: Query<
+        (
+            &BoxIndex,
+            &ShelfBoxStyle,
+            &mut Transform,
+            Option<&mut BoxEntrance>,
+        ),
+        Without<RowRoot>,
+    >,
+    mut revealed: Local<Vec<usize>>,
 ) {
     let dt = time.delta_secs();
     let elapsed = time.elapsed_secs();
     let mode = state.view_mode;
-    let row_target = row_focus_target(mode, state.selected);
+
+    revealed.clear();
+    revealed.extend(
+        boxes
+            .iter()
+            .filter_map(|(index, _, _, entrance)| entrance.is_some().then_some(index.0)),
+    );
+    revealed.sort_unstable();
+    let slot_of = |index: usize| revealed.partition_point(|&r| r < index);
+
+    let selected_slot = slot_of(state.selected);
+    let row_target = row_focus_target(mode, selected_slot);
 
     if let Ok(mut transform) = row.single_mut() {
         transform
@@ -98,26 +157,40 @@ pub fn animate_library(
     let base_western = box_base_scale(BoxStyle::Western) * BOX_SCALE;
     let base_japanese = box_base_scale(BoxStyle::Japanese) * BOX_SCALE;
 
-    for (index, style, mut transform) in &mut boxes {
-        let slot = slot_axis * (index.0 as f32);
+    for (index, style, mut transform, entrance) in &mut boxes {
+        let slot_index = slot_of(index.0);
+        let slot = slot_axis * (slot_index as f32);
         let (idle_rotation, base_scale, depth_nudge) = match style.0 {
             BoxStyle::Western => (idle_western, base_western, 0.0),
             BoxStyle::Japanese => (idle_japanese, base_japanese, JP_SPINE_ALIGN),
         };
 
-        if index.0.abs_diff(state.selected) > ANIMATED_WINDOW {
-            transform.translation = slot + Vec3::new(0.0, 0.0, depth_nudge);
+        let Some(mut entrance) = entrance else {
+            transform.translation = slot + entrance_offset(0.0) + Vec3::new(0.0, 0.0, depth_nudge);
             transform.rotation = idle_rotation;
-            transform.scale = base_scale;
+            transform.scale = base_scale * ENTER_SCALE_FLOOR;
+            continue;
+        };
+
+        entrance.progress = (entrance.progress + dt * ENTER_RATE).min(1.0 + entrance.delay);
+        let t = (entrance.progress - entrance.delay).clamp(0.0, 1.0);
+        let ef = EaseFunction::CubicOut.sample_clamped(t);
+        let enter_scale = ENTER_SCALE_FLOOR + (1.0 - ENTER_SCALE_FLOOR) * ef;
+        let enter_offset = entrance_offset(ef);
+
+        if slot_index.abs_diff(selected_slot) > ANIMATED_WINDOW {
+            transform.translation = slot + enter_offset + Vec3::new(0.0, 0.0, depth_nudge);
+            transform.rotation = idle_rotation;
+            transform.scale = base_scale * enter_scale;
             continue;
         }
 
         let selected = index.0 == state.selected;
-        let sway = box_sway(index.0, elapsed, selected);
-        let wave = box_wave(index.0, elapsed, selected);
-        let target_translation;
+        let sway = box_sway(slot_index, elapsed, selected);
+        let wave = box_wave(slot_index, elapsed, selected);
+        let mut target_translation;
         let target_rotation;
-        let target_scale;
+        let mut target_scale;
 
         if selected {
             let face = if state.box_flipped {
@@ -144,6 +217,9 @@ pub fn animate_library(
             target_scale = base_scale;
         }
 
+        target_translation += enter_offset;
+        target_scale *= enter_scale;
+
         transform
             .translation
             .smooth_nudge(&target_translation, APPROACH_RATE, dt);
@@ -154,6 +230,10 @@ pub fn animate_library(
             .scale
             .smooth_nudge(&target_scale, APPROACH_RATE, dt);
     }
+}
+
+fn entrance_offset(ef: f32) -> Vec3 {
+    Vec3::new(0.0, 0.0, -(1.0 - ef) * ENTER_DEPTH)
 }
 
 fn row_focus_target(mode: ViewMode, selected: usize) -> Vec3 {

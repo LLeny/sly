@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::text::{FontSize, FontSourceTemplate};
 use bevy::ui::widget::ViewportNode;
 
-use crate::assets::{Fonts, GameTexture};
+use crate::assets::{Fonts, GameTexture, PromptIcons};
 use crate::camera::DetailCamera;
 use crate::discovery::Library;
 use crate::game::{FRAME_HEIGHT, FRAME_WIDTH};
@@ -27,7 +27,8 @@ const CELL_LETTER_EMPTY: Color = Color::srgba(0.86, 0.83, 0.9, 0.26);
 pub const GAME_BLACK: Color = Color::srgb(0.008, 0.008, 0.012);
 
 pub const BUBBLE_MARGIN_PX: f32 = 28.0;
-const ALPHABET_TOP_PX: f32 = 18.0;
+pub const EDGE_MARGIN_PX: f32 = 16.0;
+const ALPHABET_TOP_PX: f32 = EDGE_MARGIN_PX;
 const ALPHABET_HEIGHT_PX: f32 = 30.0;
 pub const BUBBLE_VMARGIN_PX: f32 = ALPHABET_TOP_PX + ALPHABET_HEIGHT_PX + ALPHABET_TOP_PX;
 pub const BUBBLE_WIDTH_FRACTION: f32 = 0.38;
@@ -39,6 +40,11 @@ pub const RIBBON_STRIP_TOP_FRACTION: f32 = 0.68;
 pub const RIBBON_STRIP_WIDTH_FRACTION: f32 = 0.60;
 pub const RIBBON_STRIP_HEIGHT_FRACTION: f32 = 0.24;
 pub const RIBBON_VIEWPORT_FRACTION: f32 = 0.30;
+
+const HINT_KEY_PX: f32 = 30.0;
+const KEY_SPRITE_BORDER_FRACTION: f32 = 16.0 / 128.0;
+const HINT_BAR_BOTTOM_PX: f32 = EDGE_MARGIN_PX - HINT_KEY_PX * KEY_SPRITE_BORDER_FRACTION;
+const GAME_HINT: Color = Color::srgba(1.0, 1.0, 1.0, 0.30);
 
 const TITLE_BASE_PX: f32 = 27.0;
 const TITLE_RIBBON_BASE_PX: f32 = 34.0;
@@ -104,6 +110,9 @@ impl FactKind {
 }
 
 #[derive(Component, Default, Clone)]
+pub struct HintIcon;
+
+#[derive(Component, Default, Clone)]
 pub struct PillRow;
 
 #[derive(Component, Default, Clone)]
@@ -119,6 +128,12 @@ pub struct TvPillText;
 pub struct RegionPillText;
 
 #[derive(Component, Default, Clone)]
+pub struct TintedPill;
+
+#[derive(Component, Default, Clone)]
+pub struct TintedPillText;
+
+#[derive(Component, Default, Clone)]
 pub struct AlphabetLetter(usize);
 
 #[derive(Component, Default, Clone)]
@@ -126,6 +141,7 @@ pub struct AlphabetCell(usize);
 
 pub fn launcher_ui(
     fonts: &Fonts,
+    prompts: &PromptIcons,
     background_pattern: &BackgroundPattern,
     library_camera: Entity,
     detail_camera: Entity,
@@ -164,30 +180,126 @@ pub fn launcher_ui(
                 template_value(Pickable::IGNORE)
             ),
             (
-                Text("LIBRARY / SNES")
-                text_font(mono.clone(), 12.0)
-                TextColor(TEXT_SECONDARY)
                 Node {
                     position_type: PositionType::Absolute,
-                    left: px(28),
-                    top: px(24),
+                    left: px(EDGE_MARGIN_PX),
+                    top: px(EDGE_MARGIN_PX),
+                    padding: UiRect::axes(px(10), px(3)),
+                    border_radius: BorderRadius::MAX,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
                 }
+                BackgroundColor(ACCENT_SOFT)
                 GlobalZIndex(6)
+                TintedPill
+                Children [
+                    (
+                        Text("SNES")
+                        Node { top: px(1) }
+                        text_font(mono.clone(), 11.0)
+                        TextColor(ACCENT)
+                        TintedPillText
+                    )
+                ]
             ),
             (
-                Text("Scanning ROM library")
-                text_font(mono.clone(), 11.0)
-                TextColor(TEXT_MUTED)
                 Node {
                     position_type: PositionType::Absolute,
-                    left: px(28),
-                    bottom: px(24),
+                    left: px(EDGE_MARGIN_PX),
+                    bottom: px(EDGE_MARGIN_PX),
+                    padding: UiRect::axes(px(10), px(3)),
+                    border_radius: BorderRadius::MAX,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
                 }
+                BackgroundColor(ACCENT_SOFT)
                 GlobalZIndex(6)
-                StatusText
+                TintedPill
+                Children [
+                    (
+                        Text("Scanning ROM library")
+                        Node { top: px(1) }
+                        text_font(mono.clone(), 11.0)
+                        TextColor(ACCENT)
+                        StatusText
+                        TintedPillText
+                    )
+                ]
             ),
             alphabet_rail(mono.clone()),
+            hints_bar(mono.clone(), prompts),
             detail_bubble(fonts, detail_camera, frosted_bubble),
+        ]
+    }
+}
+
+fn hint_key(image: Handle<Image>, color: Color) -> impl Scene {
+    bsn! {
+        Node {
+            width: px(HINT_KEY_PX),
+            height: px(HINT_KEY_PX),
+        }
+        ImageNode { image: {image}, color: {color} }
+    }
+}
+
+fn hint_label(label: &'static str, mono: Handle<Font>, color: Color) -> impl Scene {
+    bsn! {
+        Text(label)
+        Node { top: px(1) }
+        text_font(mono, 12.0)
+        TextColor(color)
+    }
+}
+
+fn tinted_hint_key(image: Handle<Image>) -> impl Scene {
+    bsn! {
+        Node {
+            width: px(HINT_KEY_PX),
+            height: px(HINT_KEY_PX),
+        }
+        ImageNode { image: {image}, color: {TEXT_SECONDARY} }
+        HintIcon
+    }
+}
+
+fn hints_bar(mono: Handle<Font>, prompts: &PromptIcons) -> impl Scene {
+    let arrow_left = prompts.arrow_left.clone();
+    let arrow_right = prompts.arrow_right.clone();
+    let key_f = prompts.key_f.clone();
+    let key_tab = prompts.key_tab.clone();
+    let key_enter = prompts.key_enter.clone();
+    bsn! {
+        Node {
+            position_type: PositionType::Absolute,
+            right: px(EDGE_MARGIN_PX),
+            bottom: px(HINT_BAR_BOTTOM_PX),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: px(18),
+        }
+        GlobalZIndex(6)
+        template_value(Pickable::IGNORE)
+        Children [
+            hint_group(vec![arrow_left, arrow_right], "Scroll", mono.clone()),
+            hint_group(vec![key_f], "Flip", mono.clone()),
+            hint_group(vec![key_tab], "View", mono.clone()),
+            hint_group(vec![key_enter], "Start", mono),
+        ]
+    }
+}
+
+fn hint_group(keys: Vec<Handle<Image>>, label: &'static str, mono: Handle<Font>) -> impl Scene {
+    let icons: Vec<_> = keys.into_iter().map(tinted_hint_key).collect();
+    bsn! {
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: px(5),
+        }
+        Children [
+            {icons},
+            hint_label(label, mono, TEXT_MUTED),
         ]
     }
 }
@@ -201,7 +313,7 @@ fn alphabet_rail(mono: Handle<Font>) -> impl Scene {
             position_type: PositionType::Absolute,
             left: px(0),
             right: px(0),
-            top: px(18),
+            top: px(EDGE_MARGIN_PX),
             height: px(30),
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
@@ -357,8 +469,10 @@ fn detail_bubble(
     }
 }
 
-pub fn game_ui(game_texture: &GameTexture) -> impl Scene {
+pub fn game_ui(game_texture: &GameTexture, fonts: &Fonts, prompts: &PromptIcons) -> impl Scene {
     let frame = game_texture.0.clone();
+    let mono = fonts.mono_medium.clone();
+    let key_escape = prompts.key_escape.clone();
     bsn! {
         Node {
             position_type: PositionType::Absolute,
@@ -379,6 +493,21 @@ pub fn game_ui(game_texture: &GameTexture) -> impl Scene {
                 }
                 ImageNode { image: {frame} }
                 GameFrame
+            ),
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: px(EDGE_MARGIN_PX),
+                    bottom: px(HINT_BAR_BOTTOM_PX),
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: px(5),
+                }
+                template_value(Pickable::IGNORE)
+                Children [
+                    hint_key(key_escape, GAME_HINT),
+                    hint_label("Library", mono, GAME_HINT),
+                ]
             )
         ]
     }
@@ -435,6 +564,7 @@ fn pill_row(mono: Handle<Font>) -> impl Scene {
                 }
                 BackgroundColor(ACCENT_SOFT)
                 RegionPill
+                TintedPill
                 Children [
                     (
                         Text("Region")
@@ -442,6 +572,7 @@ fn pill_row(mono: Handle<Font>) -> impl Scene {
                         text_font(mono, 11.0)
                         TextColor(ACCENT)
                         RegionPillText
+                        TintedPillText
                     )
                 ]
             ),
@@ -454,9 +585,10 @@ pub fn tint_pills(
     mut applied: Local<Option<Vec3>>,
     mut backgrounds: ParamSet<(
         Query<&mut BackgroundColor, With<TvPill>>,
-        Query<&mut BackgroundColor, With<RegionPill>>,
+        Query<&mut BackgroundColor, With<TintedPill>>,
     )>,
-    mut region_text: Query<&mut TextColor, With<RegionPillText>>,
+    mut tinted_text: Query<&mut TextColor, With<TintedPillText>>,
+    mut hint_icons: Query<&mut ImageNode, With<HintIcon>>,
 ) {
     let tint = pattern.tint;
     if *applied == Some(tint) {
@@ -464,16 +596,20 @@ pub fn tint_pills(
     }
     *applied = Some(tint);
 
+    let srgb = |v: Vec3| Color::srgb(v.x, v.y, v.z);
     let solid = tint * 0.72;
     let dark = tint * 0.48;
-    if let Ok(mut background) = backgrounds.p0().single_mut() {
-        background.0 = Color::srgb(solid.x, solid.y, solid.z);
+    for mut icon in &mut hint_icons {
+        icon.color = srgb(dark);
     }
-    if let Ok(mut background) = backgrounds.p1().single_mut() {
+    if let Ok(mut background) = backgrounds.p0().single_mut() {
+        background.0 = srgb(solid);
+    }
+    for mut background in backgrounds.p1().iter_mut() {
         background.0 = Color::srgba(tint.x, tint.y, tint.z, 0.20);
     }
-    if let Ok(mut color) = region_text.single_mut() {
-        color.0 = Color::srgb(dark.x, dark.y, dark.z);
+    for mut color in &mut tinted_text {
+        color.0 = srgb(dark);
     }
 }
 
@@ -659,7 +795,7 @@ pub fn style_viewport_idle(mode: ViewMode, node: &mut Node) {
 fn style_alphabet_outer(mode: ViewMode, node: &mut Node) {
     match mode {
         ViewMode::Column => {
-            node.left = px(18);
+            node.left = px(EDGE_MARGIN_PX);
             node.right = Val::Auto;
             node.top = px(0);
             node.bottom = px(0);
@@ -669,7 +805,7 @@ fn style_alphabet_outer(mode: ViewMode, node: &mut Node) {
         ViewMode::Row | ViewMode::Ribbon => {
             node.left = px(0);
             node.right = px(0);
-            node.top = px(18);
+            node.top = px(EDGE_MARGIN_PX);
             node.bottom = Val::Auto;
             node.width = Val::Auto;
             node.height = px(30);

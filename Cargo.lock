@@ -5929,6 +5929,7 @@ dependencies = [
  "bevy",
  "core-model",
  "crc32fast",
+ "dirs",
  "image",
  "serde",
  "sha1",

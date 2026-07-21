@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy::world_serialization::WorldInstanceReady;
 
 use crate::materials::{CardboardExtension, CardboardMaterial};
-use crate::shelf::BoxIndex;
+use crate::shelf::{BoxEntrance, BoxIndex, RevealBurst};
 
 #[derive(Component, Clone, Default)]
 pub struct BoxTextures {
@@ -36,6 +36,9 @@ pub fn on_scene_ready(
     box_textures: Query<&BoxTextures>,
     cart_labels: Query<&CartLabelTexture>,
     primitives: Query<(&MeshMaterial3d<StandardMaterial>, &GltfMaterialName)>,
+    entrances: Query<&BoxEntrance>,
+    time: Res<Time>,
+    mut burst: ResMut<RevealBurst>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut cardboard_materials: ResMut<Assets<CardboardMaterial>>,
 ) {
@@ -58,17 +61,24 @@ pub fn on_scene_ready(
             .map(|textures| (textures, box_seed)),
         cart_labels.get(ready.entity).ok(),
         Some(layer.0),
+        &entrances,
+        time.elapsed_secs(),
+        &mut burst,
         &mut materials,
         &mut cardboard_materials,
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn refresh_scene_materials(
     mut commands: Commands,
     children: Query<&Children>,
     boxes: Query<(Entity, &BoxIndex, &BoxTextures), Changed<BoxTextures>>,
     carts: Query<(Entity, &CartLabelTexture), Changed<CartLabelTexture>>,
     primitives: Query<(&MeshMaterial3d<StandardMaterial>, &GltfMaterialName)>,
+    entrances: Query<&BoxEntrance>,
+    time: Res<Time>,
+    mut burst: ResMut<RevealBurst>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut cardboard_materials: ResMut<Assets<CardboardMaterial>>,
 ) {
@@ -81,6 +91,9 @@ pub fn refresh_scene_materials(
             Some((textures, index.0 as f32)),
             None,
             None,
+            &entrances,
+            time.elapsed_secs(),
+            &mut burst,
             &mut materials,
             &mut cardboard_materials,
         );
@@ -94,6 +107,9 @@ pub fn refresh_scene_materials(
             None,
             Some(label),
             None,
+            &entrances,
+            time.elapsed_secs(),
+            &mut burst,
             &mut materials,
             &mut cardboard_materials,
         );
@@ -109,6 +125,9 @@ fn apply_scene_textures(
     box_art: Option<(&BoxTextures, f32)>,
     cart_label: Option<&CartLabelTexture>,
     render_layer: Option<usize>,
+    entrances: &Query<&BoxEntrance>,
+    now: f32,
+    burst: &mut RevealBurst,
     materials: &mut Assets<StandardMaterial>,
     cardboard_materials: &mut Assets<CardboardMaterial>,
 ) {
@@ -155,7 +174,15 @@ fn apply_scene_textures(
     }
 
     if any_ready {
-        commands.entity(root).insert(Visibility::Visible);
+        let mut cmd = commands.entity(root);
+        cmd.insert(Visibility::Visible);
+
+        if box_art.is_some() && !entrances.contains(root) {
+            cmd.insert(BoxEntrance {
+                progress: 0.0,
+                delay: burst.next_delay(now),
+            });
+        }
     }
 }
 

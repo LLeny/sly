@@ -36,6 +36,16 @@ pub struct UiSounds {
 }
 
 #[derive(Resource)]
+pub struct PromptIcons {
+    pub arrow_left: Handle<Image>,
+    pub arrow_right: Handle<Image>,
+    pub key_f: Handle<Image>,
+    pub key_tab: Handle<Image>,
+    pub key_enter: Handle<Image>,
+    pub key_escape: Handle<Image>,
+}
+
+#[derive(Resource)]
 pub struct GameTexture(pub Handle<Image>);
 
 #[derive(Resource)]
@@ -78,12 +88,36 @@ fn embed_assets(registry: &EmbeddedAssetRegistry) {
             include_bytes!("../shaders/contours.wgsl"),
         ),
         (
-            "sounds/scroll.wav",
-            include_bytes!("../../../vendor/sounds/scroll.wav"),
+            "sounds/scroll.ogg",
+            include_bytes!("../../../vendor/sounds/click_003.ogg"),
         ),
         (
             "sounds/game-start.wav",
             include_bytes!("../../../vendor/sounds/game-start.wav"),
+        ),
+        (
+            "prompts/keyboard_arrow_left.png",
+            include_bytes!("../../../vendor/input-prompts/keyboard_arrow_left.png"),
+        ),
+        (
+            "prompts/keyboard_arrow_right.png",
+            include_bytes!("../../../vendor/input-prompts/keyboard_arrow_right.png"),
+        ),
+        (
+            "prompts/keyboard_f.png",
+            include_bytes!("../../../vendor/input-prompts/keyboard_f.png"),
+        ),
+        (
+            "prompts/keyboard_tab.png",
+            include_bytes!("../../../vendor/input-prompts/keyboard_tab_icon.png"),
+        ),
+        (
+            "prompts/keyboard_enter.png",
+            include_bytes!("../../../vendor/input-prompts/keyboard_numpad_enter.png"),
+        ),
+        (
+            "prompts/keyboard_escape.png",
+            include_bytes!("../../../vendor/input-prompts/keyboard_escape.png"),
         ),
         (
             "fonts/IBMPlexSans-Regular.ttf",
@@ -129,8 +163,17 @@ pub fn setup_assets(
     });
 
     commands.insert_resource(UiSounds {
-        scroll: assets.load("embedded://sounds/scroll.wav"),
+        scroll: assets.load("embedded://sounds/scroll.ogg"),
         game_start: assets.load("embedded://sounds/game-start.wav"),
+    });
+
+    commands.insert_resource(PromptIcons {
+        arrow_left: assets.load("embedded://prompts/keyboard_arrow_left.png"),
+        arrow_right: assets.load("embedded://prompts/keyboard_arrow_right.png"),
+        key_f: assets.load("embedded://prompts/keyboard_f.png"),
+        key_tab: assets.load("embedded://prompts/keyboard_tab.png"),
+        key_enter: assets.load("embedded://prompts/keyboard_enter.png"),
+        key_escape: assets.load("embedded://prompts/keyboard_escape.png"),
     });
 
     commands.insert_resource(ShaderLibrary {
