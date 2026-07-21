@@ -46,8 +46,8 @@ pub struct SnesDebug {
     label: Arc<str>,
     segments: Vec<Arc<str>>,
     last_access: MemoryAccess,
-    capture_frames: std::cell::Cell<u32>,
-    track_frames: std::cell::Cell<u32>,
+    capture_frames: std::sync::atomic::AtomicU32,
+    track_frames: std::sync::atomic::AtomicU32,
 }
 
 impl SnesDebug {
@@ -68,8 +68,8 @@ impl SnesDebug {
             label: label.into(),
             segments,
             last_access: MemoryAccess::default(),
-            capture_frames: std::cell::Cell::new(0),
-            track_frames: std::cell::Cell::new(0),
+            capture_frames: std::sync::atomic::AtomicU32::new(0),
+            track_frames: std::sync::atomic::AtomicU32::new(0),
         }
     }
 
@@ -136,12 +136,15 @@ impl SnesDebug {
     }
 
     fn track_mode(&self) -> TrackMode {
+        use std::sync::atomic::Ordering::Relaxed;
+
         for (frames, mode) in [
             (&self.capture_frames, TrackMode::Full),
             (&self.track_frames, TrackMode::LastOnly),
         ] {
-            if frames.get() > 0 {
-                frames.set(frames.get() - 1);
+            let remaining = frames.load(Relaxed);
+            if remaining > 0 {
+                frames.store(remaining - 1, Relaxed);
                 return mode;
             }
         }
@@ -736,7 +739,8 @@ impl DebugCore for SnesDebug {
     }
 
     fn memory_highlights(&self, region: &str, addr: u32, len: usize) -> Vec<Highlight> {
-        self.capture_frames.set(CAPTURE_FRAMES);
+        self.capture_frames
+            .store(CAPTURE_FRAMES, std::sync::atomic::Ordering::Relaxed);
 
         (0..len as u32)
             .map(|i| match self.region_key(region, addr.wrapping_add(i)) {
@@ -754,7 +758,8 @@ impl DebugCore for SnesDebug {
     }
 
     fn latest_access(&self) -> Option<(Arc<str>, u32)> {
-        self.track_frames.set(TRACK_FRAMES);
+        self.track_frames
+            .store(TRACK_FRAMES, std::sync::atomic::Ordering::Relaxed);
 
         let (kind, offset) = self.last_access.last?;
         let region = match kind {

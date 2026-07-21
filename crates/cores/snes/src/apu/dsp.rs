@@ -42,7 +42,7 @@ pub struct Dsp {
     #[cfg(feature = "debug")]
     voice_hist_pos: usize,
     #[cfg(feature = "debug")]
-    debug_capture: std::cell::Cell<u32>,
+    debug_capture: std::sync::atomic::AtomicU32,
 }
 
 impl Default for Dsp {
@@ -66,13 +66,14 @@ impl Dsp {
             #[cfg(feature = "debug")]
             voice_hist_pos: 0,
             #[cfg(feature = "debug")]
-            debug_capture: std::cell::Cell::new(0),
+            debug_capture: std::sync::atomic::AtomicU32::new(0),
         }
     }
 
     #[cfg(feature = "debug")]
     fn arm_debug_capture(&self) {
-        self.debug_capture.set(DEBUG_CAPTURE_TICKS);
+        self.debug_capture
+            .store(DEBUG_CAPTURE_TICKS, std::sync::atomic::Ordering::Relaxed);
     }
 
     #[cfg(feature = "debug")]
@@ -121,9 +122,10 @@ impl Dsp {
     pub fn tick(&mut self, ram: &mut [u8; 0x10000]) -> (i16, i16) {
         #[cfg(feature = "debug")]
         let debug_capture = {
-            let remaining = self.debug_capture.get();
+            use std::sync::atomic::Ordering::Relaxed;
+            let remaining = self.debug_capture.load(Relaxed);
             if remaining > 0 {
-                self.debug_capture.set(remaining - 1);
+                self.debug_capture.store(remaining - 1, Relaxed);
             }
             remaining > 0
         };

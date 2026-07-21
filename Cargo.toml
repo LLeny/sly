@@ -17,9 +17,9 @@ members = [
 ]
 
 [workspace.dependencies]
-gpui = { git = "https://github.com/ioncodes/zed", rev = "979129d8d0526f5a01890ad341e57315efd22466" }
-gpui_platform = { git = "https://github.com/ioncodes/zed", rev = "979129d8d0526f5a01890ad341e57315efd22466" }
-reqwest_client = { git = "https://github.com/ioncodes/zed", rev = "979129d8d0526f5a01890ad341e57315efd22466" }
+gpui = { git = "https://github.com/ioncodes/zed", rev = "f406f75c4875b9630b5c4db4aa51dd2fe0af6c00" }
+gpui_platform = { git = "https://github.com/ioncodes/zed", rev = "f406f75c4875b9630b5c4db4aa51dd2fe0af6c00" }
+reqwest_client = { git = "https://github.com/ioncodes/zed", rev = "f406f75c4875b9630b5c4db4aa51dd2fe0af6c00" }
 tracing = { version = "0.1.44", features = ["release_max_level_off"] }
 tracing-subscriber = { version = "0.3.23", features = ["registry", "fmt", "ansi", "std", "env-filter"] }
 

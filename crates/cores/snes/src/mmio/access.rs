@@ -1,5 +1,6 @@
-use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use super::MemKind;
 
@@ -21,73 +22,74 @@ impl MemoryAccess {
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum TrackMode {
     #[default]
-    Off,
-    LastOnly,
-    Full,
+    Off = 0,
+    LastOnly = 1,
+    Full = 2,
 }
 
 #[derive(Default)]
 pub struct AccessTracker {
-    mode: Cell<TrackMode>,
-    gated: Cell<bool>,
-    reads: RefCell<HashSet<(MemKind, u32)>>,
-    writes: RefCell<HashSet<(MemKind, u32)>>,
-    last: Cell<Option<(MemKind, u32)>>,
+    mode: AtomicU8,
+    gated: AtomicBool,
+    reads: Mutex<HashSet<(MemKind, u32)>>,
+    writes: Mutex<HashSet<(MemKind, u32)>>,
+    last: Mutex<Option<(MemKind, u32)>>,
 }
 
 impl AccessTracker {
     pub(crate) fn begin(&self, mode: TrackMode) {
-        self.mode.set(mode);
-        self.gated.set(false);
-        self.last.set(None);
+        self.mode.store(mode as u8, Ordering::Relaxed);
+        self.gated.store(false, Ordering::Relaxed);
+        *self.last.lock().unwrap() = None;
         if mode == TrackMode::Full {
-            self.reads.borrow_mut().clear();
-            self.writes.borrow_mut().clear();
+            self.reads.lock().unwrap().clear();
+            self.writes.lock().unwrap().clear();
         }
     }
 
     pub(crate) fn stop(&self) {
-        self.mode.set(TrackMode::Off);
-        self.gated.set(false);
+        self.mode.store(TrackMode::Off as u8, Ordering::Relaxed);
+        self.gated.store(false, Ordering::Relaxed);
     }
 
     pub(crate) fn resume(&self) {
-        if self.mode.get() != TrackMode::Off {
-            self.gated.set(true);
+        if self.mode.load(Ordering::Relaxed) != TrackMode::Off as u8 {
+            self.gated.store(true, Ordering::Relaxed);
         }
     }
 
     pub(crate) fn pause(&self) {
-        self.gated.set(false);
+        self.gated.store(false, Ordering::Relaxed);
     }
 
     pub(super) fn active(&self) -> bool {
-        self.gated.get()
+        self.gated.load(Ordering::Relaxed)
     }
 
     pub(crate) fn record(&self, key: (MemKind, u32), write: bool) {
-        if !self.gated.get() {
+        if !self.gated.load(Ordering::Relaxed) {
             return;
         }
 
-        self.last.set(Some(key));
+        *self.last.lock().unwrap() = Some(key);
 
-        if self.mode.get() == TrackMode::Full {
+        if self.mode.load(Ordering::Relaxed) == TrackMode::Full as u8 {
             if write {
-                self.writes.borrow_mut().insert(key);
+                self.writes.lock().unwrap().insert(key);
             } else {
-                self.reads.borrow_mut().insert(key);
+                self.reads.lock().unwrap().insert(key);
             }
         }
     }
 
     pub fn take(&self) -> MemoryAccess {
         MemoryAccess {
-            reads: self.reads.take(),
-            writes: self.writes.take(),
-            last: self.last.take(),
+            reads: std::mem::take(&mut *self.reads.lock().unwrap()),
+            writes: std::mem::take(&mut *self.writes.lock().unwrap()),
+            last: self.last.lock().unwrap().take(),
         }
     }
 }
