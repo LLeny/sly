@@ -394,6 +394,16 @@ impl<'a> ScanlineRenderer<'a> {
 
 impl Ppu {
     pub fn render_scanline(&mut self, scanline: usize) {
+        #[cfg(feature = "debug")]
+        self.window_trace.record(
+            scanline,
+            crate::ppu::window::WindowDebugState {
+                windows: self.windows,
+                main_screen: self.main_screen_window,
+                sub_screen: self.sub_screen_window,
+            },
+        );
+
         let mut row = [(0, 0, 0); SCREEN_WIDTH_USIZE];
 
         if !self.force_blank {

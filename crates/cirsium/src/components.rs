@@ -14,13 +14,13 @@ pub use copyable::Copyable;
 pub use menu::{MenuItem, context_menu, popover};
 pub use panel::{HEADER_HEIGHT, Panel, PanelChrome};
 pub use primitives::{
-    CheckboxSize, badge, bool_chip, checkbox, empty_state, empty_state_centered, field_button,
-    flip_label, header_rule, hex, label_text, meter_bar, meter_bar_scaled, mono_text,
-    section_header, separator, status_flag,
+    CheckboxSize, badge, bool_chip, checkbox, divided, divided_mono, empty_state,
+    empty_state_centered, field_button, flip_label, header_rule, hex, label_text, meter_bar,
+    meter_bar_scaled, mono_text, section_header, separator, status_flag,
 };
 pub use rows::{
     DETAIL_INDENT, FOOTER_ROW_H, INDENT_STEP, RowCallback, chevron_slot, detail_row,
-    footer_placeholder, footer_row, row_toggle,
+    footer_placeholder, footer_row, footer_row_el, row_toggle,
 };
 pub use segmented::Segmented;
 pub use status_bar::{StatusView, console_pill, status_bar};

@@ -22,6 +22,7 @@ pub(super) fn cell_grid(
     on_select: Option<SelectCallback>,
     on_hover: Option<HoverCallback>,
     on_viewport: Option<ViewportCallback>,
+    show_window_overlays: bool,
 ) -> Div {
     let container = div()
         .relative()
@@ -51,6 +52,11 @@ pub(super) fn cell_grid(
             count: content.count,
             cell,
             overlay: content.overlay,
+            window_overlays: if show_window_overlays {
+                content.window_overlays.clone()
+            } else {
+                Vec::new()
+            },
         },
         selected,
         hovered,
@@ -68,6 +74,7 @@ struct GridSpec {
     count: usize,
     cell: f32,
     overlay: Option<GridOverlay>,
+    window_overlays: Vec<GridWindowOverlay>,
 }
 
 fn render(
@@ -87,6 +94,7 @@ fn render(
         count,
         cell,
         overlay,
+        window_overlays,
     } = spec;
 
     let bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
@@ -161,6 +169,64 @@ fn render(
         }
     }
 
+    let (map_w, map_h) = (cols as u32 * tile_px, rows as u32 * tile_px);
+    let scale = cell / tile_px as f32;
+    let window_overlays: Arc<[GridWindowOverlay]> = window_overlays.into();
+    if !window_overlays.is_empty() {
+        let painted = window_overlays.clone();
+        let colors = [theme.warning, theme.info];
+        let inactive = theme.text_dim;
+        grid = grid.child(
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    self::paint_window_overlays(
+                        window, bounds, &painted, map_w, map_h, scale, colors, inactive,
+                    );
+                },
+            )
+            .absolute()
+            .inset_0(),
+        );
+
+        for overlay in window_overlays.iter() {
+            let Some(anchor) = overlay.label_anchor else {
+                continue;
+            };
+            let Some(bounds) = anchor
+                .rects(map_w, map_h, scale)
+                .into_iter()
+                .max_by_key(|bounds| u32::from(bounds.size.width))
+            else {
+                continue;
+            };
+            let color = colors[overlay.slot.min(1)];
+            let label_width = px((f32::from(bounds.size.width) - 4.).max(0.));
+            grid = grid.child(
+                div()
+                    .absolute()
+                    .left(bounds.origin.x + px(2.))
+                    .top(bounds.origin.y + px(2.))
+                    .flex()
+                    .items_start()
+                    .w(label_width)
+                    .h(px(15.))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .flex_none()
+                            .px_1()
+                            .rounded_sm()
+                            .bg(with_alpha(theme.bg_root, 0.82))
+                            .text_xs()
+                            .whitespace_nowrap()
+                            .text_color(color)
+                            .child(overlay.label.clone()),
+                    ),
+            );
+        }
+    }
+
     if let Some(index) = hovered.filter(|&i| i < count && selected != Some(i)) {
         grid = grid.child(ring(index, theme.accent_hover));
     }
@@ -194,4 +260,61 @@ fn render(
     }
 
     grid
+}
+
+#[expect(clippy::too_many_arguments)]
+fn paint_window_overlays(
+    window: &mut Window,
+    canvas_bounds: Bounds<Pixels>,
+    overlays: &[GridWindowOverlay],
+    map_w: u32,
+    map_h: u32,
+    scale: f32,
+    colors: [Hsla; 2],
+    inactive: Hsla,
+) {
+    let offset = |bounds: Bounds<Pixels>| Bounds {
+        origin: point(
+            canvas_bounds.origin.x + bounds.origin.x,
+            canvas_bounds.origin.y + bounds.origin.y,
+        ),
+        size: bounds.size,
+    };
+
+    for overlay in overlays {
+        let color = colors[overlay.slot.min(1)];
+        for rect in &overlay.effective {
+            for bounds in rect.rects(map_w, map_h, scale) {
+                window.paint_quad(fill(offset(bounds), with_alpha(color, 0.14)));
+            }
+        }
+    }
+
+    for overlay in overlays {
+        for band in &overlay.bands {
+            if !band.show_edges || band.rect.width == 0 || band.rect.height == 0 {
+                continue;
+            }
+
+            let color = if band.active {
+                colors[overlay.slot.min(1)]
+            } else {
+                inactive
+            };
+            let left = band.rect.x % map_w;
+            let right = band.rect.x.saturating_add(band.rect.width) % map_w;
+            for (y, height) in GridOverlay::spans(band.rect.y, band.rect.height, map_h) {
+                let edge = |x: u32| {
+                    offset(Bounds {
+                        origin: point(px(x as f32 * scale), px(y as f32 * scale)),
+                        size: size(px(1.), px(height as f32 * scale)),
+                    })
+                };
+                window.paint_quad(fill(edge(left), with_alpha(color, 0.9)));
+                if right != left {
+                    window.paint_quad(fill(edge(right), with_alpha(color, 0.9)));
+                }
+            }
+        }
+    }
 }

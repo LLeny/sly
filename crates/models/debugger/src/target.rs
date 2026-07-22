@@ -9,7 +9,7 @@ use workspace_model::{
 use crate::model::{
     AudioScopesView, CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Highlight,
     MemoryRegion, MmioView, PaletteView, PpuView, Sprites, StructuredView, TableView, Tilemap,
-    TilemapViewport, Tileset, TilesetLayer, VideoGenerations,
+    TilemapOverlay, TilemapViewport, Tileset, TilesetLayer, VideoGenerations,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -172,6 +172,10 @@ pub trait DebugCore: Core {
 
     fn tilemap(&self, _layer: usize) -> Option<Tilemap> {
         None
+    }
+
+    fn tilemap_overlays(&self, _layer: usize) -> Vec<TilemapOverlay> {
+        Vec::new()
     }
 
     fn tilemap_viewport(&self, _layer: usize) -> Option<TilemapViewport> {

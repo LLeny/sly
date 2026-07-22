@@ -4,7 +4,9 @@ use gpui::prelude::*;
 use gpui::{Div, RenderImage, SharedString, div};
 
 use crate::assets::icon;
-use crate::components::{flip_label, footer_row, hex, mono_text};
+use crate::components::{
+    divided, divided_mono, flip_label, footer_row, footer_row_el, hex, label_text,
+};
 use crate::theme::Theme;
 use crate::widgets::grid::{GridContent, GridPanel, build_atlas};
 
@@ -60,6 +62,7 @@ impl SpritesWidget {
             count: view.entries.len(),
             empty_message: "No sprites",
             overlay: None,
+            window_overlays: Vec::new(),
         });
 
         let mut panel = GridPanel::new(Self::ID, "Sprites", icon::GHOST, content)
@@ -77,27 +80,38 @@ impl SpritesWidget {
 fn detail_row(theme: &Theme, view: &SpritesView, index: usize) -> Div {
     let sprite = &view.entries[index];
 
-    let flip = flip_label(sprite.flip_h, sprite.flip_v);
+    let mut coords = vec![format!("({}, {})", sprite.x, sprite.y)];
+    if let Some(flip) = flip_label(sprite.flip_h, sprite.flip_v) {
+        coords.push(flip.to_string());
+    }
 
     div()
         .flex()
         .flex_col()
-        .child(footer_row(
-            theme,
-            format!("Sprite {index} │ {}×{}", sprite.width, sprite.height),
-            mono_text(theme, format!("({}, {}){flip}", sprite.x, sprite.y)),
+        .child(footer_row_el(
+            divided(
+                theme,
+                [
+                    label_text(theme, format!("Sprite {index}")).into_any_element(),
+                    label_text(theme, format!("{}×{}", sprite.width, sprite.height))
+                        .into_any_element(),
+                ],
+            ),
+            divided_mono(theme, coords),
         ))
         .child(footer_row(
             theme,
             format!("Tile {}", hex(sprite.tile as u32, 12)),
-            mono_text(
+            divided_mono(
                 theme,
-                format!(
-                    "pal {} │ prio {} @ VRAM {}",
-                    sprite.palette,
-                    sprite.priority,
-                    hex(sprite.tile_addr, 16),
-                ),
+                [
+                    format!("pal {}", sprite.palette),
+                    format!(
+                        "prio {} @ VRAM {}",
+                        sprite.priority,
+                        hex(sprite.tile_addr, 16)
+                    ),
+                ],
             ),
         ))
 }

@@ -337,6 +337,23 @@ pub struct TilemapViewport {
 }
 
 #[derive(Clone)]
+pub struct TilemapOverlayBand {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub inverted: bool,
+    pub active: bool,
+}
+
+#[derive(Clone)]
+pub struct TilemapOverlay {
+    pub label: Arc<str>,
+    pub slot: usize,
+    pub bands: Vec<TilemapOverlayBand>,
+}
+
+#[derive(Clone)]
 pub struct Tilemap {
     pub width: usize,
     pub height: usize,
@@ -384,6 +401,7 @@ pub struct VideoGenerations {
     pub palette: u64,
     pub tileset: u64,
     pub tilemap: u64,
+    pub tilemap_overlay: u64,
     pub sprites: u64,
 }
 

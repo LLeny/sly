@@ -62,6 +62,7 @@ struct GridState {
     selected: HashMap<usize, usize>,
     hovered: Option<usize>,
     viewport: Size<f32>,
+    show_window_overlays: bool,
 }
 
 impl GridState {
@@ -125,6 +126,7 @@ pub(crate) struct Debugger {
     palette_key: Option<u64>,
     tileset_key: Option<(u64, usize, usize)>,
     tilemap_key: Option<(u64, usize)>,
+    tilemap_overlay_key: Option<(u64, usize)>,
     sprites_key: Option<u64>,
     expanded: HashMap<&'static str, HashSet<SharedString>>,
     registry: cirsium::PanelRegistry,
@@ -257,6 +259,7 @@ impl Debugger {
             palette_key: None,
             tileset_key: None,
             tilemap_key: None,
+            tilemap_overlay_key: None,
             sprites_key: None,
             expanded: HashMap::new(),
             registry,

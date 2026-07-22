@@ -8,8 +8,8 @@ pub use model::{
     DmaView, Field, FlagView, FlowKind, Highlight, MemoryRegion, MmioFieldView, MmioGroup,
     MmioRegisterView, MmioView, PaletteColor, PaletteView, PpuGroup, PpuProperty, PpuView,
     RegisterView, Row, Section, SpriteEntry, Sprites, StackFrame, StructuredView, TableRow,
-    TableView, Tilemap, TilemapEntry, TilemapViewport, Tileset, TilesetLayer, TilesetTile,
-    TokenKind, Tone, VideoGenerations, hex,
+    TableView, Tilemap, TilemapEntry, TilemapOverlay, TilemapOverlayBand, TilemapViewport, Tileset,
+    TilesetLayer, TilesetTile, TokenKind, Tone, VideoGenerations, hex,
 };
 pub use target::{
     BreakpointKind, BreakpointMark, CPU_WORKSPACE, CpuDescriptor, CpuId, DebugCore, RunOutcome,

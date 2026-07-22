@@ -343,14 +343,8 @@ impl<'a, M: MemoryMap> Interpreter<'a, M> {
             M::Cld => self.snes.cpu.flags.set_decimal(false),
             M::Sed => self.snes.cpu.flags.set_decimal(true),
             M::Clv => self.snes.cpu.flags.set_overflow(false),
-            M::RepImm => {
-                let raw = self.snes.cpu.flags.raw();
-                self.snes.cpu.flags = Flags::from_raw(raw & !(imm(arg) as u8));
-            }
-            M::SepImm => {
-                let raw = self.snes.cpu.flags.raw();
-                self.snes.cpu.flags = Flags::from_raw(raw | (imm(arg) as u8));
-            }
+            M::RepImm => self.snes.cpu.flags &= !(imm(arg) as u8),
+            M::SepImm => self.snes.cpu.flags |= imm(arg) as u8,
 
             // mode switches
             M::Xce => {

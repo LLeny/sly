@@ -8,9 +8,9 @@ use debugger_model::{
     DmaChannelDetail, DmaChannelView, DmaView, FlagView, FlowKind, Highlight, MemoryRegion,
     MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView, PpuGroup,
     PpuProperty, PpuView, RegisterView, RunOutcome, SOUND_WORKSPACE, SpriteEntry, Sprites,
-    StackFrame, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapViewport,
-    Tileset, TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE, VideoGenerations, hex,
-    standard_manifest, strip_symbol_sigils, tokenize,
+    StackFrame, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapOverlay,
+    TilemapOverlayBand, TilemapViewport, Tileset, TilesetLayer, TilesetTile, TokenKind,
+    VIDEO_WORKSPACE, VideoGenerations, hex, standard_manifest, strip_symbol_sigils, tokenize,
 };
 use workspace_model::{
     ComponentManifest, DockLocation, PanelDescriptor, PanelGroupLayout, PanelKind, RefreshPolicy,
@@ -410,6 +410,10 @@ impl DebugCore for SnesDebug {
         self::tilemap(&self.core, layer)
     }
 
+    fn tilemap_overlays(&self, layer: usize) -> Vec<TilemapOverlay> {
+        self::tilemap_window_overlays(&self.core, layer)
+    }
+
     fn sprites(&self) -> Option<Sprites> {
         Some(self::sprites(&self.core))
     }
@@ -446,6 +450,24 @@ impl DebugCore for SnesDebug {
             hasher.finish()
         };
 
+        let window_regs = {
+            use crate::ppu::regs::{W12SEL, W34SEL, WBGLOG, WH0, WOBJLOG, WOBJSEL};
+
+            let mut hasher = DefaultHasher::new();
+            for register in [W12SEL, W34SEL, WOBJSEL] {
+                hasher.write_u8(ppu.windows.selector(register).raw());
+            }
+            for register in WH0..=WH0 + 3 {
+                hasher.write_u8(ppu.windows.position(register));
+            }
+            for register in WBGLOG..=WOBJLOG {
+                hasher.write_u8(ppu.windows.logic(register));
+            }
+            hasher.write_u8(ppu.main_screen_window.raw());
+            hasher.write_u8(ppu.sub_screen_window.raw());
+            hasher.finish()
+        };
+
         let oam = {
             let mut hasher = DefaultHasher::new();
             for i in 0..128 {
@@ -462,6 +484,7 @@ impl DebugCore for SnesDebug {
             palette: mix([cgram, ppu.cgram.word_addr() as u64]),
             tileset: mix([vram, cgram, regs]),
             tilemap: mix([vram, cgram, regs]),
+            tilemap_overlay: mix([window_regs, ppu.window_trace.generation()]),
             sprites: mix([vram, cgram, regs, oam]),
         })
     }
@@ -1335,6 +1358,91 @@ fn object_pixels(
         }
     }
     pixels
+}
+
+fn tilemap_window_overlays(core: &Snes, layer: usize) -> Vec<TilemapOverlay> {
+    let fallback = crate::ppu::window::WindowDebugState {
+        windows: core.ppu.windows,
+        main_screen: core.ppu.main_screen_window,
+        sub_screen: core.ppu.sub_screen_window,
+    };
+    let trace = core.ppu.window_trace.rows();
+    let mut bands: [Vec<TilemapOverlayBand>; 2] = std::array::from_fn(|_| Vec::new());
+    let mut descriptor = [None; 2];
+    let mut mixed = [false; 2];
+
+    for y in 0..crate::ppu::SCREEN_HEIGHT as usize {
+        let state = trace.get(y).copied().unwrap_or(fallback);
+        let (settings, bounds) = state.windows.row_mask(layer as u8).settings();
+        let main = state.main_screen.enabled(layer);
+        let sub = state.sub_screen.enabled(layer);
+
+        for window in 0..2 {
+            let (enabled, inverted) = settings[window];
+            if !enabled {
+                continue;
+            }
+
+            let current_descriptor = (inverted, main, sub);
+            if descriptor[window].is_some_and(|value| value != current_descriptor) {
+                mixed[window] = true;
+            }
+            descriptor[window] = Some(current_descriptor);
+
+            let (left, right) = bounds[window];
+            let width = if left <= right {
+                (right - left) as u32 + 1
+            } else {
+                0
+            };
+            let band = TilemapOverlayBand {
+                x: left as u32,
+                y: y as u32,
+                width,
+                height: 1,
+                inverted,
+                active: main || sub,
+            };
+
+            if let Some(previous) = bands[window].last_mut()
+                && previous.y + previous.height == band.y
+                && previous.x == band.x
+                && previous.width == band.width
+                && previous.inverted == band.inverted
+                && previous.active == band.active
+            {
+                previous.height += 1;
+            } else {
+                bands[window].push(band);
+            }
+        }
+    }
+
+    bands
+        .into_iter()
+        .enumerate()
+        .filter_map(|(window, bands)| {
+            let (inverted, main, sub) = descriptor[window]?;
+            let label = if mixed[window] {
+                format!("W{} VAR", window + 1)
+            } else {
+                let screen = match (main, sub) {
+                    (true, true) => "M/S",
+                    (true, false) => "M",
+                    (false, true) => "S",
+                    (false, false) => "off",
+                };
+                let inversion = if inverted { " INV" } else { "" };
+                format!("W{} {screen}{inversion}", window + 1)
+            };
+
+            Some(TilemapOverlay {
+                label: label.into(),
+                slot: window,
+                bands,
+            })
+        })
+        .collect()
 }
 
 fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {

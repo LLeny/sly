@@ -206,7 +206,7 @@ fn advance_hdma_channel(snes: &mut Snes<impl MemoryMap>, index: usize) {
     let bit = channel_bit(index);
     let mut channel = snes.dma.channels[index];
 
-    channel.line_counter = HdmaLineCounter::from_raw(channel.line_counter.raw().wrapping_sub(1));
+    channel.line_counter = channel.line_counter.wrapping_sub(1);
     if channel.line_counter.line_count() == 0 {
         reload_hdma_entry(snes, index, &mut channel);
     } else {

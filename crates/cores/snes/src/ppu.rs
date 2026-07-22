@@ -23,6 +23,8 @@ use crate::ppu::obj::ObjLayer;
 use crate::ppu::regs::{BackgroundMode, LayerMask, LayerWindowEnable, Priority};
 use crate::ppu::tile::Tile;
 use crate::ppu::vram::Vram;
+#[cfg(feature = "debug")]
+use crate::ppu::window::WindowTrace;
 use crate::ppu::window::Windows;
 use crate::scheduler::{MASTER_CLOCKS_PER_SCANLINE, Scheduler, VBLANK_START_SCANLINE};
 use crate::{MemoryMap, Snes};
@@ -48,6 +50,8 @@ pub struct Ppu {
     pub(crate) main_screen_window: LayerWindowEnable,
     pub(crate) sub_screen_window: LayerWindowEnable,
     pub(crate) windows: Windows,
+    #[cfg(feature = "debug")]
+    pub(crate) window_trace: WindowTrace,
     pub(crate) color_math: ColorMath,
     pub(crate) obj: ObjLayer,
     pub(crate) matrix: Matrix,
@@ -73,6 +77,8 @@ impl Ppu {
             main_screen_window: LayerWindowEnable::default(),
             sub_screen_window: LayerWindowEnable::default(),
             windows: Windows::default(),
+            #[cfg(feature = "debug")]
+            window_trace: WindowTrace::default(),
             color_math: ColorMath::default(),
             obj: ObjLayer::default(),
             matrix: Matrix::default(),
@@ -352,6 +358,9 @@ impl TilemapData {
 }
 
 pub(crate) fn vblank_start<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
+    #[cfg(feature = "debug")]
+    snes.ppu.window_trace.finish_frame();
+
     snes.irq.set_vblank(true);
 
     if snes.irq.joypad_autoread_enabled() {

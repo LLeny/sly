@@ -5,7 +5,7 @@ use std::sync::Arc;
 use gpui::prelude::*;
 use gpui::{
     App, Bounds, ClickEvent, Div, Hsla, ImageFiltering, MouseMoveEvent, Pixels, Point, RenderImage,
-    SharedString, Size, Window, canvas, div, img, point, px, size,
+    SharedString, Size, Window, canvas, div, fill, img, point, px, size,
 };
 
 use crate::components::{
@@ -18,6 +18,7 @@ mod image_grid;
 pub(super) type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
 pub(super) type HoverCallback = Rc<dyn Fn(Option<usize>, &mut Window, &mut App) + 'static>;
 pub(super) type ViewportCallback = Rc<dyn Fn(Size<f32>, &mut Window, &mut App) + 'static>;
+type OverlayToggleCallback = Rc<dyn Fn(&mut Window, &mut App) + 'static>;
 
 type DetailFn = Box<dyn Fn(&Theme, usize) -> Div + 'static>;
 
@@ -99,6 +100,22 @@ pub struct GridOverlay {
     pub height: u32,
 }
 
+#[derive(Clone)]
+pub struct GridWindowBand {
+    pub rect: GridOverlay,
+    pub active: bool,
+    pub show_edges: bool,
+}
+
+#[derive(Clone)]
+pub struct GridWindowOverlay {
+    pub bands: Vec<GridWindowBand>,
+    pub effective: Vec<GridOverlay>,
+    pub label_anchor: Option<GridOverlay>,
+    pub label: SharedString,
+    pub slot: usize,
+}
+
 impl From<debugger_model::TilemapViewport> for GridOverlay {
     fn from(viewport: debugger_model::TilemapViewport) -> Self {
         Self {
@@ -141,6 +158,7 @@ pub struct GridContent {
     pub count: usize,
     pub empty_message: &'static str,
     pub overlay: Option<GridOverlay>,
+    pub window_overlays: Vec<GridWindowOverlay>,
 }
 
 #[derive(IntoElement)]
@@ -164,6 +182,9 @@ pub struct GridPanel {
     on_hover: Option<HoverCallback>,
     on_layer_select: Option<SelectCallback>,
     on_viewport: Option<ViewportCallback>,
+    window_overlay_toggle: bool,
+    show_window_overlays: bool,
+    on_toggle_window_overlays: Option<OverlayToggleCallback>,
 }
 
 impl GridPanel {
@@ -193,6 +214,9 @@ impl GridPanel {
             on_hover: None,
             on_layer_select: None,
             on_viewport: None,
+            window_overlay_toggle: false,
+            show_window_overlays: true,
+            on_toggle_window_overlays: None,
         }
     }
 
@@ -282,6 +306,24 @@ impl GridPanel {
         self.on_viewport = Some(Rc::new(handler));
         self
     }
+
+    pub fn window_overlays_visible(mut self, visible: bool) -> Self {
+        self.show_window_overlays = visible;
+        self
+    }
+
+    pub fn window_overlay_toggle(mut self, enabled: bool) -> Self {
+        self.window_overlay_toggle = enabled;
+        self
+    }
+
+    pub fn on_toggle_window_overlays(
+        mut self,
+        handler: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_toggle_window_overlays = Some(Rc::new(handler));
+        self
+    }
 }
 
 impl RenderOnce for GridPanel {
@@ -299,6 +341,19 @@ impl RenderOnce for GridPanel {
                 self.layer,
                 self.on_layer_select,
             ));
+        }
+        if self.window_overlay_toggle {
+            let mut toggle = Segmented::new(format!("{}-windows", self.id))
+                .option_label("windows", "W1/W2")
+                .selected(if self.show_window_overlays {
+                    "windows"
+                } else {
+                    ""
+                });
+            if let Some(handler) = self.on_toggle_window_overlays.clone() {
+                toggle = toggle.on_select(move |_, window, cx| handler(window, cx));
+            }
+            selectors = selectors.child(toggle);
         }
 
         match &self.content {
@@ -323,6 +378,7 @@ impl RenderOnce for GridPanel {
                     self.on_select,
                     self.on_hover,
                     self.on_viewport,
+                    self.show_window_overlays,
                 ));
 
                 let selected = self.selected.filter(|&index| index < content.count);

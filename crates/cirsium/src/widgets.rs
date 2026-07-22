@@ -38,7 +38,9 @@ pub use disassembly::{
 };
 pub use dma::{DmaChannelDetail, DmaChannelView, DmaView, DmaWidget};
 pub use framebuffer::{FramebufferView, FramebufferWidget, stage_bgra};
-pub use grid::{GridContent, GridOverlay, GridPanel, TilesetLayer};
+pub use grid::{
+    GridContent, GridOverlay, GridPanel, GridWindowBand, GridWindowOverlay, TilesetLayer,
+};
 pub use log::{LogEntry, LogLevel, LogView, LogWidget, short_target};
 pub use memory::{MemoryCell, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};
 pub use mmio::{MmioFieldView, MmioGroup, MmioRegisterView, MmioView, MmioWidget};

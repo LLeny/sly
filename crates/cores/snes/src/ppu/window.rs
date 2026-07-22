@@ -1,7 +1,12 @@
-use crate::ppu::regs::{W12SEL, WBGLOG, WH0, WH3, WOBJLOG, WindowMaskSettings};
+#[cfg(feature = "debug")]
+use crate::ppu::regs::LayerWindowEnable;
+use crate::ppu::regs::{W12SEL, W34SEL, WBGLOG, WH0, WH3, WOBJLOG, WOBJSEL, WindowMaskSettings};
 
 const WINDOW_COUNT: usize = 2;
 const LAYER_COUNT: usize = 6;
+
+#[cfg(feature = "debug")]
+type WindowDebugSettings = ([(bool, bool); WINDOW_COUNT], [(u8, u8); WINDOW_COUNT]);
 
 pub(crate) const COLOR_WINDOW: u8 = 5;
 
@@ -10,6 +15,52 @@ pub(crate) struct Windows {
     selectors: [WindowMaskSettings; 3],
     positions: [u8; 4],
     logic: [u8; 2],
+}
+
+#[cfg(feature = "debug")]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct WindowDebugState {
+    pub(crate) windows: Windows,
+    pub(crate) main_screen: LayerWindowEnable,
+    pub(crate) sub_screen: LayerWindowEnable,
+}
+
+#[cfg(feature = "debug")]
+#[derive(Default)]
+pub(crate) struct WindowTrace {
+    current: Vec<WindowDebugState>,
+    completed: Vec<WindowDebugState>,
+    generation: u64,
+}
+
+#[cfg(feature = "debug")]
+impl WindowTrace {
+    pub(crate) fn record(&mut self, scanline: usize, state: WindowDebugState) {
+        if self.current.len() <= scanline {
+            self.current
+                .resize(scanline + 1, WindowDebugState::default());
+        }
+        self.current[scanline] = state;
+    }
+
+    pub(crate) fn finish_frame(&mut self) {
+        if !self.current.is_empty() {
+            self.completed.clone_from(&self.current);
+            self.generation = self.generation.wrapping_add(1);
+        }
+    }
+
+    pub(crate) fn rows(&self) -> &[WindowDebugState] {
+        if self.completed.is_empty() {
+            &self.current
+        } else {
+            &self.completed
+        }
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -42,14 +93,24 @@ impl WindowRowMask {
             },
         }
     }
+
+    #[cfg(feature = "debug")]
+    pub(crate) fn settings(&self) -> WindowDebugSettings {
+        (
+            std::array::from_fn(|i| (self.enabled[i], self.inverted[i])),
+            self.bounds,
+        )
+    }
 }
 
 impl Windows {
     pub(crate) fn write_selector(&mut self, reg: u16, value: WindowMaskSettings) {
+        debug_assert!(matches!(reg, W12SEL | W34SEL | WOBJSEL));
         self.selectors[(reg - W12SEL) as usize] = value;
     }
 
     pub(crate) fn selector(&self, reg: u16) -> &WindowMaskSettings {
+        debug_assert!(matches!(reg, W12SEL | W34SEL | WOBJSEL));
         &self.selectors[(reg - W12SEL) as usize]
     }
 

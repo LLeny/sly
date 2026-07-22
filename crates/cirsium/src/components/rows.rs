@@ -61,6 +61,13 @@ pub const FOOTER_ROW_H: f32 = 22.;
 
 /// A label/value row pinned under a panel's scroll area (selection details).
 pub fn footer_row(theme: &Theme, label: impl Into<SharedString>, value: impl IntoElement) -> Div {
+    footer_row_el(label_text(theme, label), value)
+}
+
+/// [`footer_row`] with a pre-built element label, for labels that embed inline
+/// elements (such as a [`divided`](super::divided) segment run) instead of plain
+/// text.
+pub fn footer_row_el(label: impl IntoElement, value: impl IntoElement) -> Div {
     div()
         .flex()
         .items_center()
@@ -68,7 +75,7 @@ pub fn footer_row(theme: &Theme, label: impl Into<SharedString>, value: impl Int
         .px_1()
         .h(px(FOOTER_ROW_H))
         .pt(px(6.))
-        .child(label_text(theme, label))
+        .child(label)
         .child(div().flex_1())
         .child(value)
 }

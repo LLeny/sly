@@ -28,6 +28,7 @@ impl Debugger {
         self.palette_key = None;
         self.tileset_key = None;
         self.tilemap_key = None;
+        self.tilemap_overlay_key = None;
         self.sprites_key = None;
     }
 
@@ -69,18 +70,27 @@ impl Debugger {
         cx: &mut Context<Self>,
     ) {
         let key = gens.map(|g| (g.tilemap, self.tilemap_ui.layer));
+        let overlay_key = gens.map(|g| (g.tilemap_overlay, self.tilemap_ui.layer));
         if key.is_some() && key == self.tilemap_key && self.tilemap.is_some() {
             let viewport = self.target.tilemap_viewport(self.tilemap_ui.layer);
             if let Some(view) = &mut self.tilemap {
                 view.viewport = viewport.map(Into::into);
+                if overlay_key != self.tilemap_overlay_key {
+                    view.set_overlays(self.target.tilemap_overlays(self.tilemap_ui.layer));
+                }
             }
+            self.tilemap_overlay_key = overlay_key;
 
             return;
         }
         self.tilemap_key = key;
+        self.tilemap_overlay_key = overlay_key;
 
         Self::drop_grid_image(cx, self.tilemap.take().and_then(|view| view.image));
         self.tilemap = self.target.tilemap(self.tilemap_ui.layer).map(Into::into);
+        if let Some(view) = &mut self.tilemap {
+            view.set_overlays(self.target.tilemap_overlays(self.tilemap_ui.layer));
+        }
     }
 
     pub(super) fn refresh_sprites(&mut self, cx: &mut Context<Self>) {
@@ -403,6 +413,7 @@ impl Debugger {
             .selected(state.selected())
             .hovered(state.hovered)
             .viewport(state.viewport)
+            .window_overlays_visible(state.show_window_overlays)
             .collapsed(self.is_collapsed(id))
             .on_toggle(cx.listener(move |this, _, _, cx| this.toggle(id, cx)))
             .on_layer_select({
@@ -441,6 +452,16 @@ impl Debugger {
                         if ui(d).set_viewport(viewport) {
                             cx.notify();
                         }
+                    })
+                }
+            })
+            .on_toggle_window_overlays({
+                let this = this.clone();
+                move |_, cx| {
+                    this.update(cx, |d, cx| {
+                        let state = ui(d);
+                        state.show_window_overlays = !state.show_window_overlays;
+                        cx.notify();
                     })
                 }
             })

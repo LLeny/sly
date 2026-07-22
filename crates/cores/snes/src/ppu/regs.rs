@@ -18,6 +18,7 @@ pub(crate) const RDCGRAM: u16 = 0x213B;
 pub(crate) const TM: u16 = 0x212C;
 pub(crate) const TS: u16 = 0x212D;
 pub(crate) const W12SEL: u16 = 0x2123;
+pub(crate) const W34SEL: u16 = 0x2124;
 pub(crate) const WOBJSEL: u16 = 0x2125;
 pub(crate) const WH0: u16 = 0x2126;
 pub(crate) const WH1: u16 = 0x2127;
