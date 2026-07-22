@@ -58,6 +58,8 @@ impl Render for Debugger {
         let theme = Theme::global(cx);
         let t = &*theme;
 
+        self.sync_game_focus(window, cx);
+
         if self.framebuffer_dirty {
             self.framebuffer_dirty = false;
             let updated = self
@@ -172,6 +174,16 @@ impl Render for Debugger {
             .workspace_dock(&active_workspace, &visible, |id| self.is_collapsed(id));
 
         div()
+            .track_focus(&self.game_focus)
+            .capture_any_mouse_down(cx.listener(|this, _, window, cx| {
+                window.focus(&this.game_focus, cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.game_key(&event.keystroke, true, window, cx);
+            }))
+            .on_key_up(cx.listener(|this, event: &KeyUpEvent, window, cx| {
+                this.game_key(&event.keystroke, false, window, cx);
+            }))
             .flex()
             .flex_col()
             .size_full()

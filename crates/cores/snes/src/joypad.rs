@@ -57,6 +57,29 @@ impl Joypads {
         self.input[port] = buttons;
     }
 
+    pub fn set_button(&mut self, port: usize, button: core_model::Button, pressed: bool) {
+        use core_model::Button as B;
+
+        let Some(input) = self.input.get_mut(port) else {
+            return;
+        };
+
+        match button {
+            B::Up => input.set_up(pressed),
+            B::Down => input.set_down(pressed),
+            B::Left => input.set_left(pressed),
+            B::Right => input.set_right(pressed),
+            B::A => input.set_a(pressed),
+            B::B => input.set_b(pressed),
+            B::X => input.set_x(pressed),
+            B::Y => input.set_y(pressed),
+            B::L => input.set_l(pressed),
+            B::R => input.set_r(pressed),
+            B::Start => input.set_start(pressed),
+            B::Select => input.set_select(pressed),
+        }
+    }
+
     pub fn input(&self, port: usize) -> Buttons {
         self.input[port]
     }

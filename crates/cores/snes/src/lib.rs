@@ -162,6 +162,10 @@ impl<M: MemoryMap + 'static> core_model::Core for Snes<M> {
         self.apu.drain_audio(out);
     }
 
+    fn set_button(&mut self, player: usize, button: core_model::Button, pressed: bool) {
+        self.joypads.set_button(player, button, pressed);
+    }
+
     fn session_info(&self) -> core_model::SessionInfo {
         core_model::SessionInfo {
             system: "SNES".into(),

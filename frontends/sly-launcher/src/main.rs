@@ -94,6 +94,7 @@ fn main() {
                 discovery::poll_artwork,
                 scene_textures::refresh_scene_materials,
                 input::handle_keyboard,
+                input::game_input.run_if(in_state(LauncherMode::Playing)),
                 ui::apply_view_mode,
                 shelf::animate_library,
                 cartridge::animate_carts,

@@ -21,12 +21,13 @@ use cirsium::widgets::{
 use cirsium::{
     ACCENT_PRESETS, ChangeTracker, GUEST_COLORS, Highlight, Theme, ThemeMode, accent_at, set_theme,
 };
-use core_model::ExecutionState;
+use core_model::{Button, ExecutionState};
 use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome, VideoGenerations};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, MouseDownEvent, Pixels, Point,
-    RenderImage, SharedString, Size, Task, Window, div, px, rgb,
+    AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, FocusHandle, KeyDownEvent,
+    KeyUpEvent, MouseDownEvent, Pixels, Point, RenderImage, SharedString, Size, Task, Window, div,
+    px, rgb,
 };
 use web_time::Instant;
 use workspace_model::{PanelDescriptor, PanelKind, RefreshPolicy, WorkspaceIcon};
@@ -37,6 +38,7 @@ use crate::logging::{LogBuffer, Logs};
 use crate::memory::{self, Memory};
 
 mod actions;
+mod input;
 mod panels;
 mod refresh;
 mod render;
@@ -141,6 +143,8 @@ pub(crate) struct Debugger {
     live_refresh: bool,
     workspace: SharedString,
     execution: ExecutionState,
+    game_focus: FocusHandle,
+    pressed_buttons: Vec<Button>,
     run_task: Option<Task<()>>,
     audio: crate::audio_out::AudioOut,
     stats: crate::stats::RunStats,
@@ -272,6 +276,8 @@ impl Debugger {
             live_refresh: true,
             workspace,
             execution: ExecutionState::Paused,
+            game_focus: cx.focus_handle(),
+            pressed_buttons: Vec::new(),
             run_task: None,
             audio,
             stats: crate::stats::RunStats::default(),

@@ -7,6 +7,39 @@ pub struct AudioSpec {
     pub channels: u8,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Button {
+    Up,
+    Down,
+    Left,
+    Right,
+    A,
+    B,
+    X,
+    Y,
+    L,
+    R,
+    Start,
+    Select,
+}
+
+impl Button {
+    pub const ALL: [Button; 12] = [
+        Button::Up,
+        Button::Down,
+        Button::Left,
+        Button::Right,
+        Button::A,
+        Button::B,
+        Button::X,
+        Button::Y,
+        Button::L,
+        Button::R,
+        Button::Start,
+        Button::Select,
+    ];
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ExecutionState {
     #[default]
@@ -132,6 +165,8 @@ pub trait Core {
     }
 
     fn drain_audio(&mut self, _out: &mut Vec<i16>) {}
+
+    fn set_button(&mut self, _player: usize, _button: Button, _pressed: bool) {}
 
     fn session_info(&self) -> SessionInfo {
         SessionInfo::default()

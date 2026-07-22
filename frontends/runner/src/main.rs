@@ -10,6 +10,26 @@ use snes::{Cartridge, Snes};
 
 const SCALE: u32 = 2;
 
+fn game_button(key: Keycode) -> Option<core_model::Button> {
+    use core_model::Button;
+
+    Some(match key {
+        Keycode::Up => Button::Up,
+        Keycode::Down => Button::Down,
+        Keycode::Left => Button::Left,
+        Keycode::Right => Button::Right,
+        Keycode::Z => Button::B,
+        Keycode::X => Button::A,
+        Keycode::A => Button::Y,
+        Keycode::S => Button::X,
+        Keycode::Q => Button::L,
+        Keycode::W => Button::R,
+        Keycode::Return => Button::Start,
+        Keycode::Backspace => Button::Select,
+        _ => return None,
+    })
+}
+
 struct Recorder {
     encoder: gif::Encoder<BufWriter<File>>,
     path: String,
@@ -141,6 +161,22 @@ fn main() {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => break 'running,
+                Event::KeyDown {
+                    keycode: Some(key),
+                    repeat: false,
+                    ..
+                } => {
+                    if let Some(button) = game_button(key) {
+                        snes.set_button(0, button, true);
+                    }
+                }
+                Event::KeyUp {
+                    keycode: Some(key), ..
+                } => {
+                    if let Some(button) = game_button(key) {
+                        snes.set_button(0, button, false);
+                    }
+                }
                 _ => {}
             }
         }

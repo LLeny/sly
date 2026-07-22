@@ -195,6 +195,10 @@ impl Core for SnesDebug {
         self.core.drain_audio(out);
     }
 
+    fn set_button(&mut self, player: usize, button: core_model::Button, pressed: bool) {
+        self.core.joypads.set_button(player, button, pressed);
+    }
+
     fn session_info(&self) -> SessionInfo {
         SessionInfo {
             system: self.system.clone(),
