@@ -36,7 +36,7 @@ pub fn title_bar(
         .child(left_controls);
 
     #[cfg(target_os = "macos")]
-    let left = left.pl(px(72.));
+    let left = left.pl(px(88.));
 
     let center = div()
         .flex_1()
