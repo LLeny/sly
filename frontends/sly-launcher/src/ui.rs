@@ -30,6 +30,10 @@ pub const BUBBLE_MARGIN_PX: f32 = 28.0;
 pub const EDGE_MARGIN_PX: f32 = 16.0;
 const ALPHABET_TOP_PX: f32 = EDGE_MARGIN_PX;
 const ALPHABET_HEIGHT_PX: f32 = 30.0;
+#[cfg(target_os = "macos")]
+const ALPHABET_LETTER_TOP_PX: f32 = 0.0;
+#[cfg(not(target_os = "macos"))]
+const ALPHABET_LETTER_TOP_PX: f32 = 1.0;
 pub const BUBBLE_VMARGIN_PX: f32 = ALPHABET_TOP_PX + ALPHABET_HEIGHT_PX + ALPHABET_TOP_PX;
 pub const BUBBLE_WIDTH_FRACTION: f32 = 0.38;
 pub const BUBBLE_VIEWPORT_FRACTION: f32 = 0.52;
@@ -398,7 +402,7 @@ fn alphabet_cell(letter_index: usize, mono: Handle<Font>) -> impl Scene {
         Children [
             (
                 Text(letter)
-                Node { top: px(1) }
+                Node { top: px(ALPHABET_LETTER_TOP_PX) }
                 text_font(mono, 11.0)
                 TextColor(TEXT_MUTED)
                 AlphabetLetter(letter_index)

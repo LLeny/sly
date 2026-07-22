@@ -38,7 +38,7 @@ pub fn spawn_view_camera(
     let entity = commands
         .spawn((
             Camera3d::default(),
-            Msaa::Sample8,
+            Msaa::Sample4,
             Camera {
                 order: -(spec.layer as isize),
                 clear_color: spec.clear.into(),
