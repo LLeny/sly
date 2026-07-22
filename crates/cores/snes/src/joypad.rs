@@ -7,7 +7,7 @@ pub const JOYPAD_IO_START: u16 = 0x4218;
 pub const JOYPAD_IO_END: u16 = 0x421F;
 
 #[chapa::bitfield(u16, order = lsb0)]
-#[derive(Default, Clone, Copy)]
+#[derive(Default)]
 pub struct Buttons {
     #[bits(4)]
     pub r: bool,

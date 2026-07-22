@@ -18,7 +18,7 @@ macro_rules! register_mmio {
         $vis:vis struct $name:ident @ $addr:literal { $($body:tt)* }
     ) => {
         #[chapa::bitfield($repr, order = lsb0)]
-        #[derive(Default, Clone, Copy)]
+        #[derive(Default)]
         $(#[$meta])*
         $vis struct $name { $($body)* }
 
@@ -45,7 +45,6 @@ macro_rules! register_mmio_family {
         symbols { $($addr:literal => $sym:literal),+ $(,)? }
     ) => {
         #[chapa::bitfield(u8, order = lsb0)]
-        #[derive(Clone, Copy)]
         $(#[$meta])*
         $vis struct $name { $($body)* }
 

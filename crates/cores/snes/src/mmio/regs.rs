@@ -207,7 +207,6 @@ impl Default for DmaChannelParameters {
 }
 
 #[chapa::bitfield(u32, order = lsb0, width = 24)]
-#[derive(Clone, Copy)]
 pub struct DmaAddress {
     #[bits(0..=15, overlay = "mdma")]
     pub offset: u16,
@@ -229,7 +228,6 @@ impl Default for DmaAddress {
 }
 
 #[chapa::bitfield(u32, order = lsb0, width = 24)]
-#[derive(Clone, Copy)]
 pub struct DmaByteCount {
     #[bits(0..=15, overlay = "mdma")]
     pub amount: u16,

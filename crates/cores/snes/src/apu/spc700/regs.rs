@@ -31,7 +31,7 @@ impl Spc700 {
 }
 
 #[chapa::bitfield(u8, order = lsb0)]
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug)]
 pub struct Flags {
     #[bits(0, alias = "c")]
     pub carry: bool,

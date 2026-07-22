@@ -98,8 +98,8 @@ impl BgScrollOffset {
     pub(crate) fn write<M: MemoryMap>(snes: &mut Snes<M>, reg: u16, value: u8) {
         let matrix = &mut snes.ppu.matrix;
         match reg {
-            M7HOFS => matrix.hofs = Mode7::sign_extend13(matrix.latch(value)),
-            M7VOFS => matrix.vofs = Mode7::sign_extend13(matrix.latch(value)),
+            M7HOFS => matrix.hofs = Signed13::from_raw(matrix.latch(value)).value(),
+            M7VOFS => matrix.vofs = Signed13::from_raw(matrix.latch(value)).value(),
             _ => {}
         }
 
@@ -116,15 +116,17 @@ impl BgScrollOffset {
     }
 }
 
+#[chapa::bitfield(u16, order = lsb0)]
+struct Signed13 {
+    #[bits(0..=12)]
+    value: i16,
+}
+
 pub(crate) struct Mode7;
 
 impl Mode7 {
     pub(crate) const START: u16 = M7_MATRIX_A;
     pub(crate) const END: u16 = M7_CENTER_Y;
-
-    fn sign_extend13(word: u16) -> i16 {
-        ((word << 3) as i16) >> 3
-    }
 
     pub(crate) fn write<M: MemoryMap>(snes: &mut Snes<M>, reg: u16, value: u8) {
         let matrix = &mut snes.ppu.matrix;
@@ -135,8 +137,8 @@ impl Mode7 {
             M7_MATRIX_B => matrix.b = word as i16,
             M7_MATRIX_C => matrix.c = word as i16,
             M7_MATRIX_D => matrix.d = word as i16,
-            M7_CENTER_X => matrix.center_x = Self::sign_extend13(word),
-            M7_CENTER_Y => matrix.center_y = Self::sign_extend13(word),
+            M7_CENTER_X => matrix.center_x = Signed13::from_raw(word).value(),
+            M7_CENTER_Y => matrix.center_y = Signed13::from_raw(word).value(),
             _ => unreachable!(),
         }
 
@@ -312,6 +314,26 @@ register_mmio! {
     }
 }
 
+register_mmio! {
+    /// MOSAIC
+    pub struct Mosaic @ 0x2106 {
+        #[bits(0)]
+        pub enable_bg1: bool,
+
+        #[bits(1)]
+        pub enable_bg2: bool,
+
+        #[bits(2)]
+        pub enable_bg3: bool,
+
+        #[bits(3)]
+        pub enable_bg4: bool,
+
+        #[bits(4..=7)]
+        pub size: u8,
+    }
+}
+
 #[derive(BitEnum, Clone, Copy, Default)]
 pub enum TilemapCount {
     #[fallback]
@@ -367,7 +389,7 @@ impl TilemapAddrAndSize {
 
     pub(crate) fn peek<M: MemoryMap>(snes: &Snes<M>, addr: u16) -> u8 {
         let layer = &snes.ppu.bg_layers[(addr - Self::START) as usize];
-        let mut reg = Self::from_raw(0);
+        let mut reg = Self::zeroed();
         reg.set_tilemap_addr((layer.tilemap_addr >> 10) as u8);
         reg.set_horizontal_tilemap_count(layer.horizontal_tilemap_count);
         reg.set_vertical_tilemap_count(layer.vertical_tilemap_count);

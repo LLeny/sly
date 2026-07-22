@@ -102,7 +102,7 @@ pub(crate) fn start_mdma(snes: &mut Snes<impl MemoryMap>) {
         }
     }
 
-    snes.dma.mdmaen = MdmaTransferStart::from_raw(0);
+    snes.dma.mdmaen = MdmaTransferStart::zeroed();
 }
 
 pub(crate) fn transfer_pattern_offsets(pattern: TransferPattern) -> &'static [u8] {

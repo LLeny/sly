@@ -144,7 +144,7 @@ pub enum MapMode {
 }
 
 #[chapa::bitfield(u8, order = msb0)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct MemoryMap {
     #[bits(3)]
     pub speed: Speed,

@@ -1099,6 +1099,11 @@ fn mmio_field_view(field: &crate::mmio::FieldInfo, parent: u32) -> MmioFieldView
             Vec::new(),
         ),
         FieldKind::Uint => (fmt_hex(), false, Vec::new()),
+        FieldKind::Sint => {
+            let sign_shift = 32 - field.width;
+            let signed = ((value << sign_shift) as i32) >> sign_shift;
+            (signed.to_string(), false, Vec::new())
+        }
         FieldKind::Enum(info) => {
             let display = info
                 .variants

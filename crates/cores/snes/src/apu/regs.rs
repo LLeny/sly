@@ -1,5 +1,4 @@
 #[chapa::bitfield(u8, order = lsb0)]
-#[derive(Default, Clone, Copy)]
 pub struct Control {
     #[bits(0)]
     pub enable_timer0: bool,

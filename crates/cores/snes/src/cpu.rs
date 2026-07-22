@@ -62,7 +62,7 @@ impl Cpu {
     /// to page one in emulation mode.
     pub fn normalize_emulation(&mut self) {
         if self.emulation {
-            self.flags = Flags::from_raw(self.flags.raw() | 0x30);
+            self.flags |= 0x30;
             self.stack_pointer = self.confine_sp(self.stack_pointer);
         }
     }
@@ -274,7 +274,7 @@ pub(crate) fn service_vectored<M: MemoryMap>(snes: &mut Snes<M>, native: u16, em
 }
 
 #[chapa::bitfield(u8, order = lsb0)]
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct Flags {
     #[bits(0, alias = "c")]
     pub carry: bool,
