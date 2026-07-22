@@ -29,18 +29,6 @@ pub(crate) const VMDATAH: u16 = 0x2119;
 pub(crate) const RDVRAML: u16 = 0x2139;
 pub(crate) const RDVRAMH: u16 = 0x213A;
 
-pub(crate) const M7HOFS: u16 = 0x210D;
-pub(crate) const M7VOFS: u16 = 0x210E;
-pub(crate) const M7_MATRIX_A: u16 = 0x211B;
-pub(crate) const M7_MATRIX_B: u16 = 0x211C;
-pub(crate) const M7_MATRIX_C: u16 = 0x211D;
-pub(crate) const M7_MATRIX_D: u16 = 0x211E;
-pub(crate) const M7_CENTER_X: u16 = 0x211F;
-pub(crate) const M7_CENTER_Y: u16 = 0x2120;
-pub(crate) const MPYL: u16 = 0x2134;
-pub(crate) const MPYM: u16 = 0x2135;
-pub(crate) const MPYH: u16 = 0x2136;
-
 pub(crate) const HTIMEL: u16 = 0x4207;
 pub(crate) const HTIMEH: u16 = 0x4208;
 pub(crate) const VTIMEL: u16 = 0x4209;
@@ -72,17 +60,6 @@ register_mmio_raw! {
     0x2112 => "BG3VOFS",
     0x2113 => "BG4HOFS",
     0x2114 => "BG4VOFS",
-    M7HOFS => "M7HOFS",
-    M7VOFS => "M7VOFS",
-    M7_MATRIX_A => "M7A",
-    M7_MATRIX_B => "M7B",
-    M7_MATRIX_C => "M7C",
-    M7_MATRIX_D => "M7D",
-    M7_CENTER_X => "M7X",
-    M7_CENTER_Y => "M7Y",
-    MPYL => "MPYL",
-    MPYM => "MPYM",
-    MPYH => "MPYH",
     HTIMEL => "HTIMEL",
     HTIMEH => "HTIMEH",
     VTIMEL => "VTIMEL",
@@ -96,12 +73,7 @@ impl BgScrollOffset {
     pub(crate) const END: u16 = 0x2114; // BG4VOFS
 
     pub(crate) fn write<M: MemoryMap>(snes: &mut Snes<M>, reg: u16, value: u8) {
-        let matrix = &mut snes.ppu.matrix;
-        match reg {
-            M7HOFS => matrix.hofs = Signed13::from_raw(matrix.latch(value)).value(),
-            M7VOFS => matrix.vofs = Signed13::from_raw(matrix.latch(value)).value(),
-            _ => {}
-        }
+        snes.ppu.matrix.write_scroll(reg, value);
 
         let index = (reg - Self::START) as usize;
         let layer = &mut snes.ppu.bg_layers[index / 2];
@@ -112,38 +84,6 @@ impl BgScrollOffset {
             layer.hofs = (value as u16) << 8 | (prev & !7) as u16 | (prev_h & 7) as u16;
         } else {
             layer.vofs = (value as u16) << 8 | prev as u16;
-        }
-    }
-}
-
-#[chapa::bitfield(u16, order = lsb0)]
-struct Signed13 {
-    #[bits(0..=12)]
-    value: i16,
-}
-
-pub(crate) struct Mode7;
-
-impl Mode7 {
-    pub(crate) const START: u16 = M7_MATRIX_A;
-    pub(crate) const END: u16 = M7_CENTER_Y;
-
-    pub(crate) fn write<M: MemoryMap>(snes: &mut Snes<M>, reg: u16, value: u8) {
-        let matrix = &mut snes.ppu.matrix;
-        let word = matrix.latch(value);
-
-        match reg {
-            M7_MATRIX_A => matrix.a = word as i16,
-            M7_MATRIX_B => matrix.b = word as i16,
-            M7_MATRIX_C => matrix.c = word as i16,
-            M7_MATRIX_D => matrix.d = word as i16,
-            M7_CENTER_X => matrix.center_x = Signed13::from_raw(word).value(),
-            M7_CENTER_Y => matrix.center_y = Signed13::from_raw(word).value(),
-            _ => unreachable!(),
-        }
-
-        if matches!(reg, M7_MATRIX_A | M7_MATRIX_B) {
-            matrix.update_result();
         }
     }
 }
@@ -314,26 +254,6 @@ register_mmio! {
     }
 }
 
-register_mmio! {
-    /// MOSAIC
-    pub struct Mosaic @ 0x2106 {
-        #[bits(0)]
-        pub enable_bg1: bool,
-
-        #[bits(1)]
-        pub enable_bg2: bool,
-
-        #[bits(2)]
-        pub enable_bg3: bool,
-
-        #[bits(3)]
-        pub enable_bg4: bool,
-
-        #[bits(4..=7)]
-        pub size: u8,
-    }
-}
-
 #[derive(BitEnum, Clone, Copy, Default)]
 pub enum TilemapCount {
     #[fallback]
@@ -395,6 +315,57 @@ impl TilemapAddrAndSize {
         reg.set_vertical_tilemap_count(layer.vertical_tilemap_count);
         reg.raw()
     }
+}
+
+register_mmio_family! {
+    /// TMW / TSW
+    pub struct LayerWindowEnable {
+        #[bits(0)]
+        pub enabled_bg1: bool,
+
+        #[bits(1)]
+        pub enabled_bg2: bool,
+
+        #[bits(2)]
+        pub enabled_bg3: bool,
+
+        #[bits(3)]
+        pub enabled_bg4: bool,
+
+        #[bits(4)]
+        pub enabled_obj: bool,
+    }
+    symbols {
+        0x212E => "TMW",
+        0x212F => "TSW",
+    }
+}
+
+#[chapa::bitfield(u8, order = lsb0)]
+pub struct WindowMaskSettings {
+    #[bits(0, alias = "invert_win1_bg3")]
+    pub invert_win1_bg1: bool,
+
+    #[bits(1, alias = "enable_win1_bg3")]
+    pub enable_win1_bg1: bool,
+
+    #[bits(2, alias = "invert_win2_bg3")]
+    pub invert_win2_bg1: bool,
+
+    #[bits(3, alias = "enable_win2_bg3")]
+    pub enable_win2_bg1: bool,
+
+    #[bits(4, alias = "invert_win1_bg4")]
+    pub invert_win1_bg2: bool,
+
+    #[bits(5, alias = "enable_win1_bg4")]
+    pub enable_win1_bg2: bool,
+
+    #[bits(6, alias = "invert_win2_bg4")]
+    pub invert_win2_bg2: bool,
+
+    #[bits(7, alias = "enable_win2_bg4")]
+    pub enable_win2_bg2: bool,
 }
 
 #[derive(Clone, Copy, Default)]

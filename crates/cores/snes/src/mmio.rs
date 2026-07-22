@@ -17,11 +17,13 @@ use crate::mmio::regs::{
     APU_IO_END, APU_IO_START, HdmaTransferEnable, HvStatusJoypadBusy, MdmaTransferStart,
     NmiTimerEnable, TimerUp, VblankFlagCpuVersion,
 };
+use crate::ppu::mode7::{Mode7Registers, PRODUCT_HIGH, PRODUCT_LOW, PRODUCT_MIDDLE};
+use crate::ppu::mosaic::MosaicRegister;
 use crate::ppu::regs::{
     Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, COLDATA, ColorMathControl,
-    ColorMathSelect, HTIMEH, HTIMEL, INIDISP, MPYH, MPYL, MPYM, Mode7, OAMADDH, OAMADDL, OAMDATA,
-    OAMDATAREAD, RDCGRAM, RDVRAMH, RDVRAML, SETINI, SpriteSizeAndTileBase, TM, TS,
-    TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL, VTIMEH, VTIMEL, VramControl,
+    ColorMathSelect, HTIMEH, HTIMEL, INIDISP, OAMADDH, OAMADDL, OAMDATA, OAMDATAREAD, RDCGRAM,
+    RDVRAMH, RDVRAML, SETINI, SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH, VMADDL,
+    VMDATAH, VMDATAL, VTIMEH, VTIMEL, VramControl,
 };
 use crate::{Cartridge, Snes};
 
@@ -211,6 +213,7 @@ impl<M: MemoryMap> Snes<M> {
             RDMPYL => self.math.product_or_remainder as u8,
             RDMPYH => (self.math.product_or_remainder >> 8) as u8,
             BgMode::ADDRESS => BgMode::read(self),
+            MosaicRegister::ADDRESS => MosaicRegister::read(self),
             TilemapAddrAndSize::START..=TilemapAddrAndSize::END => {
                 TilemapAddrAndSize::peek(self, reg)
             }
@@ -231,9 +234,9 @@ impl<M: MemoryMap> Snes<M> {
             VMDATAH => self.ppu.vram.peek_high(),
             RDVRAML => self.ppu.vram.read_low(),
             RDVRAMH => self.ppu.vram.read_high(),
-            MPYL => self.ppu.matrix.result as u8,
-            MPYM => (self.ppu.matrix.result >> 8) as u8,
-            MPYH => (self.ppu.matrix.result >> 16) as u8,
+            PRODUCT_LOW => self.ppu.matrix.result as u8,
+            PRODUCT_MIDDLE => (self.ppu.matrix.result >> 8) as u8,
+            PRODUCT_HIGH => (self.ppu.matrix.result >> 16) as u8,
             NmiTimerEnable::ADDRESS => NmiTimerEnable::read(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::read(self),
             TimerUp::ADDRESS => TimerUp::read(self),
@@ -273,6 +276,7 @@ impl<M: MemoryMap> Snes<M> {
                 self.math.process_div();
             }
             BgMode::ADDRESS => BgMode::write(self, value),
+            MosaicRegister::ADDRESS => MosaicRegister::write(self, value),
             TilemapAddrAndSize::START..=TilemapAddrAndSize::END => {
                 TilemapAddrAndSize::write(self, reg, value)
             }
@@ -306,7 +310,7 @@ impl<M: MemoryMap> Snes<M> {
                 }
             }
             BgScrollOffset::START..=BgScrollOffset::END => BgScrollOffset::write(self, reg, value),
-            Mode7::START..=Mode7::END => Mode7::write(self, reg, value),
+            Mode7Registers::START..=Mode7Registers::END => Mode7Registers::write(self, reg, value),
             HTIMEL => self.irq.h_timer.set_target_low(value),
             HTIMEH => self.irq.h_timer.set_target_high(value),
             VTIMEL => self.irq.v_timer.set_target_low(value),
@@ -349,6 +353,7 @@ impl<M: MemoryMap> Snes<M> {
             RDMPYL => self.math.product_or_remainder as u8,
             RDMPYH => (self.math.product_or_remainder >> 8) as u8,
             BgMode::ADDRESS => BgMode::peek(self),
+            MosaicRegister::ADDRESS => MosaicRegister::peek(self),
             TilemapAddrAndSize::START..=TilemapAddrAndSize::END => {
                 TilemapAddrAndSize::peek(self, reg)
             }
@@ -365,9 +370,9 @@ impl<M: MemoryMap> Snes<M> {
             VMADDH => (self.ppu.vram.word_addr() >> 8) as u8,
             VMDATAL | RDVRAML => self.ppu.vram.peek_low(),
             VMDATAH | RDVRAMH => self.ppu.vram.peek_high(),
-            MPYL => self.ppu.matrix.result as u8,
-            MPYM => (self.ppu.matrix.result >> 8) as u8,
-            MPYH => (self.ppu.matrix.result >> 16) as u8,
+            PRODUCT_LOW => self.ppu.matrix.result as u8,
+            PRODUCT_MIDDLE => (self.ppu.matrix.result >> 8) as u8,
+            PRODUCT_HIGH => (self.ppu.matrix.result >> 16) as u8,
             TM => self.ppu.main_screen.raw(),
             TS => self.ppu.sub_screen.raw(),
             HTIMEL => self.irq.h_timer.target_low(),

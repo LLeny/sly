@@ -3,7 +3,8 @@ pub mod cgram;
 pub(crate) mod color_math;
 pub(crate) mod latch;
 mod layer_order;
-mod mtx;
+pub(crate) mod mode7;
+pub(crate) mod mosaic;
 pub mod oam;
 pub(crate) mod obj;
 pub(crate) mod regs;
@@ -14,6 +15,8 @@ pub mod vram;
 use crate::ppu::cgram::Cgram;
 use crate::ppu::color_math::ColorMath;
 use crate::ppu::latch::ByteLatch;
+use crate::ppu::mode7::Matrix;
+use crate::ppu::mosaic::Mosaic;
 use crate::ppu::oam::Oam;
 use crate::ppu::obj::ObjLayer;
 use crate::ppu::regs::{BackgroundMode, LayerMask, Priority};
@@ -35,13 +38,14 @@ pub struct Ppu {
     pub(crate) bg_layers: [bg::BackgroundLayer; 4],
     pub(crate) bg_mode: BackgroundMode,
     pub(crate) bg3_priority: Priority,
+    pub(crate) mosaic: Mosaic,
     pub(crate) bgofs_latch: ByteLatch,
     pub(crate) hofs_latch: ByteLatch,
     pub(crate) main_screen: LayerMask,
     pub(crate) sub_screen: LayerMask,
     pub(crate) color_math: ColorMath,
     pub(crate) obj: ObjLayer,
-    pub(crate) matrix: mtx::Matrix,
+    pub(crate) matrix: Matrix,
     pub(crate) force_blank: bool,
     pub(crate) brightness: u8,
     pub(crate) frame_buffer: Vec<(u8, u8, u8)>,
@@ -56,13 +60,14 @@ impl Ppu {
             bg_layers: [bg::BackgroundLayer::default(); 4],
             bg_mode: BackgroundMode::Mode0,
             bg3_priority: Priority::Normal,
+            mosaic: Mosaic::default(),
             bgofs_latch: ByteLatch::default(),
             hofs_latch: ByteLatch::default(),
             main_screen: LayerMask::default(),
             sub_screen: LayerMask::default(),
             color_math: ColorMath::default(),
             obj: ObjLayer::default(),
-            matrix: mtx::Matrix::default(),
+            matrix: Matrix::default(),
             force_blank: true,
             brightness: 0,
             frame_buffer: vec![(0, 0, 0); SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize],

@@ -212,66 +212,61 @@ impl<'a> ScanlineRenderer<'a> {
 
         let use_direct_color =
             bits_per_pixel == 8 && matches!(self.ppu.color_math.color_source, ColorSource::Direct);
-        let map_y = (self.y + map.scroll_y) % (map.height * map.tile_px);
+        let sampled_y = self.ppu.mosaic.sample(layer, self.y);
+        let map_y = (sampled_y + map.scroll_y) % (map.height * map.tile_px);
         let (tile_y, pixel_y) = (map_y / map.tile_px, map_y % map.tile_px);
 
-        // adjacent pixels usually come from the same tile row, so cache the
-        // last decoded one
+        // Adjacent pixels usually come from the same tile and decoded row. With
+        // mosaic enabled, all pixels in a horizontal block reuse the same
+        // sampled tile and texel as well.
+        let mut cached_entry = None;
         let mut cached_tile_row = None;
         let mut decoded_row = [0u8; 8];
-        let mut screen_x = 0;
+        let mut entry = TilemapEntry::from(0);
 
-        while screen_x < SCREEN_WIDTH {
-            let map_x = (screen_x + map.scroll_x) % (map.width * map.tile_px);
+        for screen_x in 0..SCREEN_WIDTH {
+            let sampled_x = self.ppu.mosaic.sample(layer, screen_x);
+            let map_x = (sampled_x + map.scroll_x) % (map.width * map.tile_px);
             let (tile_x, pixel_x) = (map_x / map.tile_px, map_x % map.tile_px);
-            let pixels_in_span = (map.tile_px - pixel_x).min(SCREEN_WIDTH - screen_x);
 
-            let entry =
-                TilemapEntry::from(self.ppu.vram.word(map.entry_addr(tile_x, tile_y) as u16));
+            if cached_entry != Some((tile_x, tile_y)) {
+                entry =
+                    TilemapEntry::from(self.ppu.vram.word(map.entry_addr(tile_x, tile_y) as u16));
+                cached_entry = Some((tile_x, tile_y));
+            }
             if entry.priority != priority {
-                screen_x += pixels_in_span;
+                continue;
+            }
+
+            let slot = &mut line[screen_x as usize];
+            if slot.is_some() {
+                continue;
+            }
+
+            let (texture_x, texture_y) = entry.texel(pixel_x, pixel_y, map.tile_px);
+            let tile_index = entry.char_index(texture_x, texture_y);
+            if cached_tile_row != Some((tile_index, texture_y)) {
+                let tile_base = self.ppu.bg_layers[layer].tileset_addr * 2
+                    + tile_index as u32 * (bits_per_pixel as u32 * 8);
+                decoded_row = self
+                    .ppu
+                    .tile_row(tile_base, texture_y as usize % 8, bits_per_pixel);
+                cached_tile_row = Some((tile_index, texture_y));
+            }
+
+            let color_index = decoded_row[texture_x as usize % 8];
+            if color_index == 0 {
                 continue;
             }
 
             let (palette_base, _) =
                 self.ppu
                     .bg_palette(layer, bits_per_pixel, entry.palette_selection as usize);
-
-            for offset in 0..pixels_in_span {
-                let slot = &mut line[(screen_x + offset) as usize];
-                if slot.is_some() {
-                    continue;
-                }
-
-                let (texture_x, texture_y) = entry.texel(pixel_x + offset, pixel_y, map.tile_px);
-                let tile_index = entry.char_index(texture_x, texture_y);
-                if cached_tile_row != Some((tile_index, texture_y)) {
-                    let tile_base = self.ppu.bg_layers[layer].tileset_addr * 2
-                        + tile_index as u32 * (bits_per_pixel as u32 * 8);
-                    decoded_row =
-                        self.ppu
-                            .tile_row(tile_base, texture_y as usize % 8, bits_per_pixel);
-                    cached_tile_row = Some((tile_index, texture_y));
-                }
-
-                let color_index = decoded_row[texture_x as usize % 8];
-                if color_index == 0 {
-                    continue;
-                }
-
-                *slot = Some(VisiblePixel {
-                    color: self.background_color(
-                        palette_base,
-                        &entry,
-                        color_index,
-                        use_direct_color,
-                    ),
-                    source: PixelSource::Background(layer as u8),
-                    allows_color_math: true,
-                });
-            }
-
-            screen_x += pixels_in_span;
+            *slot = Some(VisiblePixel {
+                color: self.background_color(palette_base, &entry, color_index, use_direct_color),
+                source: PixelSource::Background(layer as u8),
+                allows_color_math: true,
+            });
         }
     }
 
