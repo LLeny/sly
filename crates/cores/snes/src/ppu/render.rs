@@ -1,7 +1,8 @@
 use crate::ppu::layer_order::{self, RenderPass};
 use crate::ppu::regs::{
-    ColorMathAddend, ColorMathIntensity, ColorSource, LayerMask, Priority, WindowRegion,
+    ColorMathAddend, ColorMathIntensity, ColorSource, LayerMask, LayerWindowEnable, Priority,
 };
+use crate::ppu::window::COLOR_WINDOW;
 use crate::ppu::{Ppu, SCREEN_WIDTH, Sprite, TilemapEntry, cgram};
 
 const SCREEN_WIDTH_USIZE: usize = SCREEN_WIDTH as usize;
@@ -71,10 +72,11 @@ impl<'a> ScanlineRenderer<'a> {
             [None; SCREEN_WIDTH_USIZE]
         };
 
-        let main = self.compose_layers(self.ppu.main_screen, &objects);
-        let sub = self
-            .uses_sub_screen_for_color_math()
-            .then(|| self.compose_layers(self.ppu.sub_screen, &objects));
+        let main =
+            self.compose_layers(self.ppu.main_screen, &self.ppu.main_screen_window, &objects);
+        let sub = self.uses_sub_screen_for_color_math().then(|| {
+            self.compose_layers(self.ppu.sub_screen, &self.ppu.sub_screen_window, &objects)
+        });
 
         self.resolve_output_scanline(&main, sub.as_ref(), row);
     }
@@ -84,7 +86,12 @@ impl<'a> ScanlineRenderer<'a> {
             && self.ppu.color_math.layers.raw() != 0
     }
 
-    fn compose_layers(&self, enabled_layers: LayerMask, objects: &ObjectLine) -> CompositedLine {
+    fn compose_layers(
+        &self,
+        enabled_layers: LayerMask,
+        window_enabled_layers: &LayerWindowEnable,
+        objects: &ObjectLine,
+    ) -> CompositedLine {
         let mut line = [None; SCREEN_WIDTH_USIZE];
 
         let passes = layer_order::front_to_back_passes(self.ppu.bg_mode, self.ppu.bg3_priority);
@@ -92,12 +99,22 @@ impl<'a> ScanlineRenderer<'a> {
             match *pass {
                 RenderPass::Background { layer, priority } => {
                     if enabled_layers.bg(layer) {
-                        self.paint_background(layer, priority, &mut line);
+                        self.paint_background(
+                            layer,
+                            priority,
+                            window_enabled_layers.enabled(layer),
+                            &mut line,
+                        );
                     }
                 }
                 RenderPass::Objects { priority } => {
                     if enabled_layers.obj() {
-                        self.paint_objects(priority, objects, &mut line);
+                        self.paint_objects(
+                            priority,
+                            window_enabled_layers.enabled(LayerMask::OBJ as usize),
+                            objects,
+                            &mut line,
+                        );
                     }
                 }
             }
@@ -179,12 +196,21 @@ impl<'a> ScanlineRenderer<'a> {
         line
     }
 
-    fn paint_objects(&self, priority: u8, objects: &ObjectLine, line: &mut CompositedLine) {
-        for (slot, object) in line.iter_mut().zip(objects) {
+    fn paint_objects(
+        &self,
+        priority: u8,
+        window_enabled: bool,
+        objects: &ObjectLine,
+        line: &mut CompositedLine,
+    ) {
+        for (x, (slot, object)) in line.iter_mut().zip(objects).enumerate() {
             let Some(object) = object else {
                 continue;
             };
-            if slot.is_some() || object.priority != priority {
+            if slot.is_some()
+                || object.priority != priority
+                || (window_enabled && self.ppu.windows.contains(LayerMask::OBJ, x as u8))
+            {
                 continue;
             }
 
@@ -203,7 +229,13 @@ impl<'a> ScanlineRenderer<'a> {
         }
     }
 
-    fn paint_background(&self, layer: usize, priority: Priority, line: &mut CompositedLine) {
+    fn paint_background(
+        &self,
+        layer: usize,
+        priority: Priority,
+        window_enabled: bool,
+        line: &mut CompositedLine,
+    ) {
         let (Some(bits_per_pixel), Some(map)) =
             (self.ppu.bg_mode.bpp(layer), self.ppu.tilemap_header(layer))
         else {
@@ -225,6 +257,10 @@ impl<'a> ScanlineRenderer<'a> {
         let mut entry = TilemapEntry::from(0);
 
         for screen_x in 0..SCREEN_WIDTH {
+            if window_enabled && self.ppu.windows.contains(layer as u8, screen_x as u8) {
+                continue;
+            }
+
             let sampled_x = self.ppu.mosaic.sample(layer, screen_x);
             let map_x = (sampled_x + map.scroll_x) % (map.width * map.tile_px);
             let (tile_x, pixel_x) = (map_x / map.tile_px, map_x % map.tile_px);
@@ -294,17 +330,18 @@ impl<'a> ScanlineRenderer<'a> {
     ) {
         let backdrop = VisiblePixel::backdrop(self.ppu.cgram.word(0));
 
-        // TODO: Windows, HDMA?
-        let force_main_to_black = matches!(
-            self.ppu.color_math.main_screen_region,
-            WindowRegion::Everywhere
-        );
-        let color_math_masked = matches!(
-            self.ppu.color_math.sub_screen_region,
-            WindowRegion::Everywhere
-        );
-
         for (x, out) in row.iter_mut().enumerate() {
+            let in_color_window = self.ppu.windows.contains(COLOR_WINDOW, x as u8);
+            let force_main_to_black = self
+                .ppu
+                .color_math
+                .main_screen_region
+                .contains(in_color_window);
+            let color_math_masked = self
+                .ppu
+                .color_math
+                .sub_screen_region
+                .contains(in_color_window);
             *out = self.resolve_output_pixel(
                 main[x].unwrap_or(backdrop),
                 sub.and_then(|line| line[x]),

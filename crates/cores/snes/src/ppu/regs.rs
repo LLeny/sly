@@ -17,6 +17,16 @@ pub(crate) const RDCGRAM: u16 = 0x213B;
 
 pub(crate) const TM: u16 = 0x212C;
 pub(crate) const TS: u16 = 0x212D;
+pub(crate) const W12SEL: u16 = 0x2123;
+pub(crate) const WOBJSEL: u16 = 0x2125;
+pub(crate) const WH0: u16 = 0x2126;
+pub(crate) const WH1: u16 = 0x2127;
+pub(crate) const WH2: u16 = 0x2128;
+pub(crate) const WH3: u16 = 0x2129;
+pub(crate) const WBGLOG: u16 = 0x212A;
+pub(crate) const WOBJLOG: u16 = 0x212B;
+pub(crate) const TMW: u16 = 0x212E;
+pub(crate) const TSW: u16 = 0x212F;
 pub(crate) const COLDATA: u16 = 0x2132;
 
 // TODO
@@ -50,6 +60,12 @@ register_mmio_raw! {
     RDVRAMH => "RDVRAMH",
     TM => "TM",
     TS => "TS",
+    WH0 => "WH0",
+    WH1 => "WH1",
+    WH2 => "WH2",
+    WH3 => "WH3",
+    WBGLOG => "WBGLOG",
+    WOBJLOG => "WOBJLOG",
     COLDATA => "COLDATA",
     SETINI => "SETINI",
     0x210D => "BG1HOFS",
@@ -319,6 +335,7 @@ impl TilemapAddrAndSize {
 
 register_mmio_family! {
     /// TMW / TSW
+    #[derive(Clone, Copy, Default)]
     pub struct LayerWindowEnable {
         #[bits(0)]
         pub enabled_bg1: bool,
@@ -341,31 +358,85 @@ register_mmio_family! {
     }
 }
 
-#[chapa::bitfield(u8, order = lsb0)]
-pub struct WindowMaskSettings {
-    #[bits(0, alias = "invert_win1_bg3")]
-    pub invert_win1_bg1: bool,
+register_mmio_family! {
+    /// W12SEL / W34SEL / WOBJSEL
+    #[derive(Clone, Copy, Default)]
+    pub struct WindowMaskSettings {
+        #[bits(0, alias = ["invert_win1_bg3", "invert_win1_obj"])]
+        pub invert_win1_bg1: bool,
 
-    #[bits(1, alias = "enable_win1_bg3")]
-    pub enable_win1_bg1: bool,
+        #[bits(1, alias = ["enable_win1_bg3", "enable_win1_obj"])]
+        pub enable_win1_bg1: bool,
 
-    #[bits(2, alias = "invert_win2_bg3")]
-    pub invert_win2_bg1: bool,
+        #[bits(2, alias = ["invert_win2_bg3", "invert_win2_obj"])]
+        pub invert_win2_bg1: bool,
 
-    #[bits(3, alias = "enable_win2_bg3")]
-    pub enable_win2_bg1: bool,
+        #[bits(3, alias = ["enable_win2_bg3", "enable_win2_obj"])]
+        pub enable_win2_bg1: bool,
 
-    #[bits(4, alias = "invert_win1_bg4")]
-    pub invert_win1_bg2: bool,
+        #[bits(4, alias = ["invert_win1_bg4", "invert_win1_color"])]
+        pub invert_win1_bg2: bool,
 
-    #[bits(5, alias = "enable_win1_bg4")]
-    pub enable_win1_bg2: bool,
+        #[bits(5, alias = ["enable_win1_bg4", "enable_win1_color"])]
+        pub enable_win1_bg2: bool,
 
-    #[bits(6, alias = "invert_win2_bg4")]
-    pub invert_win2_bg2: bool,
+        #[bits(6, alias = ["invert_win2_bg4", "invert_win2_color"])]
+        pub invert_win2_bg2: bool,
 
-    #[bits(7, alias = "enable_win2_bg4")]
-    pub enable_win2_bg2: bool,
+        #[bits(7, alias = ["enable_win2_bg4", "enable_win2_color"])]
+        pub enable_win2_bg2: bool,
+    }
+    symbols {
+        0x2123 => "W12SEL",
+        0x2124 => "W34SEL",
+        0x2125 => "WOBJSEL",
+    }
+}
+
+impl WindowMaskSettings {
+    pub(crate) const START: u16 = W12SEL;
+    pub(crate) const END: u16 = WOBJSEL;
+
+    pub(crate) fn write<M: MemoryMap>(snes: &mut Snes<M>, addr: u16, value: u8) {
+        snes.ppu.windows.write_selector(addr, Self::from_raw(value));
+    }
+
+    pub(crate) fn peek<M: MemoryMap>(snes: &Snes<M>, addr: u16) -> u8 {
+        snes.ppu.windows.selector(addr).raw()
+    }
+}
+
+impl LayerWindowEnable {
+    pub(crate) const START: u16 = TMW;
+    pub(crate) const END: u16 = TSW;
+
+    pub(crate) fn enabled(&self, layer: usize) -> bool {
+        match layer {
+            0 => self.enabled_bg1(),
+            1 => self.enabled_bg2(),
+            2 => self.enabled_bg3(),
+            3 => self.enabled_bg4(),
+            4 => self.enabled_obj(),
+            _ => false,
+        }
+    }
+
+    pub(crate) fn write<M: MemoryMap>(snes: &mut Snes<M>, addr: u16, value: u8) {
+        let reg = Self::from_raw(value & 0x1F);
+        match addr {
+            TMW => snes.ppu.main_screen_window = reg,
+            TSW => snes.ppu.sub_screen_window = reg,
+            _ => unreachable!(),
+        }
+    }
+
+    pub(crate) fn peek<M: MemoryMap>(snes: &Snes<M>, addr: u16) -> u8 {
+        match addr {
+            TMW => snes.ppu.main_screen_window.raw(),
+            TSW => snes.ppu.sub_screen_window.raw(),
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Default)]

@@ -11,6 +11,7 @@ pub(crate) mod regs;
 mod render;
 pub mod tile;
 pub mod vram;
+pub(crate) mod window;
 
 use crate::ppu::cgram::Cgram;
 use crate::ppu::color_math::ColorMath;
@@ -19,9 +20,10 @@ use crate::ppu::mode7::Matrix;
 use crate::ppu::mosaic::Mosaic;
 use crate::ppu::oam::Oam;
 use crate::ppu::obj::ObjLayer;
-use crate::ppu::regs::{BackgroundMode, LayerMask, Priority};
+use crate::ppu::regs::{BackgroundMode, LayerMask, LayerWindowEnable, Priority};
 use crate::ppu::tile::Tile;
 use crate::ppu::vram::Vram;
+use crate::ppu::window::Windows;
 use crate::scheduler::{MASTER_CLOCKS_PER_SCANLINE, Scheduler, VBLANK_START_SCANLINE};
 use crate::{MemoryMap, Snes};
 
@@ -43,6 +45,9 @@ pub struct Ppu {
     pub(crate) hofs_latch: ByteLatch,
     pub(crate) main_screen: LayerMask,
     pub(crate) sub_screen: LayerMask,
+    pub(crate) main_screen_window: LayerWindowEnable,
+    pub(crate) sub_screen_window: LayerWindowEnable,
+    pub(crate) windows: Windows,
     pub(crate) color_math: ColorMath,
     pub(crate) obj: ObjLayer,
     pub(crate) matrix: Matrix,
@@ -65,6 +70,9 @@ impl Ppu {
             hofs_latch: ByteLatch::default(),
             main_screen: LayerMask::default(),
             sub_screen: LayerMask::default(),
+            main_screen_window: LayerWindowEnable::default(),
+            sub_screen_window: LayerWindowEnable::default(),
+            windows: Windows::default(),
             color_math: ColorMath::default(),
             obj: ObjLayer::default(),
             matrix: Matrix::default(),

@@ -21,10 +21,12 @@ use crate::ppu::mode7::{Mode7Registers, PRODUCT_HIGH, PRODUCT_LOW, PRODUCT_MIDDL
 use crate::ppu::mosaic::MosaicRegister;
 use crate::ppu::regs::{
     Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, COLDATA, ColorMathControl,
-    ColorMathSelect, HTIMEH, HTIMEL, INIDISP, OAMADDH, OAMADDL, OAMDATA, OAMDATAREAD, RDCGRAM,
-    RDVRAMH, RDVRAML, SETINI, SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH, VMADDL,
-    VMDATAH, VMDATAL, VTIMEH, VTIMEL, VramControl,
+    ColorMathSelect, HTIMEH, HTIMEL, INIDISP, LayerWindowEnable, OAMADDH, OAMADDL, OAMDATA,
+    OAMDATAREAD, RDCGRAM, RDVRAMH, RDVRAML, SETINI, SpriteSizeAndTileBase, TM, TS,
+    TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL, VTIMEH, VTIMEL, VramControl,
+    WindowMaskSettings,
 };
+use crate::ppu::window::{LOGIC_END, LOGIC_START, POSITION_END, POSITION_START};
 use crate::{Cartridge, Snes};
 
 pub use addr::Address;
@@ -296,8 +298,16 @@ impl<M: MemoryMap> Snes<M> {
             VMDATAL => self.ppu.vram.write_low(value),
             VMDATAH => self.ppu.vram.write_high(value),
             RDVRAML | RDVRAMH => {}
+            WindowMaskSettings::START..=WindowMaskSettings::END => {
+                WindowMaskSettings::write(self, reg, value)
+            }
+            POSITION_START..=POSITION_END => self.ppu.windows.write_position(reg, value),
+            LOGIC_START..=LOGIC_END => self.ppu.windows.write_logic(reg, value),
             TM => self.ppu.main_screen = value.into(),
             TS => self.ppu.sub_screen = value.into(),
+            LayerWindowEnable::START..=LayerWindowEnable::END => {
+                LayerWindowEnable::write(self, reg, value)
+            }
             ColorMathControl::ADDRESS => ColorMathControl::write(self, value),
             COLDATA => self.ppu.color_math.set_fixed_color(value),
             ColorMathSelect::ADDRESS => ColorMathSelect::write(self, value),
@@ -370,11 +380,17 @@ impl<M: MemoryMap> Snes<M> {
             VMADDH => (self.ppu.vram.word_addr() >> 8) as u8,
             VMDATAL | RDVRAML => self.ppu.vram.peek_low(),
             VMDATAH | RDVRAMH => self.ppu.vram.peek_high(),
+            WindowMaskSettings::START..=WindowMaskSettings::END => {
+                WindowMaskSettings::peek(self, reg)
+            }
+            POSITION_START..=POSITION_END => self.ppu.windows.position(reg),
+            LOGIC_START..=LOGIC_END => self.ppu.windows.logic(reg),
             PRODUCT_LOW => self.ppu.matrix.result as u8,
             PRODUCT_MIDDLE => (self.ppu.matrix.result >> 8) as u8,
             PRODUCT_HIGH => (self.ppu.matrix.result >> 16) as u8,
             TM => self.ppu.main_screen.raw(),
             TS => self.ppu.sub_screen.raw(),
+            LayerWindowEnable::START..=LayerWindowEnable::END => LayerWindowEnable::peek(self, reg),
             HTIMEL => self.irq.h_timer.target_low(),
             HTIMEH => self.irq.h_timer.target_high(),
             VTIMEL => self.irq.v_timer.target_low(),
