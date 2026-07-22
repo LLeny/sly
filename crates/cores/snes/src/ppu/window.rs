@@ -12,6 +12,38 @@ pub(crate) struct Windows {
     logic: [u8; 2],
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct WindowRowMask {
+    enabled: [bool; WINDOW_COUNT],
+    inverted: [bool; WINDOW_COUNT],
+    bounds: [(u8, u8); WINDOW_COUNT],
+    logic: u8,
+}
+
+impl WindowRowMask {
+    pub(crate) fn contains(&self, x: u8) -> bool {
+        let mut areas = [false; WINDOW_COUNT];
+        for window in 0..WINDOW_COUNT {
+            let (left, right) = self.bounds[window];
+            let inside = left <= right && (left..=right).contains(&x);
+            areas[window] = inside ^ self.inverted[window];
+        }
+
+        match self.enabled {
+            [false, false] => false,
+            [true, false] => areas[0],
+            [false, true] => areas[1],
+            [true, true] => match self.logic {
+                0 => areas[0] || areas[1],
+                1 => areas[0] && areas[1],
+                2 => areas[0] ^ areas[1],
+                3 => areas[0] == areas[1],
+                _ => unreachable!(),
+            },
+        }
+    }
+}
+
 impl Windows {
     pub(crate) fn write_selector(&mut self, reg: u16, value: WindowMaskSettings) {
         self.selectors[(reg - W12SEL) as usize] = value;
@@ -37,34 +69,26 @@ impl Windows {
         self.logic[(reg - WBGLOG) as usize]
     }
 
-    pub(crate) fn contains(&self, layer: u8, x: u8) -> bool {
+    pub(crate) fn row_mask(&self, layer: u8) -> WindowRowMask {
         debug_assert!((layer as usize) < LAYER_COUNT);
 
         let settings = self.settings_for_layer(layer);
         let mut enabled = [false; WINDOW_COUNT];
-        let mut areas = [false; WINDOW_COUNT];
+        let mut inverted = [false; WINDOW_COUNT];
+        let mut bounds = [(0u8, 0u8); WINDOW_COUNT];
 
         for window in 0..WINDOW_COUNT {
-            let (window_enabled, inverted) = settings[window];
+            let (window_enabled, invert) = settings[window];
             enabled[window] = window_enabled;
-
-            let left = self.positions[window * 2];
-            let right = self.positions[window * 2 + 1];
-            let inside = left <= right && (left..=right).contains(&x);
-            areas[window] = inside ^ inverted;
+            inverted[window] = invert;
+            bounds[window] = (self.positions[window * 2], self.positions[window * 2 + 1]);
         }
 
-        match enabled {
-            [false, false] => false,
-            [true, false] => areas[0],
-            [false, true] => areas[1],
-            [true, true] => match self.logic_for_layer(layer) {
-                0 => areas[0] || areas[1],
-                1 => areas[0] && areas[1],
-                2 => areas[0] ^ areas[1],
-                3 => areas[0] == areas[1],
-                _ => unreachable!(),
-            },
+        WindowRowMask {
+            enabled,
+            inverted,
+            bounds,
+            logic: self.logic_for_layer(layer),
         }
     }
 

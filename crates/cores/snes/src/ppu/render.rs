@@ -203,13 +203,14 @@ impl<'a> ScanlineRenderer<'a> {
         objects: &ObjectLine,
         line: &mut CompositedLine,
     ) {
+        let window_mask = window_enabled.then(|| self.ppu.windows.row_mask(LayerMask::OBJ));
         for (x, (slot, object)) in line.iter_mut().zip(objects).enumerate() {
             let Some(object) = object else {
                 continue;
             };
             if slot.is_some()
                 || object.priority != priority
-                || (window_enabled && self.ppu.windows.contains(LayerMask::OBJ, x as u8))
+                || window_mask.is_some_and(|mask| mask.contains(x as u8))
             {
                 continue;
             }
@@ -244,9 +245,11 @@ impl<'a> ScanlineRenderer<'a> {
 
         let use_direct_color =
             bits_per_pixel == 8 && matches!(self.ppu.color_math.color_source, ColorSource::Direct);
-        let sampled_y = self.ppu.mosaic.sample(layer, self.y);
+        let mosaic_size = self.ppu.mosaic.size_for_layer(layer);
+        let sampled_y = self.y / mosaic_size * mosaic_size;
         let map_y = (sampled_y + map.scroll_y) % (map.height * map.tile_px);
         let (tile_y, pixel_y) = (map_y / map.tile_px, map_y % map.tile_px);
+        let window_mask = window_enabled.then(|| self.ppu.windows.row_mask(layer as u8));
 
         // Adjacent pixels usually come from the same tile and decoded row. With
         // mosaic enabled, all pixels in a horizontal block reuse the same
@@ -257,11 +260,11 @@ impl<'a> ScanlineRenderer<'a> {
         let mut entry = TilemapEntry::from(0);
 
         for screen_x in 0..SCREEN_WIDTH {
-            if window_enabled && self.ppu.windows.contains(layer as u8, screen_x as u8) {
+            if window_mask.is_some_and(|mask| mask.contains(screen_x as u8)) {
                 continue;
             }
 
-            let sampled_x = self.ppu.mosaic.sample(layer, screen_x);
+            let sampled_x = screen_x / mosaic_size * mosaic_size;
             let map_x = (sampled_x + map.scroll_x) % (map.width * map.tile_px);
             let (tile_x, pixel_x) = (map_x / map.tile_px, map_x % map.tile_px);
 
@@ -329,9 +332,10 @@ impl<'a> ScanlineRenderer<'a> {
         row: &mut RgbLine,
     ) {
         let backdrop = VisiblePixel::backdrop(self.ppu.cgram.word(0));
+        let color_window = self.ppu.windows.row_mask(COLOR_WINDOW);
 
         for (x, out) in row.iter_mut().enumerate() {
-            let in_color_window = self.ppu.windows.contains(COLOR_WINDOW, x as u8);
+            let in_color_window = color_window.contains(x as u8);
             let force_main_to_black = self
                 .ppu
                 .color_math

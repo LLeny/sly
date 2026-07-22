@@ -36,26 +36,20 @@ impl Default for Mosaic {
 
 impl Mosaic {
     fn write(&mut self, value: u8) {
-        let register = MosaicRegister::from_raw(value);
         self.layers = value & 0x0F;
-        self.size = register.size() + 1;
+        self.size = (value >> 4) + 1;
     }
 
     fn raw(self) -> u8 {
         (self.size - 1) << 4 | self.layers
     }
 
-    fn size_for_layer(self, layer: usize) -> u32 {
+    pub(crate) fn size_for_layer(self, layer: usize) -> u32 {
         if self.layers & (1 << layer) != 0 {
             self.size as u32
         } else {
             1
         }
-    }
-
-    pub(crate) fn sample(self, layer: usize, coordinate: u32) -> u32 {
-        let size = self.size_for_layer(layer);
-        coordinate / size * size
     }
 }
 

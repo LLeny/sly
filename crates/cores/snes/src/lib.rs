@@ -25,7 +25,7 @@ use crate::interrupt::Irq;
 use crate::joypad::Joypads;
 use crate::math::Math;
 use crate::mmio::Address;
-use crate::mmio::dma::Dma;
+use crate::mmio::dma::{self, Dma};
 use crate::ppu::Ppu;
 use crate::scheduler::Scheduler;
 
@@ -91,6 +91,16 @@ impl<M: MemoryMap + 'static> Snes<M> {
             .schedule_periodic(self.scheduler.cycles_per_frame(), ppu::vblank_end);
         self.scheduler
             .schedule_periodic(scheduler::MASTER_CLOCKS_PER_SCANLINE, ppu::draw_scanline);
+        self.scheduler.schedule_periodic_at(
+            dma::HDMA_INIT_CLOCK,
+            self.scheduler.cycles_per_frame(),
+            dma::init_hdma,
+        );
+        self.scheduler.schedule_periodic_at(
+            dma::HDMA_RUN_CLOCK,
+            scheduler::MASTER_CLOCKS_PER_SCANLINE,
+            dma::run_hdma,
+        );
         self.scheduler.schedule_periodic(
             scheduler::MASTER_CLOCKS_PER_SCANLINE,
             interrupt::hv_timer_line,
