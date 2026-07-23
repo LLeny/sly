@@ -40,6 +40,10 @@ pub(crate) const VMDATAH: u16 = 0x2119;
 pub(crate) const RDVRAML: u16 = 0x2139;
 pub(crate) const RDVRAMH: u16 = 0x213A;
 
+pub(crate) const SLHV: u16 = 0x2137;
+pub(crate) const OPHCT: u16 = 0x213C;
+pub(crate) const OPVCT: u16 = 0x213D;
+
 pub(crate) const HTIMEL: u16 = 0x4207;
 pub(crate) const HTIMEH: u16 = 0x4208;
 pub(crate) const VTIMEL: u16 = 0x4209;
@@ -59,6 +63,9 @@ register_mmio_raw! {
     VMDATAH => "VMDATAH",
     RDVRAML => "RDVRAML",
     RDVRAMH => "RDVRAMH",
+    SLHV => "SLHV",
+    OPHCT => "OPHCT",
+    OPVCT => "OPVCT",
     TM => "TM",
     TS => "TS",
     WH0 => "WH0",
@@ -153,6 +160,34 @@ impl AddressRemapping {
             Self::Bpp4 => (addr & 0xFE00) | ((addr << 3) & 0x01F8) | ((addr >> 6) & 0x0007),
             Self::Bpp8 => (addr & 0xFC00) | ((addr << 3) & 0x03F8) | ((addr >> 7) & 0x0007),
         }
+    }
+}
+
+register_mmio! {
+    /// STAT78
+    pub struct Ppu2Status @ 0x213F {
+        #[bits(4)]
+        pub pal: bool,
+    }
+}
+
+impl MmioReg for Ppu2Status {
+    fn write<M: MemoryMap>(_snes: &mut Snes<M>, _value: u8) {}
+
+    fn read<M: MemoryMap>(snes: &mut Snes<M>) -> u8 {
+        let value = Self::peek(snes);
+        snes.ppu.reset_counter_reads();
+        if snes.mmu.wrio() & 0x80 != 0 {
+            snes.ppu.clear_counter_latch();
+        }
+        value
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        let mut status = Self::default();
+        status.set_pal(snes.mmu.cartridge.region().tv_system() == crate::cartridge::TvSystem::Pal);
+        let counter_latch = snes.mmu.wrio() & 0x80 == 0 || snes.ppu.counter_latch();
+        status.raw() | ((counter_latch as u8) << 6)
     }
 }
 

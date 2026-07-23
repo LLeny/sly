@@ -58,6 +58,11 @@ pub struct Ppu {
     pub(crate) force_blank: bool,
     pub(crate) brightness: u8,
     pub(crate) frame_buffer: Vec<(u8, u8, u8)>,
+    counter_latch: bool,
+    latched_h_counter: u16,
+    latched_v_counter: u16,
+    ophct_high_byte: bool,
+    opvct_high_byte: bool,
 }
 
 impl Ppu {
@@ -85,7 +90,67 @@ impl Ppu {
             force_blank: true,
             brightness: 0,
             frame_buffer: vec![(0, 0, 0); SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize],
+            counter_latch: false,
+            latched_h_counter: 0,
+            latched_v_counter: 0,
+            ophct_high_byte: false,
+            opvct_high_byte: false,
         }
+    }
+
+    pub(crate) fn latch_counters(&mut self, master_clock: u64, scanline: u16) {
+        let mut hclock = master_clock % MASTER_CLOCKS_PER_SCANLINE;
+        if hclock >= 1292 {
+            hclock -= 2;
+        }
+        if hclock >= 1308 {
+            hclock -= 2;
+        }
+
+        self.latched_h_counter = (hclock / 4) as u16 & 0x01FF;
+        self.latched_v_counter = scanline & 0x01FF;
+        self.counter_latch = true;
+    }
+
+    fn counter_byte(counter: u16, high_byte: bool) -> u8 {
+        if high_byte {
+            (counter >> 8) as u8 & 1
+        } else {
+            counter as u8
+        }
+    }
+
+    pub(crate) fn peek_h_counter(&self) -> u8 {
+        Self::counter_byte(self.latched_h_counter, self.ophct_high_byte)
+    }
+
+    pub(crate) fn read_h_counter(&mut self) -> u8 {
+        let value = self.peek_h_counter();
+        self.ophct_high_byte = !self.ophct_high_byte;
+        value
+    }
+
+    pub(crate) fn peek_v_counter(&self) -> u8 {
+        Self::counter_byte(self.latched_v_counter, self.opvct_high_byte)
+    }
+
+    pub(crate) fn read_v_counter(&mut self) -> u8 {
+        let value = self.peek_v_counter();
+        self.opvct_high_byte = !self.opvct_high_byte;
+        value
+    }
+
+    pub(crate) fn counter_latch(&self) -> bool {
+        self.counter_latch
+    }
+
+    pub(crate) fn clear_counter_latch(&mut self) {
+        self.counter_latch = false;
+    }
+
+    pub(crate) fn reset_counter_reads(&mut self) {
+        self.ophct_high_byte = false;
+        self.opvct_high_byte = false;
     }
 
     pub(crate) fn set_display_control(&mut self, value: u8) {

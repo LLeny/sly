@@ -28,12 +28,14 @@ register_mmio_raw! {
 }
 
 register_mmio_raw! {
+    0x4201 => "WRIO",
     0x4202 => "WRMPYA",
     0x4203 => "WRMPYB",
     0x4204 => "WRDIVL",
     0x4205 => "WRDIVH",
     0x4206 => "WRDIVB",
     0x420D => "MEMSEL",
+    0x4213 => "RDIO",
     0x4214 => "RDDIVL",
     0x4215 => "RDDIVH",
     0x4216 => "RDMPYL",

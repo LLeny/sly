@@ -22,9 +22,9 @@ use crate::ppu::mosaic::MosaicRegister;
 use crate::ppu::regs::{
     Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, COLDATA, ColorMathControl,
     ColorMathSelect, HTIMEH, HTIMEL, INIDISP, LayerWindowEnable, OAMADDH, OAMADDL, OAMDATA,
-    OAMDATAREAD, RDCGRAM, RDVRAMH, RDVRAML, SETINI, SpriteSizeAndTileBase, TM, TS,
-    TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL, VTIMEH, VTIMEL, VramControl,
-    WindowMaskSettings,
+    OAMDATAREAD, OPHCT, OPVCT, Ppu2Status, RDCGRAM, RDVRAMH, RDVRAML, SETINI, SLHV,
+    SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL, VTIMEH,
+    VTIMEL, VramControl, WindowMaskSettings,
 };
 use crate::ppu::window::{LOGIC_END, LOGIC_START, POSITION_END, POSITION_START};
 use crate::{Cartridge, Snes};
@@ -36,13 +36,16 @@ pub(crate) use symbol::MmioReg;
 pub use symbol::{MmioSymbol, address_of, is_symbol, symbol, symbols};
 
 pub(crate) const OPEN_BUS: u8 = 0xFF;
+pub(crate) const WRIO: u16 = 0x4201;
 pub(crate) const MEMSEL: u16 = 0x420D;
+pub(crate) const RDIO: u16 = 0x4213;
 
 pub struct Mmio<M: MemoryMap = CartridgeMap> {
     pub cartridge: Cartridge,
     pub wram: Box<[u8]>,
     map: M,
     pub fastrom: bool,
+    wrio: u8,
     pub clocks: u64,
 
     #[cfg(feature = "debug")]
@@ -89,6 +92,7 @@ impl<M: MemoryMap> Mmio<M> {
             wram: vec![0; M::WRAM_SIZE].into_boxed_slice(),
             map,
             fastrom: false,
+            wrio: 0xFF,
             clocks: 0,
 
             #[cfg(feature = "debug")]
@@ -99,12 +103,17 @@ impl<M: MemoryMap> Mmio<M> {
     pub fn reset(&mut self) {
         self.wram.fill(0);
         self.fastrom = false;
+        self.wrio = 0xFF;
         self.clocks = 0;
 
         #[cfg(feature = "debug")]
         {
             self.access = AccessTracker::default();
         }
+    }
+
+    pub(crate) fn wrio(&self) -> u8 {
+        self.wrio
     }
 
     /// Translate a CPU address to an address space (WRAM, ROM, I/O or unmapped).
@@ -215,6 +224,7 @@ impl<M: MemoryMap> Snes<M> {
 
     fn read_io(&mut self, reg: u16) -> u8 {
         match reg {
+            RDIO => self.mmu.wrio,
             MEMSEL => self.mmu.fastrom as u8,
             RDDIVL => self.math.div_quotient as u8,
             RDDIVH => (self.math.div_quotient >> 8) as u8,
@@ -245,6 +255,17 @@ impl<M: MemoryMap> Snes<M> {
             PRODUCT_LOW => self.ppu.matrix.result as u8,
             PRODUCT_MIDDLE => (self.ppu.matrix.result >> 8) as u8,
             PRODUCT_HIGH => (self.ppu.matrix.result >> 16) as u8,
+            SLHV => {
+                if self.mmu.wrio & 0x80 != 0 {
+                    let master_clock = self.scheduler.cycles();
+                    let scanline = self.scheduler.scanline_at(master_clock) as u16;
+                    self.ppu.latch_counters(master_clock, scanline);
+                }
+                OPEN_BUS
+            }
+            OPHCT => self.ppu.read_h_counter(),
+            OPVCT => self.ppu.read_v_counter(),
+            Ppu2Status::ADDRESS => Ppu2Status::read(self),
             NmiTimerEnable::ADDRESS => NmiTimerEnable::read(self),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::read(self),
             TimerUp::ADDRESS => TimerUp::read(self),
@@ -270,6 +291,16 @@ impl<M: MemoryMap> Snes<M> {
 
     fn write_io(&mut self, reg: u16, value: u8) {
         match reg {
+            WRIO => {
+                let external_latch_falling_edge = self.mmu.wrio & 0x80 != 0 && value & 0x80 == 0;
+                self.mmu.wrio = value;
+
+                if external_latch_falling_edge {
+                    let master_clock = self.scheduler.cycles();
+                    let scanline = self.scheduler.scanline_at(master_clock) as u16;
+                    self.ppu.latch_counters(master_clock, scanline);
+                }
+            }
             WRMPYA => self.math.mul_factor_a = value,
             WRMPYB => {
                 self.math.mul_factor_b = value;
@@ -325,6 +356,7 @@ impl<M: MemoryMap> Snes<M> {
                     );
                 }
             }
+            Ppu2Status::ADDRESS => Ppu2Status::write(self, value),
             BgScrollOffset::START..=BgScrollOffset::END => BgScrollOffset::write(self, reg, value),
             Mode7Registers::START..=Mode7Registers::END => Mode7Registers::write(self, reg, value),
             HTIMEL => self.irq.h_timer.set_target_low(value),
@@ -363,6 +395,7 @@ impl<M: MemoryMap> Snes<M> {
 
     fn peek_io(&self, reg: u16) -> u8 {
         match reg {
+            WRIO | RDIO => self.mmu.wrio,
             MEMSEL => self.mmu.fastrom as u8,
             RDDIVL => self.math.div_quotient as u8,
             RDDIVH => (self.math.div_quotient >> 8) as u8,
@@ -394,6 +427,10 @@ impl<M: MemoryMap> Snes<M> {
             PRODUCT_LOW => self.ppu.matrix.result as u8,
             PRODUCT_MIDDLE => (self.ppu.matrix.result >> 8) as u8,
             PRODUCT_HIGH => (self.ppu.matrix.result >> 16) as u8,
+            SLHV => OPEN_BUS,
+            OPHCT => self.ppu.peek_h_counter(),
+            OPVCT => self.ppu.peek_v_counter(),
+            Ppu2Status::ADDRESS => Ppu2Status::peek(self),
             TM => self.ppu.main_screen.raw(),
             TS => self.ppu.sub_screen.raw(),
             LayerWindowEnable::START..=LayerWindowEnable::END => LayerWindowEnable::peek(self, reg),

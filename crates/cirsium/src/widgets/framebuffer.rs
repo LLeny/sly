@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, ImageFiltering, ObjectFit, RenderImage, Window, div, img, px};
+use gpui::{
+    App, Bounds, ClickEvent, Corners, ImageFiltering, Pixels, RenderImage, Window, canvas, div,
+    point, px, size,
+};
 
 use crate::assets::icon;
 use crate::components::{ClickHandler, Panel, empty_state};
@@ -52,6 +55,29 @@ pub fn stage_bgra(fb: &core_model::SoftwareFrame<'_>, out: &mut Vec<u8>) {
     }
 }
 
+fn fitted_bounds(
+    bounds: Bounds<Pixels>,
+    image_width: u32,
+    image_height: u32,
+    display_scale: f32,
+) -> Bounds<Pixels> {
+    let image_width = image_width as f32;
+    let image_height = image_height as f32;
+    let fit = (f32::from(bounds.size.width) * display_scale / image_width)
+        .min(f32::from(bounds.size.height) * display_scale / image_height);
+    let scale = if fit >= 1.0 { fit.floor() } else { fit };
+    let width = px(image_width * scale / display_scale);
+    let height = px(image_height * scale / display_scale);
+
+    Bounds {
+        origin: point(
+            bounds.origin.x + (bounds.size.width - width) / 2.0,
+            bounds.origin.y + (bounds.size.height - height) / 2.0,
+        ),
+        size: size(width, height),
+    }
+}
+
 #[derive(IntoElement)]
 pub struct FramebufferWidget {
     view: Option<FramebufferView>,
@@ -97,12 +123,29 @@ impl RenderOnce for FramebufferWidget {
             .items_center()
             .justify_center()
             .overflow_hidden();
-        let body = match self.view.as_ref().and_then(|view| view.image.clone()) {
-            Some(image) => body.child(
-                img(image)
-                    .size_full()
-                    .object_fit(ObjectFit::Contain)
-                    .image_filtering(ImageFiltering::Nearest),
+        let body = match self.view.as_ref().and_then(|view| {
+            view.image
+                .clone()
+                .map(|image| (image, view.width, view.height))
+        }) {
+            Some((image, width, height)) => body.child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, _, window, _| {
+                        let bounds = fitted_bounds(bounds, width, height, window.scale_factor());
+                        window
+                            .paint_image(
+                                bounds,
+                                Corners::all(px(0.)),
+                                image.clone(),
+                                0,
+                                false,
+                                ImageFiltering::Nearest,
+                            )
+                            .ok();
+                    },
+                )
+                .size_full(),
             ),
             None => body.child(empty_state(t, "No frame")),
         };
