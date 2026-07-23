@@ -14,7 +14,6 @@ mod stats;
 #[cfg(target_family = "wasm")]
 mod web_dnd;
 
-#[cfg(not(target_family = "wasm"))]
 use std::sync::Arc;
 
 use cirsium::components::register_text_input_keys;
@@ -100,6 +99,9 @@ fn run(initial: Option<Box<dyn DebugCore>>, logs: LogBuffer) {
         cx.set_http_client(Arc::new(
             reqwest_client::ReqwestClient::user_agent("debugger").unwrap(),
         ));
+
+        #[cfg(target_family = "wasm")]
+        cx.set_http_client(Arc::new(unsafe { gpui_web::FetchHttpClient::new() }));
 
         set_theme(cx, Theme::new(ThemeMode::Dark));
 

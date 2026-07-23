@@ -54,12 +54,14 @@ pub trait AssetProvider: Send + Sync {
 }
 
 pub struct LibretroThumbnails {
+    #[cfg(not(target_family = "wasm"))]
     base_url: &'static str,
 }
 
 impl LibretroThumbnails {
     pub fn new() -> Self {
         Self {
+            #[cfg(not(target_family = "wasm"))]
             base_url: "https://thumbnails.libretro.com",
         }
     }
@@ -78,10 +80,26 @@ impl AssetProvider for LibretroThumbnails {
             return None;
         }
 
-        let system = urlencoding::encode(game.system.info().libretro_name);
         let sanitized = self::sanitize(name);
         let file = urlencoding::encode(&sanitized);
-        Some(format!("{}/{}/Named_Boxarts/{}.png", self.base_url, system, file).into())
+
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let system = urlencoding::encode(game.system.info().libretro_name);
+            Some(format!("{}/{}/Named_Boxarts/{}.png", self.base_url, system, file).into())
+        }
+
+        // CORS issues
+        #[cfg(target_family = "wasm")]
+        {
+            let repo = game.system.info().libretro_name.replace(' ', "_");
+            Some(
+                format!(
+                    "https://raw.githubusercontent.com/libretro-thumbnails/{repo}/master/Named_Boxarts/{file}.png"
+                )
+                .into(),
+            )
+        }
     }
 }
 
