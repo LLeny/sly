@@ -51,6 +51,7 @@ pub struct Mmio<M: MemoryMap = CartridgeMap> {
 
 pub enum AddressSpace {
     Wram(usize),
+    Sram(usize),
     Rom(usize),
     Io(u16),
     Unmapped,
@@ -59,6 +60,7 @@ pub enum AddressSpace {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum MemKind {
     Wram,
+    Sram,
     Rom,
     Io,
     Spc,
@@ -67,6 +69,7 @@ pub enum MemKind {
 fn space_key(space: &AddressSpace) -> Option<(MemKind, u32)> {
     match space {
         AddressSpace::Wram(index) => Some((MemKind::Wram, *index as u32)),
+        AddressSpace::Sram(index) => Some((MemKind::Sram, *index as u32)),
         AddressSpace::Rom(index) => Some((MemKind::Rom, *index as u32)),
         AddressSpace::Io(reg) => Some((MemKind::Io, *reg as u32)),
         AddressSpace::Unmapped => None,
@@ -158,6 +161,7 @@ impl<M: MemoryMap> Snes<M> {
 
         match space {
             AddressSpace::Wram(index) => self.mmu.wram[index],
+            AddressSpace::Sram(index) => self.mmu.cartridge.sram[index],
             AddressSpace::Rom(index) => self.mmu.cartridge.rom[index],
             AddressSpace::Io(reg) => self.read_io(reg),
             AddressSpace::Unmapped => {
@@ -174,6 +178,7 @@ impl<M: MemoryMap> Snes<M> {
     pub fn peek8(&self, addr: Address) -> u8 {
         match self.mmu.map(addr) {
             AddressSpace::Wram(index) => self.mmu.wram[index],
+            AddressSpace::Sram(index) => self.mmu.cartridge.sram[index],
             AddressSpace::Rom(index) => self.mmu.cartridge.rom[index],
             AddressSpace::Io(reg) => self.peek_io(reg),
             AddressSpace::Unmapped => OPEN_BUS,
@@ -189,6 +194,7 @@ impl<M: MemoryMap> Snes<M> {
 
         match space {
             AddressSpace::Wram(index) => self.mmu.wram[index] = value,
+            AddressSpace::Sram(index) => self.mmu.cartridge.sram[index] = value,
             AddressSpace::Rom(_) => {
                 tracing::warn!(
                     addr = format!("{addr:?}"),

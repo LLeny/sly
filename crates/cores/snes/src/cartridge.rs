@@ -8,6 +8,7 @@ const HEADER_LENGTH: usize = 0x20;
 
 pub struct Cartridge {
     pub rom: Vec<u8>,
+    pub sram: Vec<u8>,
     header_offset: usize,
     map_mode: Option<MapMode>,
     rom_mask: Option<usize>,
@@ -16,11 +17,13 @@ pub struct Cartridge {
 impl Cartridge {
     pub fn new(rom: Vec<u8>) -> Result<Self, SnesError> {
         let header_offset = Self::search_header(&rom).ok_or(SnesError::InvalidRomHeader)?;
+
         let mut cartridge = Self {
             rom,
             header_offset,
             map_mode: None,
             rom_mask: None,
+            sram: Vec::new(),
         };
         cartridge.map_mode = cartridge.memory_map().ok().map(|map| map.map_mode());
         cartridge.rom_mask = cartridge
@@ -28,6 +31,10 @@ impl Cartridge {
             .len()
             .is_power_of_two()
             .then(|| cartridge.rom.len() - 1);
+        if cartridge.has_sram() {
+            cartridge.sram.resize(cartridge.sram_size(), 0);
+        }
+
         Ok(cartridge)
     }
 
@@ -51,6 +58,24 @@ impl Cartridge {
 
         let memory_map = self.rom[self.header_offset + MEMORY_MAP_OFFSET];
         MemoryMap::try_from_raw(memory_map).map_err(|_| SnesError::InvalidMemoryMap)
+    }
+
+    pub fn has_sram(&self) -> bool {
+        const EXTRA_HARDWARE_OFFSET: usize = 0x16;
+
+        let chipset = self.rom[self.header_offset + EXTRA_HARDWARE_OFFSET];
+        matches!(chipset & 0x0F, 0x01 | 0x02 | 0x04 | 0x05 | 0x09 | 0x0A)
+    }
+
+    pub fn sram_size(&self) -> usize {
+        const SRAM_SIZE_OFFSET: usize = 0x18;
+
+        let size_code = self.rom[self.header_offset + SRAM_SIZE_OFFSET];
+        if size_code == 0 {
+            0
+        } else {
+            1024usize.checked_shl(size_code.into()).unwrap_or(0)
+        }
     }
 
     pub fn header_offset(&self) -> usize {

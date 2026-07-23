@@ -35,6 +35,10 @@ impl MemoryMap for CartridgeMap {
         let bank = addr.bank();
         let offset = addr.address();
 
+        if let Some(space) = map_sram(cartridge, bank, offset) {
+            return space;
+        }
+
         match bank {
             // "The first 8 KiB of RAM is mirrored into many banks for convenient access,
             // and banks $7E-$7F provide continuous access to the entire 128 KiB in
@@ -55,6 +59,28 @@ impl MemoryMap for CartridgeMap {
             _ => self::map_rom(cartridge, bank, offset),
         }
     }
+}
+
+/// Translate the standard SRAM windows.
+fn map_sram(cartridge: &Cartridge, bank: u8, offset: u16) -> Option<AddressSpace> {
+    let size = cartridge.sram.len();
+    if size == 0 {
+        return None;
+    }
+
+    let raw_index = match cartridge.map_mode()? {
+        MapMode::LoRom if matches!(bank, 0x70..=0x7D | 0xF0..=0xFF) && offset <= 0x7FFF => {
+            (((bank & 0x0F) as usize) << 15) | offset as usize
+        }
+        MapMode::HiRom | MapMode::ExHiRom
+            if matches!(bank, 0x20..=0x3F | 0xA0..=0xBF) && (0x6000..=0x7FFF).contains(&offset) =>
+        {
+            (((bank & 0x1F) as usize) << 13) | (offset as usize - 0x6000)
+        }
+        _ => return None,
+    };
+
+    Some(AddressSpace::Sram(raw_index % size))
 }
 
 /// Waitstates within the system banks $00-$3F and $80-$BF.

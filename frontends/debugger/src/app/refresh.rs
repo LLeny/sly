@@ -72,15 +72,7 @@ impl Debugger {
         let key = gens.map(|g| (g.tilemap, self.tilemap_ui.layer));
         let overlay_key = gens.map(|g| (g.tilemap_overlay, self.tilemap_ui.layer));
         if key.is_some() && key == self.tilemap_key && self.tilemap.is_some() {
-            let viewport = self.target.tilemap_viewport(self.tilemap_ui.layer);
-            if let Some(view) = &mut self.tilemap {
-                view.viewport = viewport.map(Into::into);
-                if overlay_key != self.tilemap_overlay_key {
-                    view.set_overlays(self.target.tilemap_overlays(self.tilemap_ui.layer));
-                }
-            }
-            self.tilemap_overlay_key = overlay_key;
-
+            self.refresh_tilemap_overlay_keyed(gens);
             return;
         }
         self.tilemap_key = key;
@@ -91,6 +83,21 @@ impl Debugger {
         if let Some(view) = &mut self.tilemap {
             view.set_overlays(self.target.tilemap_overlays(self.tilemap_ui.layer));
         }
+    }
+
+    fn refresh_tilemap_overlay_keyed(&mut self, gens: Option<VideoGenerations>) {
+        let key = gens.map(|g| (g.tilemap_overlay, self.tilemap_ui.layer));
+        let viewport = self.target.tilemap_viewport(self.tilemap_ui.layer);
+        let overlays = (key != self.tilemap_overlay_key)
+            .then(|| self.target.tilemap_overlays(self.tilemap_ui.layer));
+
+        if let Some(view) = &mut self.tilemap {
+            view.viewport = viewport.map(Into::into);
+            if let Some(overlays) = overlays {
+                view.set_overlays(overlays);
+            }
+        }
+        self.tilemap_overlay_key = key;
     }
 
     pub(super) fn refresh_sprites(&mut self, cx: &mut Context<Self>) {
@@ -197,8 +204,20 @@ impl Debugger {
         let wants_tileset = self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tileset));
         let wants_tilemap = self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tilemap));
         let wants_sprites = self.wants_refresh(live, |kind| matches!(kind, PanelKind::Sprites));
+        let live_window_overlay = live
+            && self.tilemap_ui.show_window_overlays
+            && !self.is_collapsed(TilemapWidget::ID)
+            && self
+                .registry
+                .manifest()
+                .in_workspace(&self.workspace)
+                .any(|panel| matches!(panel.kind, PanelKind::Tilemap));
 
-        let gens = (wants_palette || wants_tileset || wants_tilemap || wants_sprites)
+        let gens = (wants_palette
+            || wants_tileset
+            || wants_tilemap
+            || wants_sprites
+            || live_window_overlay)
             .then(|| self.target.video_generations())
             .flatten();
 
@@ -226,6 +245,8 @@ impl Debugger {
 
         if wants_tilemap {
             self.refresh_tilemap_keyed(gens, cx);
+        } else if live_window_overlay {
+            self.refresh_tilemap_overlay_keyed(gens);
         }
 
         if wants_sprites {

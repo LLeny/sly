@@ -76,6 +76,14 @@ impl SnesDebug {
     fn region_byte(&self, region: &str, addr: u32) -> u8 {
         match region {
             "wram" => self.core.mmu.wram.get(addr as usize).copied().unwrap_or(0),
+            "sram" => self
+                .core
+                .mmu
+                .cartridge
+                .sram
+                .get(addr as usize)
+                .copied()
+                .unwrap_or(0),
             "rom" => self
                 .core
                 .mmu
@@ -93,6 +101,7 @@ impl SnesDebug {
     fn region_key(&self, region: &str, addr: u32) -> Option<(MemKind, u32)> {
         match region {
             "wram" => Some((MemKind::Wram, addr)),
+            "sram" => Some((MemKind::Sram, addr)),
             "rom" => Some((MemKind::Rom, addr)),
             "bus" => self.core.classify(Address::from_24bit(addr & 0x00FF_FFFF)),
             "spc" => Some((MemKind::Spc, addr)),
@@ -725,14 +734,26 @@ impl DebugCore for SnesDebug {
     }
 
     fn memory_regions(&self) -> Vec<MemoryRegion> {
-        vec![
+        let mut regions = vec![
             MemoryRegion::new("wram", "WRAM", 0, WRAM_SIZE),
             MemoryRegion::new("rom", "ROM", 0, self.core.mmu.cartridge.rom.len() as u32),
             MemoryRegion::new("ppu", "PPU/APU", PPU_BASE, PPU_SIZE),
             MemoryRegion::new("cpu", "CPU/DMA", CPU_BASE, CPU_SIZE),
             MemoryRegion::new("bus", "CPU Bus", 0, BUS_SIZE),
             MemoryRegion::new("spc", "SPC RAM", 0, 0x1_0000),
-        ]
+        ];
+        if !self.core.mmu.cartridge.sram.is_empty() {
+            regions.insert(
+                1,
+                MemoryRegion::new(
+                    "sram",
+                    "Cartridge SRAM",
+                    0,
+                    self.core.mmu.cartridge.sram.len() as u32,
+                ),
+            );
+        }
+        regions
     }
 
     fn read_memory(&self, region: &str, addr: u32, len: usize) -> Vec<u8> {
@@ -748,6 +769,7 @@ impl DebugCore for SnesDebug {
 
         match region {
             "wram" => window(&self.core.mmu.wram, addr, len),
+            "sram" => window(&self.core.mmu.cartridge.sram, addr, len),
             "rom" => window(&self.core.mmu.cartridge.rom, addr, len),
             _ => (0..len as u32)
                 .map(|i| self.region_byte(region, addr.wrapping_add(i)))
@@ -758,6 +780,7 @@ impl DebugCore for SnesDebug {
     fn format_address(&self, region: &str, addr: u32) -> String {
         match region {
             "wram" => format!("{:02X}:{:04X}", 0x7E + (addr >> 16), addr & 0xFFFF),
+            "sram" => format!("{addr:06X}"),
             "rom" => format!("{addr:06X}"),
             "bus" => format!("{:02X}:{:04X}", (addr >> 16) & 0xFF, addr & 0xFFFF),
             "spc" => format!("{:04X}", addr & 0xFFFF),
@@ -791,6 +814,7 @@ impl DebugCore for SnesDebug {
         let (kind, offset) = self.last_access.last?;
         let region = match kind {
             MemKind::Wram => "wram",
+            MemKind::Sram => "sram",
             MemKind::Rom => "rom",
             MemKind::Io if (PPU_BASE..PPU_BASE + PPU_SIZE).contains(&offset) => "ppu",
             MemKind::Io if (CPU_BASE..CPU_BASE + CPU_SIZE).contains(&offset) => "cpu",
@@ -1627,6 +1651,7 @@ fn cartridge_view(cart: &Cartridge) -> CartridgeView {
             CartridgeField::new("Speed", speed),
             CartridgeField::new("Region", cart.region().to_string()),
             CartridgeField::new("ROM size", self::human_size(cart.rom.len())),
+            CartridgeField::new("SRAM size", self::human_size(cart.sram.len())),
             CartridgeField::new("Header", format!("${:06X}", cart.header_offset())),
         ],
         cover: None,
