@@ -1,4 +1,4 @@
-use chapa::BitEnum;
+use chapa::bitenum;
 
 use crate::Snes;
 use crate::macros::{register_mmio, register_mmio_family, register_mmio_raw};
@@ -145,7 +145,7 @@ register_mmio! {
     }
 }
 
-#[derive(BitEnum, Clone, Copy)]
+#[bitenum]
 pub enum TransferPattern {
     #[fallback]
     Pattern0 = 0,
@@ -158,7 +158,7 @@ pub enum TransferPattern {
     Pattern7 = 7,
 }
 
-#[derive(BitEnum, Clone, Copy)]
+#[bitenum]
 pub enum AddressAdjustMode {
     Increment = 0,
     Decrement = 2,
@@ -166,7 +166,7 @@ pub enum AddressAdjustMode {
     Fixed = 1, // includes 3
 }
 
-#[derive(BitEnum, Clone, Copy)]
+#[bitenum]
 pub enum Direction {
     #[fallback]
     AToB = 0,

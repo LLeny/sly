@@ -1,4 +1,4 @@
-use chapa::BitEnum;
+use chapa::bitenum;
 
 use crate::Snes;
 use crate::macros::{register_mmio, register_mmio_family, register_mmio_raw};
@@ -105,7 +105,8 @@ impl BgScrollOffset {
     }
 }
 
-#[derive(BitEnum, Clone, Copy, Default)]
+#[bitenum]
+#[derive(Default)]
 pub enum IncrementMode {
     #[fallback]
     #[default]
@@ -113,7 +114,8 @@ pub enum IncrementMode {
     AfterHigh = 1,
 }
 
-#[derive(BitEnum, Clone, Copy, Default)]
+#[bitenum]
+#[derive(Default)]
 pub enum IncrementAmount {
     #[default]
     One = 0,
@@ -132,7 +134,8 @@ impl IncrementAmount {
     }
 }
 
-#[derive(BitEnum, Clone, Copy, Default)]
+#[bitenum]
+#[derive(Default)]
 pub enum AddressRemapping {
     #[fallback]
     #[default]
@@ -189,7 +192,7 @@ register_mmio! {
     }
 }
 
-#[derive(BitEnum, Clone, Copy)]
+#[bitenum]
 pub enum BackgroundMode {
     Mode0 = 0,
     Mode1 = 1,
@@ -223,7 +226,8 @@ impl BackgroundMode {
     }
 }
 
-#[derive(BitEnum, Clone, Copy, Default, PartialEq, Eq)]
+#[bitenum]
+#[derive(Default, PartialEq, Eq)]
 pub enum Priority {
     #[fallback]
     #[default]
@@ -231,7 +235,8 @@ pub enum Priority {
     High = 1,
 }
 
-#[derive(BitEnum, Clone, Copy, Default)]
+#[bitenum]
+#[derive(Default)]
 pub enum TileSize {
     #[fallback]
     #[default]
@@ -271,7 +276,8 @@ register_mmio! {
     }
 }
 
-#[derive(BitEnum, Clone, Copy, Default)]
+#[bitenum]
+#[derive(Default)]
 pub enum TilemapCount {
     #[fallback]
     #[default]
@@ -470,7 +476,8 @@ impl From<u8> for LayerMask {
     }
 }
 
-#[derive(BitEnum, Clone, Copy, Default)]
+#[bitenum]
+#[derive(Default)]
 pub enum ColorMathOperation {
     #[fallback]
     #[default]
@@ -478,7 +485,8 @@ pub enum ColorMathOperation {
     Subtract = 1,
 }
 
-#[derive(BitEnum, Clone, Copy, Default)]
+#[bitenum]
+#[derive(Default)]
 pub enum ColorMathIntensity {
     #[fallback]
     #[default]
@@ -486,7 +494,8 @@ pub enum ColorMathIntensity {
     Half = 1,
 }
 
-#[derive(BitEnum, Clone, Copy, Default)]
+#[bitenum]
+#[derive(Default)]
 pub enum ColorSource {
     #[fallback]
     #[default]
@@ -494,7 +503,8 @@ pub enum ColorSource {
     Direct = 1,
 }
 
-#[derive(BitEnum, Clone, Copy, Default, PartialEq, Eq)]
+#[bitenum]
+#[derive(Default, PartialEq, Eq)]
 pub enum ColorMathAddend {
     #[fallback]
     #[default]
@@ -502,7 +512,8 @@ pub enum ColorMathAddend {
     SubScreen = 1,
 }
 
-#[derive(BitEnum, Clone, Copy, Default)]
+#[bitenum]
+#[derive(Default)]
 pub enum WindowRegion {
     #[fallback]
     #[default]
@@ -594,7 +605,8 @@ impl MmioReg for ColorMathControl {
     }
 }
 
-#[derive(BitEnum, Clone, Copy, Default)]
+#[bitenum]
+#[derive(Default)]
 pub enum SpriteSize {
     #[fallback]
     #[default]

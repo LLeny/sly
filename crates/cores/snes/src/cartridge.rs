@@ -1,4 +1,4 @@
-use chapa::{BitEnum, BitField};
+use chapa::{BitField, bitenum};
 pub use core_model::{Region, TvSystem};
 
 use crate::error::SnesError;
@@ -150,14 +150,16 @@ impl Cartridge {
     }
 }
 
-#[derive(BitEnum, Clone, Copy, Debug)]
+#[bitenum]
+#[derive(Debug)]
 pub enum Speed {
     #[fallback]
     Slow = 0x00,
     Fast = 0x01,
 }
 
-#[derive(BitEnum, Clone, Copy, Debug)]
+#[bitenum]
+#[derive(Debug)]
 pub enum MapMode {
     #[fallback]
     LoRom = 0x00,
