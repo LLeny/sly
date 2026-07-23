@@ -4,7 +4,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use core_model::Region;
 
-use crate::artwork;
+use artwork::layle as artwork;
+
 use crate::library::{BoxStyle, CartShell};
 
 pub struct ProcessedArtwork {

@@ -1,4 +1,4 @@
-use crate::art::{Header, System};
+use artwork::{Header, System};
 
 include!(concat!(env!("OUT_DIR"), "/titles.rs"));
 
@@ -13,9 +13,5 @@ pub fn title(system: System, rom: &[u8]) -> Option<&'static str> {
 }
 
 fn rom_crc32(header: Header, rom: &[u8]) -> u32 {
-    let data = match header {
-        Header::SnesCopier if rom.len() % 1024 == 512 => &rom[512..],
-        _ => rom,
-    };
-    crc32fast::hash(data)
+    crc32fast::hash(header.strip(rom))
 }

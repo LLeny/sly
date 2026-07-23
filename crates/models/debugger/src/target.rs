@@ -148,6 +148,9 @@ pub trait DebugCore: Core {
     fn debug_run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome;
 
     fn cartridge(&self) -> &CartridgeView;
+
+    fn set_cover_art(&mut self, _cover: Arc<str>) {}
+
     fn mmio_view(&self) -> MmioView;
 
     fn dma_view(&self) -> DmaView {

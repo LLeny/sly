@@ -168,6 +168,9 @@ register_mmio! {
     pub struct Ppu2Status @ 0x213F {
         #[bits(4)]
         pub pal: bool,
+
+        #[bits(6)]
+        pub counter_latch: bool,
     }
 }
 
@@ -177,8 +180,8 @@ impl MmioReg for Ppu2Status {
     fn read<M: MemoryMap>(snes: &mut Snes<M>) -> u8 {
         let value = Self::peek(snes);
         snes.ppu.reset_counter_reads();
-        if snes.mmu.wrio() & 0x80 != 0 {
-            snes.ppu.clear_counter_latch();
+        if snes.mmu.latch_pin_high() {
+            snes.ppu.counter_latch = false;
         }
         value
     }
@@ -186,8 +189,8 @@ impl MmioReg for Ppu2Status {
     fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
         let mut status = Self::default();
         status.set_pal(snes.mmu.cartridge.region().tv_system() == crate::cartridge::TvSystem::Pal);
-        let counter_latch = snes.mmu.wrio() & 0x80 == 0 || snes.ppu.counter_latch();
-        status.raw() | ((counter_latch as u8) << 6)
+        status.set_counter_latch(!snes.mmu.latch_pin_high() || snes.ppu.counter_latch);
+        status.raw()
     }
 }
 
@@ -258,6 +261,11 @@ impl BackgroundMode {
 
     pub fn bpp(self, layer: usize) -> Option<u8> {
         self.layer_bpp().get(layer).copied().flatten()
+    }
+
+    /// Modes 5 and 6 render at doubled (512px) horizontal resolution.
+    pub fn is_hires(self) -> bool {
+        matches!(self, Self::Mode5 | Self::Mode6)
     }
 }
 

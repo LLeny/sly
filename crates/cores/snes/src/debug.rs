@@ -369,6 +369,10 @@ impl DebugCore for SnesDebug {
         &self.cartridge
     }
 
+    fn set_cover_art(&mut self, cover: Arc<str>) {
+        self.cartridge.cover = Some(cover);
+    }
+
     fn mmio_view(&self) -> MmioView {
         self::mmio_view(&self.core)
     }

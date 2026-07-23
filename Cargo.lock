@@ -370,6 +370,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f02882884d3e1bc524fb12c79f107f6ad0e1cfd498c536ffb494301740995dfe"
 
 [[package]]
+name = "artwork"
+version = "0.1.0"
+dependencies = [
+ "core-model",
+ "dirs",
+ "serde",
+ "serde_json",
+ "sha1",
+ "ureq",
+ "urlencoding",
+]
+
+[[package]]
 name = "as-raw-xcb-connection"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3437,11 +3450,13 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 name = "debugger"
 version = "0.1.0"
 dependencies = [
+ "artwork",
  "audio",
  "cirsium",
  "core-model",
  "crc32fast",
  "debugger-model",
+ "futures",
  "gpui",
  "gpui_platform",
  "gpui_web",
@@ -3450,7 +3465,6 @@ dependencies = [
  "snes",
  "tracing",
  "tracing-subscriber",
- "urlencoding",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -8699,16 +8713,13 @@ dependencies = [
 name = "sly-launcher"
 version = "0.1.0"
 dependencies = [
+ "artwork",
  "audio",
  "bevy",
  "core-model",
  "crc32fast",
- "dirs",
  "image",
- "serde",
- "sha1",
  "snes",
- "ureq",
  "walkdir",
 ]
 

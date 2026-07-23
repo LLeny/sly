@@ -1,8 +1,6 @@
-use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use core_model::{Region, TvSystem};
-use sha1::{Digest, Sha1};
 use snes::Cartridge;
 use walkdir::WalkDir;
 
@@ -105,12 +103,7 @@ pub fn load_cartridge(path: &Path) -> Result<Cartridge, String> {
 
 fn read_entry(path: &Path) -> Result<LibraryEntry, String> {
     let bytes = read_rom(path)?;
-    let sha1 = Sha1::digest(&bytes)
-        .iter()
-        .fold(String::with_capacity(40), |mut hex, byte| {
-            write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
-            hex
-        });
+    let sha1 = artwork::rom_sha1(artwork::System::Snes, &bytes);
     let crc = crc32fast::hash(&bytes);
     let cartridge = Cartridge::new(bytes).map_err(|err| format!("invalid SNES ROM: {err}"))?;
     let meta = gamedb::lookup(&sha1, crc);

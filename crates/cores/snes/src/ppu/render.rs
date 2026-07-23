@@ -6,12 +6,13 @@ use crate::ppu::window::COLOR_WINDOW;
 use crate::ppu::{Ppu, SCREEN_WIDTH, Sprite, TilemapEntry, cgram};
 
 const SCREEN_WIDTH_USIZE: usize = SCREEN_WIDTH as usize;
+const HIRES_WIDTH_USIZE: usize = SCREEN_WIDTH_USIZE * 2;
 const MAX_OBJECTS_PER_SCANLINE: usize = 32;
 const MAX_OBJECT_TILES_PER_SCANLINE: usize = 34;
 const FIRST_COLOR_MATH_OBJECT_PALETTE: u8 = 4;
 
-type CompositedLine = [Option<VisiblePixel>; SCREEN_WIDTH_USIZE];
-type ObjectLine = [Option<ObjectPixel>; SCREEN_WIDTH_USIZE];
+type CompositedLine = [Option<VisiblePixel>; HIRES_WIDTH_USIZE];
+type ObjectLine = [Option<ObjectPixel>; HIRES_WIDTH_USIZE];
 type RgbLine = [(u8, u8, u8); SCREEN_WIDTH_USIZE];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,12 +70,15 @@ impl<'a> ScanlineRenderer<'a> {
         let objects = if self.ppu.main_screen.obj() || self.ppu.sub_screen.obj() {
             self.object_pixels_on_scanline()
         } else {
-            [None; SCREEN_WIDTH_USIZE]
+            [None; HIRES_WIDTH_USIZE]
         };
 
         let main =
             self.compose_layers(self.ppu.main_screen, &self.ppu.main_screen_window, &objects);
-        let sub = self.uses_sub_screen_for_color_math().then(|| {
+        // Pseudo-hires only takes effect outside the true hires modes; in Modes
+        // 5 and 6 the sub screen is only needed for color math.
+        let pseudo_hires = self.ppu.pseudo_hires && !self.ppu.bg_mode.is_hires();
+        let sub = (pseudo_hires || self.uses_sub_screen_for_color_math()).then(|| {
             self.compose_layers(self.ppu.sub_screen, &self.ppu.sub_screen_window, &objects)
         });
 
@@ -92,7 +96,7 @@ impl<'a> ScanlineRenderer<'a> {
         window_enabled_layers: &LayerWindowEnable,
         objects: &ObjectLine,
     ) -> CompositedLine {
-        let mut line = [None; SCREEN_WIDTH_USIZE];
+        let mut line = [None; HIRES_WIDTH_USIZE];
 
         let passes = layer_order::front_to_back_passes(self.ppu.bg_mode, self.ppu.bg3_priority);
         for pass in passes {
@@ -151,15 +155,16 @@ impl<'a> ScanlineRenderer<'a> {
     }
 
     fn object_pixels_on_scanline(&self) -> ObjectLine {
-        let mut line = [None; SCREEN_WIDTH_USIZE];
+        let mut line = [None; HIRES_WIDTH_USIZE];
         let mut tile_count = 0;
+        let scale_x = if self.ppu.bg_mode.is_hires() { 2 } else { 1 };
 
         for sprite in self.visible_objects_on_scanline().iter().rev().flatten() {
             let sprite_row = sprite.row(self.y);
 
             for tile_column in 0..sprite.width / 8 {
-                let screen_x = sprite.x + tile_column as i32 * 8;
-                if screen_x <= -8 || screen_x >= SCREEN_WIDTH as i32 {
+                let screen_x = (sprite.x + tile_column as i32 * 8) * scale_x;
+                if screen_x <= -8 * scale_x || screen_x >= SCREEN_WIDTH as i32 * scale_x {
                     continue;
                 }
 
@@ -175,19 +180,22 @@ impl<'a> ScanlineRenderer<'a> {
                 let tile_row = self.ppu.tile_row(tile_base, texture_y as usize % 8, 4);
 
                 for pixel_offset in 0..8u32 {
-                    let x = screen_x + pixel_offset as i32;
-                    if !(0..SCREEN_WIDTH as i32).contains(&x) {
+                    let (texture_x, _) = sprite.texel(tile_column * 8 + pixel_offset, sprite_row);
+                    let color_index = tile_row[texture_x as usize % 8];
+                    if color_index == 0 {
                         continue;
                     }
 
-                    let (texture_x, _) = sprite.texel(tile_column * 8 + pixel_offset, sprite_row);
-                    let color_index = tile_row[texture_x as usize % 8];
-                    if color_index != 0 {
-                        line[x as usize] = Some(ObjectPixel {
-                            priority: sprite.priority,
-                            palette: sprite.palette,
-                            color: color_index,
-                        });
+                    let pixel = Some(ObjectPixel {
+                        priority: sprite.priority,
+                        palette: sprite.palette,
+                        color: color_index,
+                    });
+                    for subpixel in 0..scale_x {
+                        let x = screen_x + pixel_offset as i32 * scale_x + subpixel;
+                        if (0..SCREEN_WIDTH as i32 * scale_x).contains(&x) {
+                            line[x as usize] = pixel;
+                        }
                     }
                 }
             }
@@ -204,13 +212,18 @@ impl<'a> ScanlineRenderer<'a> {
         line: &mut CompositedLine,
     ) {
         let window_mask = window_enabled.then(|| self.ppu.windows.row_mask(LayerMask::OBJ));
-        for (x, (slot, object)) in line.iter_mut().zip(objects).enumerate() {
+        let scale = if self.ppu.bg_mode.is_hires() { 2 } else { 1 };
+        let width = SCREEN_WIDTH_USIZE * scale;
+
+        for (x, (slot, object)) in line[..width].iter_mut().zip(&objects[..width]).enumerate() {
             let Some(object) = object else {
                 continue;
             };
+
+            let window_x = x / scale;
             if slot.is_some()
                 || object.priority != priority
-                || window_mask.is_some_and(|mask| mask.contains(x as u8))
+                || window_mask.is_some_and(|mask| mask.contains(window_x as u8))
             {
                 continue;
             }
@@ -250,6 +263,14 @@ impl<'a> ScanlineRenderer<'a> {
         let map_y = (sampled_y + map.scroll_y) % (map.height * map.tile_px);
         let (tile_y, pixel_y) = (map_y / map.tile_px, map_y % map.tile_px);
         let window_mask = window_enabled.then(|| self.ppu.windows.row_mask(layer as u8));
+        let hires = self.ppu.bg_mode.is_hires();
+        let scale = if hires { 2 } else { 1 };
+        let screen_width = SCREEN_WIDTH * scale;
+        let mosaic_width = mosaic_size * scale;
+        let scroll_x = map.scroll_x * scale;
+        // Modes 5 and 6 replace the normal 8x8 setting with 16x8 cells.
+        // The large setting remains 16x16.
+        let tile_width = if hires { 16 } else { map.tile_px };
 
         // Adjacent pixels usually come from the same tile and decoded row. With
         // mosaic enabled, all pixels in a horizontal block reuse the same
@@ -259,14 +280,15 @@ impl<'a> ScanlineRenderer<'a> {
         let mut decoded_row = [0u8; 8];
         let mut entry = TilemapEntry::from(0);
 
-        for screen_x in 0..SCREEN_WIDTH {
-            if window_mask.is_some_and(|mask| mask.contains(screen_x as u8)) {
+        for screen_x in 0..screen_width {
+            let window_x = screen_x / scale;
+            if window_mask.is_some_and(|mask| mask.contains(window_x as u8)) {
                 continue;
             }
 
-            let sampled_x = screen_x / mosaic_size * mosaic_size;
-            let map_x = (sampled_x + map.scroll_x) % (map.width * map.tile_px);
-            let (tile_x, pixel_x) = (map_x / map.tile_px, map_x % map.tile_px);
+            let sampled_x = screen_x / mosaic_width * mosaic_width;
+            let map_x = (sampled_x + scroll_x) % (map.width * tile_width);
+            let (tile_x, pixel_x) = (map_x / tile_width, map_x % tile_width);
 
             if cached_entry != Some((tile_x, tile_y)) {
                 entry =
@@ -282,7 +304,7 @@ impl<'a> ScanlineRenderer<'a> {
                 continue;
             }
 
-            let (texture_x, texture_y) = entry.texel(pixel_x, pixel_y, map.tile_px);
+            let (texture_x, texture_y) = entry.texel(pixel_x, pixel_y, tile_width, map.tile_px);
             let tile_index = entry.char_index(texture_x, texture_y);
             if cached_tile_row != Some((tile_index, texture_y)) {
                 let tile_base = self.ppu.bg_layers[layer].tileset_addr * 2
@@ -333,6 +355,7 @@ impl<'a> ScanlineRenderer<'a> {
     ) {
         let backdrop = VisiblePixel::backdrop(self.ppu.cgram.word(0));
         let color_window = self.ppu.windows.row_mask(COLOR_WINDOW);
+        let hires = self.ppu.bg_mode.is_hires();
 
         for (x, out) in row.iter_mut().enumerate() {
             let in_color_window = color_window.contains(x as u8);
@@ -346,13 +369,30 @@ impl<'a> ScanlineRenderer<'a> {
                 .color_math
                 .sub_screen_region
                 .contains(in_color_window);
-            *out = self.resolve_output_pixel(
-                main[x].unwrap_or(backdrop),
-                sub.and_then(|line| line[x]),
-                force_main_to_black,
-                color_math_masked,
-            );
+
+            let resolve = |source_x: usize| {
+                self.resolve_output_pixel(
+                    main[source_x].unwrap_or(backdrop),
+                    sub.and_then(|line| line[source_x]),
+                    force_main_to_black,
+                    color_math_masked,
+                )
+            };
+
+            *out = if hires {
+                Self::average_rgb(resolve(x * 2), resolve(x * 2 + 1))
+            } else if self.ppu.pseudo_hires {
+                let sub_rgb = cgram::rgb(sub.and_then(|line| line[x]).unwrap_or(backdrop).color);
+                Self::average_rgb(sub_rgb, resolve(x))
+            } else {
+                resolve(x)
+            };
         }
+    }
+
+    fn average_rgb(a: (u8, u8, u8), b: (u8, u8, u8)) -> (u8, u8, u8) {
+        let average = |a: u8, b: u8| (a as u16 + b as u16).div_ceil(2) as u8;
+        (average(a.0, b.0), average(a.1, b.1), average(a.2, b.2))
     }
 
     fn resolve_output_pixel(

@@ -5,6 +5,7 @@ use gpui::prelude::*;
 use gpui::{Context, Entity, SharedString, Window, div};
 
 use crate::app::Debugger;
+use crate::cover::ArtQuery;
 use crate::logging::LogBuffer;
 
 pub(crate) struct Root {
@@ -16,12 +17,13 @@ pub(crate) struct Root {
 impl Root {
     pub(crate) fn new(
         logs: LogBuffer,
-        initial: Option<Box<dyn DebugCore>>,
+        initial: Option<(Box<dyn DebugCore>, ArtQuery)>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let debugger = initial.map(|target| {
-            let logs = logs.clone();
-            cx.new(|cx| Debugger::new(target, logs, cx))
+        let debugger = initial.map(|(target, art)| {
+            let debugger = cx.new(|cx| Debugger::new(target, logs.clone(), cx));
+            Self::resolve_cover_art(debugger.clone(), art, cx);
+            debugger
         });
         Self {
             logs,
@@ -32,9 +34,11 @@ impl Root {
 
     pub(crate) fn load_rom(&mut self, file_name: String, rom: Vec<u8>, cx: &mut Context<Self>) {
         match crate::load_snes_rom(rom, file_name) {
-            Ok(target) => {
+            Ok((target, art)) => {
                 let logs = self.logs.clone();
-                self.debugger = Some(cx.new(|cx| Debugger::new(target, logs, cx)));
+                let debugger = cx.new(|cx| Debugger::new(target, logs, cx));
+                Self::resolve_cover_art(debugger.clone(), art, cx);
+                self.debugger = Some(debugger);
                 self.error = None;
             }
             Err(err) => {
@@ -43,6 +47,17 @@ impl Root {
             }
         }
         cx.notify();
+    }
+
+    fn resolve_cover_art(debugger: Entity<Debugger>, art: ArtQuery, cx: &mut Context<Self>) {
+        let client = cx.http_client();
+        cx.spawn(async move |_this, cx| {
+            let Some(cover) = crate::cover::resolve(client, &art).await else {
+                return;
+            };
+            let _ = debugger.update(cx, |debugger, cx| debugger.set_cover_art(cover, cx));
+        })
+        .detach();
     }
 
     #[cfg(not(target_family = "wasm"))]

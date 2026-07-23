@@ -1,5 +1,4 @@
 mod art_processing;
-mod artwork;
 mod assets;
 mod camera;
 mod cartridge;

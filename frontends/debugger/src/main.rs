@@ -1,9 +1,9 @@
 #![cfg_attr(target_family = "wasm", no_main)]
 
 mod app;
-mod art;
 mod audio_out;
 mod breakpoints;
+mod cover;
 mod db;
 mod disasm;
 mod logging;
@@ -54,8 +54,8 @@ fn init_logging() -> LogBuffer {
 pub(crate) fn load_snes_rom(
     rom: Vec<u8>,
     file_name: String,
-) -> Result<Box<dyn DebugCore>, Box<dyn std::error::Error>> {
-    use art::{AssetProvider, GameRef, LibretroThumbnails, System};
+) -> Result<(Box<dyn DebugCore>, cover::ArtQuery), Box<dyn std::error::Error>> {
+    use artwork::System;
 
     let name = db::title(System::Snes, &rom)
         .map(str::to_string)
@@ -66,11 +66,15 @@ pub(crate) fn load_snes_rom(
                 .unwrap_or_else(|| file_name.clone())
         });
 
+    let sha1 = artwork::rom_sha1(System::Snes, &rom);
     let cart = snes::Cartridge::new(rom)?;
-    let cover = LibretroThumbnails::new().cover_art(&GameRef::new(System::Snes, name));
-    Ok(Box::new(snes::debug::SnesDebug::new(
-        cart, file_name, cover,
-    )))
+    let art = cover::ArtQuery {
+        sha1,
+        region: cart.region(),
+        fallback: artwork::libretro::cover_url(System::Snes, &name).map(Into::into),
+    };
+    let core = Box::new(snes::debug::SnesDebug::new(cart, file_name, None));
+    Ok((core, art))
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -81,7 +85,7 @@ fn file_name_of(path: &std::path::Path) -> String {
         .into_owned()
 }
 
-fn run(initial: Option<Box<dyn DebugCore>>, logs: LogBuffer) {
+fn run(initial: Option<(Box<dyn DebugCore>, cover::ArtQuery)>, logs: LogBuffer) {
     #[cfg(target_family = "wasm")]
     let app = gpui_platform::single_threaded_web();
     #[cfg(not(target_family = "wasm"))]
@@ -96,12 +100,14 @@ fn run(initial: Option<Box<dyn DebugCore>>, logs: LogBuffer) {
         register_text_input_keys(cx);
 
         #[cfg(not(target_family = "wasm"))]
-        cx.set_http_client(Arc::new(
+        cx.set_http_client(Arc::new(cover::ArtAuthClient(Arc::new(
             reqwest_client::ReqwestClient::user_agent("debugger").unwrap(),
-        ));
+        ))));
 
         #[cfg(target_family = "wasm")]
-        cx.set_http_client(Arc::new(unsafe { gpui_web::FetchHttpClient::new() }));
+        cx.set_http_client(Arc::new(cover::ArtAuthClient(Arc::new(unsafe {
+            gpui_web::FetchHttpClient::new()
+        }))));
 
         set_theme(cx, Theme::new(ThemeMode::Dark));
 
@@ -156,7 +162,9 @@ fn main() {
 }
 
 #[cfg(not(target_family = "wasm"))]
-fn load_snes(path: &str) -> Result<Box<dyn DebugCore>, Box<dyn std::error::Error>> {
+fn load_snes(
+    path: &str,
+) -> Result<(Box<dyn DebugCore>, cover::ArtQuery), Box<dyn std::error::Error>> {
     let rom = std::fs::read(path)?;
     load_snes_rom(rom, file_name_of(std::path::Path::new(path)))
 }

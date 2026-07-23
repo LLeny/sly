@@ -15,7 +15,7 @@ pub(crate) mod window;
 
 use crate::ppu::cgram::Cgram;
 use crate::ppu::color_math::ColorMath;
-use crate::ppu::latch::ByteLatch;
+use crate::ppu::latch::{ByteLatch, WordLatch};
 use crate::ppu::mode7::Matrix;
 use crate::ppu::mosaic::Mosaic;
 use crate::ppu::oam::Oam;
@@ -57,12 +57,13 @@ pub struct Ppu {
     pub(crate) matrix: Matrix,
     pub(crate) force_blank: bool,
     pub(crate) brightness: u8,
+    pub(crate) pseudo_hires: bool,
     pub(crate) frame_buffer: Vec<(u8, u8, u8)>,
-    counter_latch: bool,
+    pub(crate) counter_latch: bool,
     latched_h_counter: u16,
     latched_v_counter: u16,
-    ophct_high_byte: bool,
-    opvct_high_byte: bool,
+    ophct_latch: WordLatch,
+    opvct_latch: WordLatch,
 }
 
 impl Ppu {
@@ -89,16 +90,17 @@ impl Ppu {
             matrix: Matrix::default(),
             force_blank: true,
             brightness: 0,
+            pseudo_hires: false,
             frame_buffer: vec![(0, 0, 0); SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize],
             counter_latch: false,
             latched_h_counter: 0,
             latched_v_counter: 0,
-            ophct_high_byte: false,
-            opvct_high_byte: false,
+            ophct_latch: WordLatch::default(),
+            opvct_latch: WordLatch::default(),
         }
     }
 
-    pub(crate) fn latch_counters(&mut self, master_clock: u64, scanline: u16) {
+    fn latch_counters(&mut self, master_clock: u64, scanline: u16) {
         let mut hclock = master_clock % MASTER_CLOCKS_PER_SCANLINE;
         if hclock >= 1292 {
             hclock -= 2;
@@ -121,36 +123,24 @@ impl Ppu {
     }
 
     pub(crate) fn peek_h_counter(&self) -> u8 {
-        Self::counter_byte(self.latched_h_counter, self.ophct_high_byte)
+        Self::counter_byte(self.latched_h_counter, self.ophct_latch.is_high())
     }
 
     pub(crate) fn read_h_counter(&mut self) -> u8 {
-        let value = self.peek_h_counter();
-        self.ophct_high_byte = !self.ophct_high_byte;
-        value
+        Self::counter_byte(self.latched_h_counter, self.ophct_latch.toggle())
     }
 
     pub(crate) fn peek_v_counter(&self) -> u8 {
-        Self::counter_byte(self.latched_v_counter, self.opvct_high_byte)
+        Self::counter_byte(self.latched_v_counter, self.opvct_latch.is_high())
     }
 
     pub(crate) fn read_v_counter(&mut self) -> u8 {
-        let value = self.peek_v_counter();
-        self.opvct_high_byte = !self.opvct_high_byte;
-        value
-    }
-
-    pub(crate) fn counter_latch(&self) -> bool {
-        self.counter_latch
-    }
-
-    pub(crate) fn clear_counter_latch(&mut self) {
-        self.counter_latch = false;
+        Self::counter_byte(self.latched_v_counter, self.opvct_latch.toggle())
     }
 
     pub(crate) fn reset_counter_reads(&mut self) {
-        self.ophct_high_byte = false;
-        self.opvct_high_byte = false;
+        self.ophct_latch.reset();
+        self.opvct_latch.reset();
     }
 
     pub(crate) fn set_display_control(&mut self, value: u8) {
@@ -356,10 +346,10 @@ impl From<u16> for TilemapEntry {
 }
 
 impl TilemapEntry {
-    pub fn texel(&self, x: u32, y: u32, tile_px: u32) -> (u32, u32) {
+    pub fn texel(&self, x: u32, y: u32, tile_w: u32, tile_h: u32) -> (u32, u32) {
         (
-            if self.flip_h { tile_px - 1 - x } else { x },
-            if self.flip_v { tile_px - 1 - y } else { y },
+            if self.flip_h { tile_w - 1 - x } else { x },
+            if self.flip_v { tile_h - 1 - y } else { y },
         )
     }
 
@@ -444,6 +434,12 @@ pub(crate) fn in_vblank<M: MemoryMap>(scheduler: &Scheduler<M>) -> bool {
 
 pub(crate) fn in_hblank<M: MemoryMap>(scheduler: &Scheduler<M>) -> bool {
     scheduler.cycles() % MASTER_CLOCKS_PER_SCANLINE >= HBLANK_START_CLOCK
+}
+
+pub(crate) fn latch_hv_counters<M: MemoryMap>(snes: &mut Snes<M>) {
+    let master_clock = snes.scheduler.cycles();
+    let scanline = snes.scheduler.scanline_at(master_clock) as u16;
+    snes.ppu.latch_counters(master_clock, scanline);
 }
 
 pub(crate) fn draw_scanline<M: MemoryMap>(snes: &mut Snes<M>, deadline: u64) {

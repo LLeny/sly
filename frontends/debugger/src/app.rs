@@ -291,4 +291,10 @@ impl Debugger {
             web_tick_armed: false,
         }
     }
+
+    pub(crate) fn set_cover_art(&mut self, cover: Arc<str>, cx: &mut Context<Self>) {
+        self.target.set_cover_art(cover);
+        self.cartridge = Arc::new(self.target.cartridge().clone().into());
+        cx.notify();
+    }
 }

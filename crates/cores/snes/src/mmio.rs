@@ -112,8 +112,9 @@ impl<M: MemoryMap> Mmio<M> {
         }
     }
 
-    pub(crate) fn wrio(&self) -> u8 {
-        self.wrio
+    /// Bit 7 of WRIO drives the PPU's external counter-latch pin.
+    pub(crate) fn latch_pin_high(&self) -> bool {
+        self.wrio & 0x80 != 0
     }
 
     /// Translate a CPU address to an address space (WRAM, ROM, I/O or unmapped).
@@ -256,10 +257,8 @@ impl<M: MemoryMap> Snes<M> {
             PRODUCT_MIDDLE => (self.ppu.matrix.result >> 8) as u8,
             PRODUCT_HIGH => (self.ppu.matrix.result >> 16) as u8,
             SLHV => {
-                if self.mmu.wrio & 0x80 != 0 {
-                    let master_clock = self.scheduler.cycles();
-                    let scanline = self.scheduler.scanline_at(master_clock) as u16;
-                    self.ppu.latch_counters(master_clock, scanline);
+                if self.mmu.latch_pin_high() {
+                    crate::ppu::latch_hv_counters(self);
                 }
                 OPEN_BUS
             }
@@ -292,13 +291,11 @@ impl<M: MemoryMap> Snes<M> {
     fn write_io(&mut self, reg: u16, value: u8) {
         match reg {
             WRIO => {
-                let external_latch_falling_edge = self.mmu.wrio & 0x80 != 0 && value & 0x80 == 0;
+                let latch_pin_was_high = self.mmu.latch_pin_high();
                 self.mmu.wrio = value;
 
-                if external_latch_falling_edge {
-                    let master_clock = self.scheduler.cycles();
-                    let scanline = self.scheduler.scanline_at(master_clock) as u16;
-                    self.ppu.latch_counters(master_clock, scanline);
+                if latch_pin_was_high && !self.mmu.latch_pin_high() {
+                    crate::ppu::latch_hv_counters(self);
                 }
             }
             WRMPYA => self.math.mul_factor_a = value,
@@ -355,6 +352,7 @@ impl<M: MemoryMap> Snes<M> {
                         "SETINI: Mode 7 EXTBG enabled (unimplemented)"
                     );
                 }
+                self.ppu.pseudo_hires = value & 0x08 != 0;
             }
             Ppu2Status::ADDRESS => Ppu2Status::write(self, value),
             BgScrollOffset::START..=BgScrollOffset::END => BgScrollOffset::write(self, reg, value),

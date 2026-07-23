@@ -2,8 +2,9 @@ use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{IoTaskPool, Task};
 
+use artwork::layle as artwork;
+
 use crate::art_processing::{ProcessedArtwork, process_artwork};
-use crate::artwork;
 use crate::assets::Models;
 use crate::cartridge::{DetailCart, spawn_detail_cart};
 use crate::library::{self, LibraryEntry};
