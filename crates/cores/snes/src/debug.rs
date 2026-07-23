@@ -409,8 +409,8 @@ impl DebugCore for SnesDebug {
     fn tileset_layers(&self) -> Vec<TilesetLayer> {
         (0..4)
             .map(|i| TilesetLayer {
-                name: format!("BG{}", i + 1).into(),
-                enabled: self.core.ppu.bg_mode.bpp(i).is_some(),
+                name: bg_layer_name(&self.core, i).into(),
+                enabled: self.core.ppu.bg_mode.bpp(i).is_some() || mode7_bg_layer(&self.core, i),
             })
             .collect()
     }
@@ -424,6 +424,9 @@ impl DebugCore for SnesDebug {
     }
 
     fn tilemap_overlays(&self, layer: usize) -> Vec<TilemapOverlay> {
+        if mode7_bg_layer(&self.core, layer) {
+            return Vec::new();
+        }
         self::tilemap_window_overlays(&self.core, layer)
     }
 
@@ -449,6 +452,9 @@ impl DebugCore for SnesDebug {
         let regs = {
             let mut hasher = DefaultHasher::new();
             hasher.write_u8(ppu.bg_mode as u8);
+            hasher.write_u16(ppu.window_trace.background_mode_mask());
+            hasher.write_u8(ppu.extbg as u8);
+            hasher.write_u8(ppu.color_math.color_source as u8);
             hasher.write_u8(ppu.bg3_priority as u8);
             for layer in &ppu.bg_layers {
                 hasher.write_u32(layer.tileset_addr);
@@ -503,6 +509,10 @@ impl DebugCore for SnesDebug {
     }
 
     fn tilemap_viewport(&self, layer: usize) -> Option<TilemapViewport> {
+        if mode7_bg_layer(&self.core, layer) {
+            return None;
+        }
+
         let header = self.core.ppu.tilemap_header(layer)?;
         Some(TilemapViewport {
             x: header.scroll_x,
@@ -1271,21 +1281,45 @@ fn dma_view(core: &Snes) -> DmaView {
 }
 
 fn ppu_view(core: &Snes) -> PpuView {
-    use crate::ppu::regs::{BackgroundMode, Priority, TileSize};
+    use crate::ppu::regs::{Priority, TileSize};
 
-    let mode = match core.ppu.bg_mode {
-        BackgroundMode::Invalid => "Invalid".to_string(),
-        m => format!("Mode {}", m as u8),
+    let trace = core.ppu.window_trace.rows();
+    let mut mode_names = Vec::new();
+    let mut ranges = Vec::new();
+    let mut range_start = 0;
+    for line in 1..=trace.len() {
+        if line == trace.len()
+            || trace[line].bg_mode as u8 != trace[range_start].bg_mode as u8
+            || trace[line].extbg != trace[range_start].extbg
+        {
+            let state = trace[range_start];
+            let name = background_mode_name(state.bg_mode, state.extbg);
+            if !mode_names.contains(&name) {
+                mode_names.push(name.clone());
+            }
+
+            ranges.push(format!("{name} y{}-{}", range_start + 1, line));
+            range_start = line;
+        }
+    }
+
+    let mode = if mode_names.is_empty() {
+        background_mode_name(core.ppu.bg_mode, core.ppu.extbg)
+    } else {
+        mode_names.join(" + ")
     };
     let bg3_priority = match core.ppu.bg3_priority {
         Priority::Normal => "normal",
         Priority::High => "high",
     };
 
-    let properties = vec![
+    let mut properties = vec![
         PpuProperty::new("BG mode", mode).accented(),
         PpuProperty::new("BG3 priority", bg3_priority),
     ];
+    if ranges.len() > 1 {
+        properties.push(PpuProperty::new("Raster", ranges.join(", ")));
+    }
 
     let groups = core
         .ppu
@@ -1293,20 +1327,25 @@ fn ppu_view(core: &Snes) -> PpuView {
         .iter()
         .enumerate()
         .map(|(i, layer)| {
-            let tile_size = match layer.tile_size {
-                TileSize::Size8x8 => "8x8",
-                TileSize::Size16x16 => "16x16",
+            let mode7_layer = mode7_bg_layer(core, i);
+            let tile_size = if mode7_layer {
+                "8x8"
+            } else {
+                match layer.tile_size {
+                    TileSize::Size8x8 => "8x8",
+                    TileSize::Size16x16 => "16x16",
+                }
             };
-            let depth = match core.ppu.bg_mode.bpp(i) {
-                Some(bpp) => format!("{bpp}bpp"),
-                None => "unused".to_string(),
-            };
-            let tileset: Arc<str> = hex(layer.tileset_addr, 16).into();
-            let tilemap: Arc<str> = hex(layer.tilemap_addr, 16).into();
+            let depth = raster_depth(core, i);
+            let tileset: Arc<str> =
+                hex(if mode7_layer { 0 } else { layer.tileset_addr }, 16).into();
+            let tilemap: Arc<str> =
+                hex(if mode7_layer { 0 } else { layer.tilemap_addr }, 16).into();
+            let name = bg_layer_name(core, i);
 
             PpuGroup::new(
                 format!("ppu-bg{}", i + 1),
-                format!("BG{}", i + 1),
+                name,
                 vec![
                     PpuProperty::new("Tileset", tileset.clone()),
                     PpuProperty::new("Tilemap", tilemap),
@@ -1321,6 +1360,65 @@ fn ppu_view(core: &Snes) -> PpuView {
     PpuView { properties, groups }
 }
 
+fn background_mode_name(mode: crate::ppu::regs::BackgroundMode, extbg: bool) -> String {
+    use crate::ppu::regs::BackgroundMode;
+
+    match mode {
+        BackgroundMode::Invalid => "Invalid".to_string(),
+        BackgroundMode::Mode7 if extbg => "M7 EXTBG".to_string(),
+        BackgroundMode::Mode7 => "M7".to_string(),
+        mode => format!("Mode {}", mode as u8),
+    }
+}
+
+fn raster_depth(core: &Snes, layer: usize) -> String {
+    let mut depths = Vec::new();
+
+    for state in core.ppu.window_trace.rows() {
+        if let Some(depth) = state.bg_mode.bpp(layer)
+            && !depths.contains(&depth)
+        {
+            depths.push(depth);
+        }
+    }
+
+    if depths.is_empty()
+        && let Some(depth) = core.ppu.bg_mode.bpp(layer)
+    {
+        depths.push(depth);
+    }
+
+    if depths.is_empty() {
+        "unused".to_string()
+    } else {
+        depths.sort_unstable();
+        depths
+            .into_iter()
+            .map(|depth| format!("{depth}bpp"))
+            .collect::<Vec<_>>()
+            .join(" / ")
+    }
+}
+
+fn raster_uses_mode7(core: &Snes) -> bool {
+    use crate::ppu::regs::BackgroundMode;
+
+    core.ppu.bg_mode as u8 == BackgroundMode::Mode7 as u8
+        || core.ppu.window_trace.uses_mode(BackgroundMode::Mode7)
+}
+
+fn mode7_bg_layer(core: &Snes, layer: usize) -> bool {
+    layer == 0 && raster_uses_mode7(core)
+}
+
+fn bg_layer_name(core: &Snes, layer: usize) -> String {
+    if mode7_bg_layer(core, layer) {
+        "BG1 / M7".to_string()
+    } else {
+        format!("BG{}", layer + 1)
+    }
+}
+
 fn bg_palette_colors(core: &Snes, layer: usize, bpp: u8, palette: usize) -> Vec<(u8, u8, u8)> {
     let (base, count) = core.ppu.bg_palette(layer, bpp, palette);
     (0..count)
@@ -1329,6 +1427,10 @@ fn bg_palette_colors(core: &Snes, layer: usize, bpp: u8, palette: usize) -> Vec<
 }
 
 fn tileset(core: &Snes, layer: usize, color: usize) -> Option<Tileset> {
+    if mode7_bg_layer(core, layer) {
+        return Some(mode7_tileset(&core.ppu));
+    }
+
     let data = core.ppu.tileset(layer)?;
 
     let palette = core.ppu.bg_palette_index(layer, data.bpp, color);
@@ -1354,6 +1456,49 @@ fn tileset(core: &Snes, layer: usize, color: usize) -> Option<Tileset> {
         tile_bytes: data.tile_bytes(),
         tiles,
     })
+}
+
+fn mode7_colors(ppu: &crate::ppu::Ppu) -> Vec<(u8, u8, u8)> {
+    use crate::ppu::regs::ColorSource;
+
+    let direct_color = matches!(ppu.color_math.color_source, ColorSource::Direct);
+    (0..=u8::MAX)
+        .map(|index| {
+            if direct_color {
+                crate::ppu::cgram::rgb(crate::ppu::cgram::direct_color(0, index))
+            } else {
+                crate::ppu::cgram::rgb(ppu.cgram.word(index))
+            }
+        })
+        .collect()
+}
+
+fn mode7_tile_pixels(ppu: &crate::ppu::Ppu, tile: u8) -> [[u8; 8]; 8] {
+    std::array::from_fn(|y| {
+        std::array::from_fn(|x| {
+            crate::ppu::mode7::mode7_character_pixel(&ppu.vram, tile, x as u16, y as u16)
+        })
+    })
+}
+
+fn mode7_tileset(ppu: &crate::ppu::Ppu) -> Tileset {
+    let colors = mode7_colors(ppu);
+    let tiles = (0..=u8::MAX)
+        .map(|tile| TilesetTile {
+            addr: (tile as u32) << 6,
+            pixels: mode7_tile_pixels(ppu, tile)
+                .as_flattened()
+                .iter()
+                .map(|&index| colors[index as usize])
+                .collect(),
+        })
+        .collect();
+
+    Tileset {
+        bpp: 8,
+        tile_bytes: 64,
+        tiles,
+    }
 }
 
 fn object_pixels(
@@ -1393,6 +1538,8 @@ fn tilemap_window_overlays(core: &Snes, layer: usize) -> Vec<TilemapOverlay> {
         windows: core.ppu.windows,
         main_screen: core.ppu.main_screen_window,
         sub_screen: core.ppu.sub_screen_window,
+        bg_mode: core.ppu.bg_mode,
+        extbg: core.ppu.extbg,
     };
     let trace = core.ppu.window_trace.rows();
     let mut bands: [Vec<TilemapOverlayBand>; 2] = std::array::from_fn(|_| Vec::new());
@@ -1474,6 +1621,10 @@ fn tilemap_window_overlays(core: &Snes, layer: usize) -> Vec<TilemapOverlay> {
 }
 
 fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {
+    if mode7_bg_layer(core, layer) {
+        return Some(mode7_tilemap(&core.ppu));
+    }
+
     let data = core.ppu.tilemap(layer)?;
     let bpp = core.ppu.bg_mode.bpp(layer)?;
 
@@ -1528,6 +1679,43 @@ fn tilemap(core: &Snes, layer: usize) -> Option<Tilemap> {
             height: crate::ppu::SCREEN_HEIGHT,
         }),
     })
+}
+
+fn mode7_tilemap(ppu: &crate::ppu::Ppu) -> Tilemap {
+    const MAP_TILES: usize = 128;
+
+    let colors = mode7_colors(ppu);
+    let decoded: Vec<_> = (0..=u8::MAX)
+        .map(|tile| mode7_tile_pixels(ppu, tile))
+        .collect();
+    let mut entries = Vec::with_capacity(MAP_TILES * MAP_TILES);
+
+    for address in 0..MAP_TILES * MAP_TILES {
+        let tile = ppu.vram.word(address as u16) as u8;
+        let pixels = decoded[tile as usize]
+            .as_flattened()
+            .iter()
+            .map(|&raw| colors[raw as usize])
+            .collect();
+        entries.push(TilemapEntry {
+            addr: address as u32,
+            raw: tile as u16,
+            tile_index: tile as u16,
+            palette: 0,
+            priority: false,
+            flip_h: false,
+            flip_v: false,
+            pixels,
+        });
+    }
+
+    Tilemap {
+        width: MAP_TILES,
+        height: MAP_TILES,
+        tile_px: 8,
+        entries,
+        viewport: None,
+    }
 }
 
 fn sprites(core: &Snes) -> Sprites {

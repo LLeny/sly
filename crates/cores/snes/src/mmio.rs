@@ -2,6 +2,7 @@ pub mod addr;
 pub mod dma;
 pub mod map;
 pub mod regs;
+pub(crate) mod wram;
 
 #[cfg(feature = "debug")]
 mod access;
@@ -17,7 +18,8 @@ use crate::mmio::regs::{
     APU_IO_END, APU_IO_START, HdmaTransferEnable, HvStatusJoypadBusy, MdmaTransferStart,
     NmiTimerEnable, TimerUp, VblankFlagCpuVersion,
 };
-use crate::ppu::mode7::{Mode7Registers, PRODUCT_HIGH, PRODUCT_LOW, PRODUCT_MIDDLE};
+use crate::mmio::wram::{WMADDH, WMADDL, WMADDM, WMDATA, WramPort};
+use crate::ppu::mode7::{Mode7Registers, Mode7Settings, PRODUCT_HIGH, PRODUCT_LOW, PRODUCT_MIDDLE};
 use crate::ppu::mosaic::MosaicRegister;
 use crate::ppu::regs::{
     Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, COLDATA, ColorMathControl,
@@ -39,6 +41,8 @@ pub(crate) const OPEN_BUS: u8 = 0xFF;
 pub(crate) const WRIO: u16 = 0x4201;
 pub(crate) const MEMSEL: u16 = 0x420D;
 pub(crate) const RDIO: u16 = 0x4213;
+const PPU_WRITE_START: u16 = 0x2100;
+const PPU_WRITE_END: u16 = 0x2133;
 
 pub struct Mmio<M: MemoryMap = CartridgeMap> {
     pub cartridge: Cartridge,
@@ -46,7 +50,10 @@ pub struct Mmio<M: MemoryMap = CartridgeMap> {
     map: M,
     pub fastrom: bool,
     wrio: u8,
+    pub(crate) wram_port: WramPort,
     pub clocks: u64,
+    defer_ppu_writes: bool,
+    pending_ppu_writes: Vec<(u16, u8)>,
 
     #[cfg(feature = "debug")]
     pub access: AccessTracker,
@@ -93,7 +100,10 @@ impl<M: MemoryMap> Mmio<M> {
             map,
             fastrom: false,
             wrio: 0xFF,
+            wram_port: WramPort::default(),
             clocks: 0,
+            defer_ppu_writes: false,
+            pending_ppu_writes: Vec::new(),
 
             #[cfg(feature = "debug")]
             access: AccessTracker::default(),
@@ -104,7 +114,10 @@ impl<M: MemoryMap> Mmio<M> {
         self.wram.fill(0);
         self.fastrom = false;
         self.wrio = 0xFF;
+        self.wram_port.reset();
         self.clocks = 0;
+        self.defer_ppu_writes = false;
+        self.pending_ppu_writes.clear();
 
         #[cfg(feature = "debug")]
         {
@@ -129,6 +142,24 @@ impl<M: MemoryMap> Mmio<M> {
 }
 
 impl<M: MemoryMap> Snes<M> {
+    pub(crate) fn begin_cpu_instruction(&mut self) {
+        debug_assert!(!self.mmu.defer_ppu_writes);
+        debug_assert!(self.mmu.pending_ppu_writes.is_empty());
+        self.mmu.defer_ppu_writes = true;
+    }
+
+    pub(crate) fn end_cpu_instruction(&mut self) {
+        self.mmu.defer_ppu_writes = false;
+    }
+
+    pub(crate) fn commit_cpu_ppu_writes(&mut self) {
+        let mut writes = core::mem::take(&mut self.mmu.pending_ppu_writes);
+        for (reg, value) in writes.drain(..) {
+            self.write_io(reg, value);
+        }
+        self.mmu.pending_ppu_writes = writes;
+    }
+
     pub fn read16(&mut self, addr: Address) -> u16 {
         let lo = self.read8(addr) as u16;
         let hi = self.read8(addr.wrapping_add(1)) as u16;
@@ -212,6 +243,12 @@ impl<M: MemoryMap> Snes<M> {
                     "Write to ROM"
                 );
             }
+            AddressSpace::Io(reg)
+                if self.mmu.defer_ppu_writes
+                    && (PPU_WRITE_START..=PPU_WRITE_END).contains(&reg) =>
+            {
+                self.mmu.pending_ppu_writes.push((reg, value));
+            }
             AddressSpace::Io(reg) => self.write_io(reg, value),
             AddressSpace::Unmapped => {
                 tracing::error!(
@@ -231,6 +268,8 @@ impl<M: MemoryMap> Snes<M> {
             RDDIVH => (self.math.div_quotient >> 8) as u8,
             RDMPYL => self.math.product_or_remainder as u8,
             RDMPYH => (self.math.product_or_remainder >> 8) as u8,
+            WMDATA => self.mmu.wram_port.read(&self.mmu.wram),
+            WMADDL | WMADDM | WMADDH => OPEN_BUS,
             BgMode::ADDRESS => BgMode::read(self),
             MosaicRegister::ADDRESS => MosaicRegister::read(self),
             TilemapAddrAndSize::START..=TilemapAddrAndSize::END => {
@@ -238,6 +277,7 @@ impl<M: MemoryMap> Snes<M> {
             }
             Bg12ChrBase::ADDRESS => Bg12ChrBase::read(self),
             Bg34ChrBase::ADDRESS => Bg34ChrBase::read(self),
+            Mode7Settings::ADDRESS => Mode7Settings::read(self),
             SpriteSizeAndTileBase::ADDRESS => SpriteSizeAndTileBase::read(self),
             OAMADDL => self.ppu.oam.word_addr() as u8,
             OAMADDH => (self.ppu.oam.word_addr() >> 8) as u8,
@@ -311,6 +351,10 @@ impl<M: MemoryMap> Snes<M> {
                 self.math.div_divisor = value;
                 self.math.process_div();
             }
+            WMDATA => self.mmu.wram_port.write(&mut self.mmu.wram, value),
+            WMADDL => self.mmu.wram_port.set_low(value),
+            WMADDM => self.mmu.wram_port.set_middle(value),
+            WMADDH => self.mmu.wram_port.set_high(value),
             BgMode::ADDRESS => BgMode::write(self, value),
             MosaicRegister::ADDRESS => MosaicRegister::write(self, value),
             TilemapAddrAndSize::START..=TilemapAddrAndSize::END => {
@@ -318,6 +362,7 @@ impl<M: MemoryMap> Snes<M> {
             }
             Bg12ChrBase::ADDRESS => Bg12ChrBase::write(self, value),
             Bg34ChrBase::ADDRESS => Bg34ChrBase::write(self, value),
+            Mode7Settings::ADDRESS => Mode7Settings::write(self, value),
             SpriteSizeAndTileBase::ADDRESS => SpriteSizeAndTileBase::write(self, value),
             OAMADDL => self.ppu.oam.set_addr_low(value),
             OAMADDH => self.ppu.oam.set_addr_high(value),
@@ -346,13 +391,8 @@ impl<M: MemoryMap> Snes<M> {
             COLDATA => self.ppu.color_math.set_fixed_color(value),
             ColorMathSelect::ADDRESS => ColorMathSelect::write(self, value),
             SETINI => {
-                if value & 0x40 != 0 {
-                    tracing::error!(
-                        value = format!("{:02X}", value),
-                        "SETINI: Mode 7 EXTBG enabled (unimplemented)"
-                    );
-                }
                 self.ppu.pseudo_hires = value & 0x08 != 0;
+                self.ppu.extbg = value & 0x40 != 0;
             }
             Ppu2Status::ADDRESS => Ppu2Status::write(self, value),
             BgScrollOffset::START..=BgScrollOffset::END => BgScrollOffset::write(self, reg, value),
@@ -399,6 +439,10 @@ impl<M: MemoryMap> Snes<M> {
             RDDIVH => (self.math.div_quotient >> 8) as u8,
             RDMPYL => self.math.product_or_remainder as u8,
             RDMPYH => (self.math.product_or_remainder >> 8) as u8,
+            WMDATA => self.mmu.wram_port.peek(&self.mmu.wram),
+            WMADDL => self.mmu.wram_port.address() as u8,
+            WMADDM => (self.mmu.wram_port.address() >> 8) as u8,
+            WMADDH => (self.mmu.wram_port.address() >> 16) as u8,
             BgMode::ADDRESS => BgMode::peek(self),
             MosaicRegister::ADDRESS => MosaicRegister::peek(self),
             TilemapAddrAndSize::START..=TilemapAddrAndSize::END => {
@@ -406,6 +450,7 @@ impl<M: MemoryMap> Snes<M> {
             }
             Bg12ChrBase::ADDRESS => Bg12ChrBase::peek(self),
             Bg34ChrBase::ADDRESS => Bg34ChrBase::peek(self),
+            Mode7Settings::ADDRESS => Mode7Settings::peek(self),
             SpriteSizeAndTileBase::ADDRESS => SpriteSizeAndTileBase::peek(self),
             OAMADDL => self.ppu.oam.word_addr() as u8,
             OAMADDH => (self.ppu.oam.word_addr() >> 8) as u8,

@@ -1,5 +1,5 @@
 #[cfg(feature = "debug")]
-use crate::ppu::regs::LayerWindowEnable;
+use crate::ppu::regs::{BackgroundMode, LayerWindowEnable};
 use crate::ppu::regs::{W12SEL, W34SEL, WBGLOG, WH0, WH3, WOBJLOG, WOBJSEL, WindowMaskSettings};
 
 const WINDOW_COUNT: usize = 2;
@@ -18,11 +18,26 @@ pub(crate) struct Windows {
 }
 
 #[cfg(feature = "debug")]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub(crate) struct WindowDebugState {
     pub(crate) windows: Windows,
     pub(crate) main_screen: LayerWindowEnable,
     pub(crate) sub_screen: LayerWindowEnable,
+    pub(crate) bg_mode: BackgroundMode,
+    pub(crate) extbg: bool,
+}
+
+#[cfg(feature = "debug")]
+impl Default for WindowDebugState {
+    fn default() -> Self {
+        Self {
+            windows: Windows::default(),
+            main_screen: LayerWindowEnable::default(),
+            sub_screen: LayerWindowEnable::default(),
+            bg_mode: BackgroundMode::Mode0,
+            extbg: false,
+        }
+    }
 }
 
 #[cfg(feature = "debug")]
@@ -60,6 +75,22 @@ impl WindowTrace {
 
     pub(crate) fn generation(&self) -> u64 {
         self.generation
+    }
+
+    pub(crate) fn background_mode_mask(&self) -> u16 {
+        self.rows().iter().fold(0, |mask, row| {
+            let bit = match row.bg_mode {
+                BackgroundMode::Invalid => 8,
+                mode => mode as u8,
+            };
+            mask | 1 << bit
+        })
+    }
+
+    pub(crate) fn uses_mode(&self, mode: BackgroundMode) -> bool {
+        self.rows()
+            .iter()
+            .any(|row| row.bg_mode as u8 == mode as u8)
     }
 }
 

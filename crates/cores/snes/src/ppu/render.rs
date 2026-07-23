@@ -1,6 +1,8 @@
 use crate::ppu::layer_order::{self, RenderPass};
+use crate::ppu::mode7::{Mode7Settings, mode7_character_pixel};
 use crate::ppu::regs::{
-    ColorMathAddend, ColorMathIntensity, ColorSource, LayerMask, LayerWindowEnable, Priority,
+    BackgroundMode, ColorMathAddend, ColorMathIntensity, ColorSource, LayerMask, LayerWindowEnable,
+    Priority,
 };
 use crate::ppu::window::COLOR_WINDOW;
 use crate::ppu::{Ppu, SCREEN_WIDTH, Sprite, TilemapEntry, cgram};
@@ -98,7 +100,11 @@ impl<'a> ScanlineRenderer<'a> {
     ) -> CompositedLine {
         let mut line = [None; HIRES_WIDTH_USIZE];
 
-        let passes = layer_order::front_to_back_passes(self.ppu.bg_mode, self.ppu.bg3_priority);
+        let passes = layer_order::front_to_back_passes(
+            self.ppu.bg_mode,
+            self.ppu.bg3_priority,
+            self.ppu.extbg,
+        );
         for pass in passes {
             match *pass {
                 RenderPass::Background { layer, priority } => {
@@ -250,6 +256,11 @@ impl<'a> ScanlineRenderer<'a> {
         window_enabled: bool,
         line: &mut CompositedLine,
     ) {
+        if matches!(self.ppu.bg_mode, BackgroundMode::Mode7) {
+            self.paint_mode7_background(layer, priority, window_enabled, line);
+            return;
+        }
+
         let (Some(bits_per_pixel), Some(map)) =
             (self.ppu.bg_mode.bpp(layer), self.ppu.tilemap_header(layer))
         else {
@@ -329,6 +340,86 @@ impl<'a> ScanlineRenderer<'a> {
                 allows_color_math: true,
             });
         }
+    }
+
+    fn paint_mode7_background(
+        &self,
+        layer: usize,
+        priority: Priority,
+        window_enabled: bool,
+        line: &mut CompositedLine,
+    ) {
+        if layer > 1
+            || (layer == 1 && !self.ppu.extbg)
+            || (layer == 0 && priority != Priority::Normal)
+        {
+            return;
+        }
+
+        let window_mask = window_enabled.then(|| self.ppu.windows.row_mask(layer as u8));
+        let mosaic_size = self.ppu.mosaic.size_for_layer(layer);
+        let sampled_y = self.y / mosaic_size * mosaic_size + 1;
+        let direct_color =
+            layer == 0 && matches!(self.ppu.color_math.color_source, ColorSource::Direct);
+
+        let settings = self.ppu.matrix.settings();
+        let origin = self.ppu.matrix.scanline_origin(settings, sampled_y);
+
+        for (screen_x, slot) in line[..SCREEN_WIDTH_USIZE].iter_mut().enumerate() {
+            if slot.is_some() || window_mask.is_some_and(|mask| mask.contains(screen_x as u8)) {
+                continue;
+            }
+
+            let sampled_x = screen_x as u32 / mosaic_size * mosaic_size;
+            let raw_color = self.mode7_texel(settings, origin, sampled_x);
+
+            let (color_index, pixel_priority) = if layer == 1 {
+                (
+                    raw_color & 0x7F,
+                    if raw_color & 0x80 != 0 {
+                        Priority::High
+                    } else {
+                        Priority::Normal
+                    },
+                )
+            } else {
+                (raw_color, Priority::Normal)
+            };
+            if color_index == 0 || pixel_priority != priority {
+                continue;
+            }
+
+            let color = if direct_color {
+                cgram::direct_color(0, color_index)
+            } else {
+                self.ppu.cgram.word(color_index)
+            };
+
+            *slot = Some(VisiblePixel {
+                color,
+                source: PixelSource::Background(layer as u8),
+                allows_color_math: true,
+            });
+        }
+    }
+
+    fn mode7_texel(&self, settings: Mode7Settings, origin: (i32, i32), screen_x: u32) -> u8 {
+        let (map_x, map_y) = self.ppu.matrix.map_pixel(settings, origin, screen_x);
+        let out_of_bounds = !(0..1024).contains(&map_x) || !(0..1024).contains(&map_y);
+        let use_non_tilemap_fill = settings.disable_tilemap_repeat() && out_of_bounds;
+        if use_non_tilemap_fill && !settings.fill_with_character_zero() {
+            return 0;
+        }
+
+        let tile = if use_non_tilemap_fill {
+            0
+        } else {
+            let tile_x = (map_x >> 3) & 127;
+            let tile_y = (map_y >> 3) & 127;
+            self.ppu.vram.word((tile_y * 128 + tile_x) as u16) as u8
+        };
+
+        mode7_character_pixel(&self.ppu.vram, tile, map_x as u16, map_y as u16)
     }
 
     fn background_color(
@@ -441,6 +532,8 @@ impl Ppu {
                 windows: self.windows,
                 main_screen: self.main_screen_window,
                 sub_screen: self.sub_screen_window,
+                bg_mode: self.bg_mode,
+                extbg: self.extbg,
             },
         );
 

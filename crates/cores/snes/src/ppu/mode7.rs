@@ -1,7 +1,8 @@
 use crate::Snes;
-use crate::macros::register_mmio_raw;
-use crate::mmio::MemoryMap;
+use crate::macros::{register_mmio, register_mmio_raw};
+use crate::mmio::{MemoryMap, MmioReg};
 use crate::ppu::latch::ByteLatch;
+use crate::ppu::vram::Vram;
 
 const H_OFFSET: u16 = 0x210D;
 const V_OFFSET: u16 = 0x210E;
@@ -30,6 +31,23 @@ register_mmio_raw! {
     PRODUCT_HIGH => "MPYH",
 }
 
+register_mmio! {
+    /// M7SEL
+    pub(crate) struct Mode7Settings @ 0x211A {
+        #[bits(0)]
+        pub flip_horizontal: bool,
+
+        #[bits(1)]
+        pub flip_vertical: bool,
+
+        #[bits(6)]
+        pub fill_with_character_zero: bool,
+
+        #[bits(7)]
+        pub disable_tilemap_repeat: bool,
+    }
+}
+
 #[chapa::bitfield(u16, order = lsb0)]
 struct Signed13 {
     #[bits(0..=12)]
@@ -47,6 +65,7 @@ pub(crate) struct Matrix {
     pub(crate) hofs: i16,
     pub(crate) vofs: i16,
     pub(crate) result: i32,
+    pub(crate) settings: u8,
     latch: ByteLatch,
 }
 
@@ -66,6 +85,74 @@ impl Matrix {
 
     fn update_result(&mut self) {
         self.result = self.a as i32 * (self.b >> 8) as i32;
+    }
+
+    pub(crate) fn settings(&self) -> Mode7Settings {
+        Mode7Settings::from_raw(self.settings)
+    }
+
+    pub(crate) fn scanline_origin(&self, settings: Mode7Settings, screen_y: u32) -> (i32, i32) {
+        let y = if settings.flip_vertical() {
+            255 - screen_y as i32
+        } else {
+            screen_y as i32
+        };
+
+        let a = self.a as i32;
+        let b = self.b as i32;
+        let c = self.c as i32;
+        let d = self.d as i32;
+
+        let center_x = self.center_x as i32;
+        let center_y = self.center_y as i32;
+
+        let h = clip_offset(self.hofs as i32 - center_x);
+        let v = clip_offset(self.vofs as i32 - center_y);
+
+        let origin_x = ((a * h) & !63) + ((b * v) & !63) + ((b * y) & !63) + (center_x << 8);
+        let origin_y = ((c * h) & !63) + ((d * v) & !63) + ((d * y) & !63) + (center_y << 8);
+
+        (origin_x, origin_y)
+    }
+
+    pub(crate) fn map_pixel(
+        &self,
+        settings: Mode7Settings,
+        origin: (i32, i32),
+        screen_x: u32,
+    ) -> (i32, i32) {
+        let x = if settings.flip_horizontal() {
+            255 - screen_x as i32
+        } else {
+            screen_x as i32
+        };
+
+        (
+            (origin.0 + self.a as i32 * x) >> 8,
+            (origin.1 + self.c as i32 * x) >> 8,
+        )
+    }
+}
+
+fn clip_offset(value: i32) -> i32 {
+    if value & 0x2000 != 0 {
+        value | !0x03FF
+    } else {
+        value & 0x03FF
+    }
+}
+
+pub(crate) fn mode7_character_pixel(vram: &Vram, tile: u8, x: u16, y: u16) -> u8 {
+    (vram.word((tile as u16) << 6 | (y & 7) << 3 | (x & 7)) >> 8) as u8
+}
+
+impl MmioReg for Mode7Settings {
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
+        snes.ppu.matrix.settings = value;
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        snes.ppu.matrix.settings
     }
 }
 

@@ -132,12 +132,20 @@ impl<M: MemoryMap + 'static> Snes<M> {
 
     pub fn step(&mut self) {
         let clocks_before = self.mmu.clocks;
+
+        // TODO: STORES OCCUR ON FINAL BUS CYCLES!!!
+        // Hold PPU stores their visible effects until scheduler
+        // events crossed by the instruction, such as HDMA, have run!
+        // THIS IS A HACK FOR MODE 7 IN SECRET OF MANA FOR NOW
+        self.begin_cpu_instruction();
         cpu::step(self);
+        self.end_cpu_instruction();
 
         self.scheduler.advance_by(self.mmu.clocks - clocks_before);
         while let Some((deadline, callback)) = self.scheduler.pop_current_event() {
             callback(self, deadline);
         }
+        self.commit_cpu_ppu_writes();
     }
 
     pub fn run_frame(&mut self) {

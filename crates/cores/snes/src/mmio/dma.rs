@@ -3,6 +3,7 @@ use crate::mmio::regs::{
     AddressAdjustMode, Direction, DmaAddress, DmaByteCount, DmaChannelParameters, HdmaLineCounter,
     HdmaTransferEnable, MdmaTransferStart, TransferPattern,
 };
+use crate::mmio::wram::WMDATA;
 use crate::mmio::{Address, AddressSpace, MemoryMap, OPEN_BUS};
 
 pub const CHANNEL_COUNT: usize = 8;
@@ -11,7 +12,7 @@ pub const CHANNEL_REGS_END: u16 = 0x437F;
 
 pub(crate) const B_BUS_BASE: u16 = 0x2100;
 pub(crate) const HDMA_INIT_CLOCK: u64 = 6 * 4;
-pub(crate) const HDMA_RUN_CLOCK: u64 = 278 * 4;
+pub(crate) const HDMA_RUN_CLOCK: u64 = 1104;
 
 const HDMA_BASE_CLOCKS: u64 = 18;
 const HDMA_IDLE_CHANNEL_CLOCKS: u64 = 8;
@@ -282,12 +283,24 @@ fn transfer_dma_byte(
     direction: Direction,
 ) {
     let clocks_before = snes.mmu.clocks;
+    let a_bus_space = snes.mmu.map(a_bus);
+
+    if b_bus.address() == WMDATA
+        && let AddressSpace::Wram(index) = &a_bus_space
+    {
+        if matches!(direction, Direction::BToA) {
+            snes.mmu.wram[*index] = OPEN_BUS;
+        }
+        snes.mmu.clocks = clocks_before + 8;
+        return;
+    }
+
     let (src, dst) = match direction {
         Direction::AToB => (a_bus, b_bus),
         Direction::BToA => (b_bus, a_bus),
     };
 
-    let a_bus_blocked = matches!(snes.mmu.map(a_bus), AddressSpace::Io(_));
+    let a_bus_blocked = matches!(a_bus_space, AddressSpace::Io(_));
     let value = if a_bus_blocked && matches!(direction, Direction::AToB) {
         OPEN_BUS
     } else {
