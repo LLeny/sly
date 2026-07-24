@@ -4,29 +4,29 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use sdl3::event::Event;
-use sdl3::keyboard::Keycode;
+use sdl3::keyboard::{Keycode, Scancode};
 use sdl3::pixels::PixelFormat;
 use sdl3::render::ScaleMode;
 use snes::{Cartridge, Snes};
 
 const SCALE: u32 = 2;
 
-fn game_button(key: Keycode) -> Option<core_model::Button> {
+fn game_button(key: Scancode) -> Option<core_model::Button> {
     use core_model::Button;
 
     Some(match key {
-        Keycode::Up => Button::Up,
-        Keycode::Down => Button::Down,
-        Keycode::Left => Button::Left,
-        Keycode::Right => Button::Right,
-        Keycode::Z => Button::B,
-        Keycode::X => Button::A,
-        Keycode::A => Button::Y,
-        Keycode::S => Button::X,
-        Keycode::Q => Button::L,
-        Keycode::W => Button::R,
-        Keycode::Return => Button::Start,
-        Keycode::Backspace => Button::Select,
+        Scancode::Up => Button::Up,
+        Scancode::Down => Button::Down,
+        Scancode::Left => Button::Left,
+        Scancode::Right => Button::Right,
+        Scancode::Z => Button::B,
+        Scancode::X => Button::A,
+        Scancode::A => Button::Y,
+        Scancode::S => Button::X,
+        Scancode::Q => Button::L,
+        Scancode::W => Button::R,
+        Scancode::Return => Button::Start,
+        Scancode::Backspace => Button::Select,
         _ => return None,
     })
 }
@@ -315,7 +315,7 @@ fn main() {
                     ..
                 } => break 'running,
                 Event::KeyDown {
-                    keycode: Some(key),
+                    scancode: Some(key),
                     repeat: false,
                     ..
                 } => {
@@ -324,7 +324,8 @@ fn main() {
                     }
                 }
                 Event::KeyUp {
-                    keycode: Some(key), ..
+                    scancode: Some(key),
+                    ..
                 } => {
                     if let Some(button) = game_button(key) {
                         snes.set_button(0, button, false);

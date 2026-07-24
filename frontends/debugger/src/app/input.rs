@@ -3,7 +3,25 @@ use gpui::Keystroke;
 
 use super::*;
 
-fn game_button(key: &str) -> Option<Button> {
+fn game_button_from_code(code: &str) -> Option<Button> {
+    Some(match code {
+        "ArrowUp" => Button::Up,
+        "ArrowDown" => Button::Down,
+        "ArrowLeft" => Button::Left,
+        "ArrowRight" => Button::Right,
+        "KeyZ" => Button::B,
+        "KeyX" => Button::A,
+        "KeyA" => Button::Y,
+        "KeyS" => Button::X,
+        "KeyQ" => Button::L,
+        "KeyW" => Button::R,
+        "Enter" => Button::Start,
+        "Backspace" => Button::Select,
+        _ => return None,
+    })
+}
+
+fn game_button_from_key(key: &str) -> Option<Button> {
     Some(match key {
         "up" => Button::Up,
         "down" => Button::Down,
@@ -38,7 +56,12 @@ impl Debugger {
             return;
         }
 
-        let Some(button) = game_button(&keystroke.key) else {
+        let button = keystroke
+            .code
+            .as_deref()
+            .and_then(game_button_from_code)
+            .or_else(|| game_button_from_key(&keystroke.key));
+        let Some(button) = button else {
             return;
         };
 
