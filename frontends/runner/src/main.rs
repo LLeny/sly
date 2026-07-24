@@ -1,5 +1,6 @@
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use sdl3::event::Event;
@@ -73,19 +74,161 @@ impl Recorder {
     }
 }
 
+struct VideoRecorder {
+    ffmpeg: Child,
+    out_path: String,
+    video_tmp: String,
+    audio: Option<AudioSink>,
+}
+
+struct AudioSink {
+    file: BufWriter<File>,
+    path: String,
+    sample_rate: u32,
+    channels: u8,
+    scratch: Vec<u8>,
+}
+
+impl VideoRecorder {
+    fn new(
+        out_path: String,
+        target_fps: f64,
+        width: u32,
+        height: u32,
+        audio_spec: Option<core_model::AudioSpec>,
+    ) -> Option<Self> {
+        let video_tmp = format!("{out_path}.video.tmp.mp4");
+
+        let ffmpeg = Command::new("ffmpeg")
+            .args(["-y", "-loglevel", "error"])
+            .args(["-f", "rawvideo", "-pixel_format", "rgb24"])
+            .args(["-video_size", &format!("{width}x{height}")])
+            .args(["-framerate", &format!("{target_fps}")])
+            .args(["-i", "pipe:0"])
+            .args([
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
+            ])
+            .arg(&video_tmp)
+            .stdin(Stdio::piped())
+            .spawn();
+
+        let ffmpeg = match ffmpeg {
+            Ok(child) => child,
+            Err(err) => {
+                eprintln!("video recording disabled: failed to launch ffmpeg: {err}");
+                return None;
+            }
+        };
+
+        let audio = audio_spec.and_then(|spec| {
+            let path = format!("{out_path}.audio.tmp.raw");
+            match File::create(&path) {
+                Ok(file) => Some(AudioSink {
+                    file: BufWriter::new(file),
+                    path,
+                    sample_rate: spec.sample_rate,
+                    channels: spec.channels,
+                    scratch: Vec::new(),
+                }),
+                Err(err) => {
+                    eprintln!("video audio disabled: failed to create temp file: {err}");
+                    None
+                }
+            }
+        });
+
+        Some(Self {
+            ffmpeg,
+            out_path,
+            video_tmp,
+            audio,
+        })
+    }
+
+    fn push_video(&mut self, rgb: &[u8]) {
+        if let Some(stdin) = self.ffmpeg.stdin.as_mut() {
+            if let Err(err) = stdin.write_all(rgb) {
+                eprintln!("video recording: failed to write frame: {err}");
+            }
+        }
+    }
+
+    fn push_audio(&mut self, samples: &[i16]) {
+        if let Some(sink) = self.audio.as_mut() {
+            sink.scratch.clear();
+            sink.scratch
+                .extend(samples.iter().flat_map(|sample| sample.to_le_bytes()));
+            let _ = sink.file.write_all(&sink.scratch);
+        }
+    }
+
+    fn finish(mut self) {
+        drop(self.ffmpeg.stdin.take());
+        if let Err(err) = self.ffmpeg.wait() {
+            eprintln!("video recording: ffmpeg encode failed: {err}");
+            return;
+        }
+
+        let mut cmd = Command::new("ffmpeg");
+        cmd.args(["-y", "-loglevel", "error"])
+            .args(["-i", &self.video_tmp]);
+
+        let audio_tmp = if let Some(mut sink) = self.audio.take() {
+            let _ = sink.file.flush();
+            drop(sink.file);
+            cmd.args(["-f", "s16le"])
+                .args(["-ar", &sink.sample_rate.to_string()])
+                .args(["-ac", &sink.channels.to_string()])
+                .args(["-i", &sink.path])
+                .args(["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest"]);
+            Some(sink.path)
+        } else {
+            cmd.args(["-c:v", "copy"]);
+            None
+        };
+
+        match cmd.arg(&self.out_path).status() {
+            Ok(status) if status.success() => println!("Saved video to {}", self.out_path),
+            Ok(status) => eprintln!("video recording: ffmpeg mux exited with {status}"),
+            Err(err) => eprintln!("video recording: failed to run ffmpeg mux: {err}"),
+        }
+
+        let _ = std::fs::remove_file(&self.video_tmp);
+        if let Some(path) = audio_tmp {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+fn sanitize_name(title: &str) -> String {
+    let name: String = title
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    let name = name.trim_matches('_');
+    if name.is_empty() {
+        "recording".to_string()
+    } else {
+        name.to_string()
+    }
+}
+
 fn main() {
     use core_model::Core;
 
     let mut rom_path = None;
     let mut uncapped = false;
     let mut record = false;
+    let mut record_video = false;
     let mut mute = false;
 
     for arg in std::env::args().skip(1) {
         if arg == "--uncapped" {
             uncapped = true;
-        } else if arg == "--record" {
+        } else if arg == "--record-gif" {
             record = true;
+        } else if arg == "--record-mp4" {
+            record_video = true;
         } else if arg == "--mute" {
             mute = true;
         } else {
@@ -93,7 +236,8 @@ fn main() {
         }
     }
 
-    let path = rom_path.expect("Usage: runner <path-to-rom> [--uncapped] [--record] [--mute]");
+    let path = rom_path
+        .expect("Usage: runner <path-to-rom> [--uncapped] [--record-gif] [--record-mp4] [--mute]");
 
     let mut rom = std::fs::read(&path).expect("Failed to read ROM");
     if rom.len() % 1024 == 512 {
@@ -112,15 +256,24 @@ fn main() {
         .unwrap_or_else(|| Duration::from_secs_f64(1.0 / target_fps));
 
     let mut recorder = record.then(|| {
-        let name: String = title
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect();
-        let name = name.trim_matches('_');
-        let path = format!("{}.gif", if name.is_empty() { "recording" } else { name });
-        println!("Recording to {path}");
+        let path = format!("{}.gif", sanitize_name(&title));
+        println!("Recording GIF to {path}");
         Recorder::new(path, target_fps, frame_width, frame_height)
     });
+
+    let mut video_recorder = record_video
+        .then(|| {
+            let path = format!("{}.mp4", sanitize_name(&title));
+            println!("Recording video to {path}");
+            VideoRecorder::new(
+                path,
+                target_fps,
+                frame_width,
+                frame_height,
+                snes.audio_spec(),
+            )
+        })
+        .flatten();
 
     let sdl = sdl3::init().expect("Failed to init SDL");
     let video = sdl.video().expect("Failed to init SDL video");
@@ -186,9 +339,14 @@ fn main() {
         core_time += start.elapsed();
         frames += 1;
 
-        if let Some(player) = player.as_mut() {
+        if player.is_some() || video_recorder.is_some() {
             snes.drain_audio(&mut audio_buffer);
-            player.queue(&audio_buffer);
+            if let Some(player) = player.as_mut() {
+                player.queue(&audio_buffer);
+            }
+            if let Some(rec) = video_recorder.as_mut() {
+                rec.push_audio(&audio_buffer);
+            }
             audio_buffer.clear();
         }
 
@@ -200,6 +358,9 @@ fn main() {
         }
         if let Some(rec) = recorder.as_mut() {
             rec.push(&buffer);
+        }
+        if let Some(rec) = video_recorder.as_mut() {
+            rec.push_video(&buffer);
         }
 
         texture
@@ -243,6 +404,11 @@ fn main() {
     if let Some(rec) = recorder {
         let path = rec.path.clone();
         drop(rec);
-        println!("Saved recording to {path}");
+        println!("Saved GIF to {path}");
+    }
+
+    if let Some(rec) = video_recorder {
+        println!("Encoding video, please wait...");
+        rec.finish();
     }
 }
