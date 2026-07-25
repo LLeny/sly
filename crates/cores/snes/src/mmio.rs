@@ -11,7 +11,7 @@ mod symbol;
 #[cfg(feature = "debug")]
 pub use access::{AccessTracker, MemoryAccess, TrackMode};
 
-use crate::joypad::{JOYPAD_IO_END, JOYPAD_IO_START, JOYSER0, JOYSER1, JOYSER1_ALWAYS_SET};
+use crate::joypad::{JOYPAD_IO_END, JOYPAD_IO_START, JOYSER0, JOYSER1};
 use crate::math::{RDDIVH, RDDIVL, RDMPYH, RDMPYL, WRDIVB, WRDIVH, WRDIVL, WRMPYA, WRMPYB};
 use crate::mmio::dma::{CHANNEL_REGS_END, CHANNEL_REGS_START, Dma};
 use crate::mmio::regs::{
@@ -316,8 +316,8 @@ impl<M: MemoryMap> Snes<M> {
             }
             APU_IO_START..=APU_IO_END => self.apu.cpu_read_port((reg - APU_IO_START) as usize),
             JOYPAD_IO_START..=JOYPAD_IO_END => self.joypads.read(reg),
-            JOYSER0 => 0,
-            JOYSER1 => JOYSER1_ALWAYS_SET,
+            JOYSER0 => self.joypads.read_serial(0),
+            JOYSER1 => self.joypads.read_serial(1),
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),
@@ -414,7 +414,7 @@ impl<M: MemoryMap> Snes<M> {
             APU_IO_START..=APU_IO_END => self
                 .apu
                 .cpu_write_port((reg - APU_IO_START) as usize, value),
-            JOYSER0 => {}
+            JOYSER0 => self.joypads.set_strobe(value & 0x01 != 0),
             INIDISP => self.ppu.set_display_control(value),
             _ => {
                 tracing::error!(
@@ -494,8 +494,8 @@ impl<M: MemoryMap> Snes<M> {
             }
             APU_IO_START..=APU_IO_END => self.apu.cpu_read_port((reg - APU_IO_START) as usize),
             JOYPAD_IO_START..=JOYPAD_IO_END => self.joypads.read(reg),
-            JOYSER0 => 0,
-            JOYSER1 => JOYSER1_ALWAYS_SET,
+            JOYSER0 => self.joypads.peek_serial(0),
+            JOYSER1 => self.joypads.peek_serial(1),
             _ => OPEN_BUS,
         }
     }

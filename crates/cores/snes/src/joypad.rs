@@ -1,8 +1,6 @@
 pub const JOYSER0: u16 = 0x4016;
 pub const JOYSER1: u16 = 0x4017;
 
-pub const JOYSER1_ALWAYS_SET: u8 = 0b0001_1100;
-
 pub const JOYPAD_IO_START: u16 = 0x4218;
 pub const JOYPAD_IO_END: u16 = 0x421F;
 
@@ -46,10 +44,25 @@ pub struct Buttons {
     pub b: bool,
 }
 
+#[chapa::bitfield(u8, order = lsb0)]
+#[derive(Default)]
+pub struct SerialPort {
+    #[bits(0)]
+    pub data1: bool,
+
+    #[bits(1)]
+    pub data2: bool,
+
+    #[bits(2..=4)]
+    pub expansion: u8,
+}
+
 #[derive(Default)]
 pub struct Joypads {
     input: [Buttons; 2],
     latched: [u16; 4],
+    strobe: bool,
+    shift: [u16; 2],
 }
 
 impl Joypads {
@@ -85,11 +98,53 @@ impl Joypads {
     }
 
     pub(crate) fn reset(&mut self) {
-        self.latched = [0; 4];
+        *self = Self {
+            input: self.input,
+            ..Self::default()
+        };
     }
 
     pub(crate) fn autoread(&mut self) {
-        self.latched = [self.input[0].raw(), self.input[1].raw(), 0, 0];
+        self.set_strobe(true);
+        self.set_strobe(false);
+
+        self.latched = [self.shift[0], self.shift[1], 0, 0];
+        self.shift = [u16::MAX; 2];
+    }
+
+    pub(crate) fn set_strobe(&mut self, high: bool) {
+        if self.strobe && !high {
+            self.shift = [self.input[0].raw(), self.input[1].raw()];
+        }
+
+        self.strobe = high;
+    }
+
+    pub(crate) fn peek_serial(&self, port: usize) -> u8 {
+        let shift = if self.strobe {
+            self.input[port].raw()
+        } else {
+            self.shift[port]
+        };
+
+        let mut value = SerialPort::default();
+        value.set_data1(shift & 0x8000 != 0);
+
+        if port == 1 {
+            value.set_expansion(0b111);
+        }
+
+        value.raw()
+    }
+
+    pub(crate) fn read_serial(&mut self, port: usize) -> u8 {
+        let value = self.peek_serial(port);
+
+        if !self.strobe {
+            self.shift[port] = (self.shift[port] << 1) | 1;
+        }
+
+        value
     }
 
     pub(crate) fn read(&self, reg: u16) -> u8 {
