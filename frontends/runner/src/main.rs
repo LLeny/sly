@@ -200,6 +200,28 @@ impl VideoRecorder {
     }
 }
 
+fn upscale(src: &[u8], dst: &mut [u8], width: usize, height: usize) {
+    let scale = SCALE as usize;
+    let src_stride = width * 3;
+    let dst_stride = src_stride * scale;
+
+    for y in 0..height {
+        let src_row = &src[y * src_stride..][..src_stride];
+        let (first, rest) =
+            dst[y * scale * dst_stride..][..scale * dst_stride].split_at_mut(dst_stride);
+
+        for (x, pixel) in src_row.chunks_exact(3).enumerate() {
+            for out in first[x * scale * 3..][..scale * 3].chunks_exact_mut(3) {
+                out.copy_from_slice(pixel);
+            }
+        }
+
+        for row in rest.chunks_exact_mut(dst_stride) {
+            row.copy_from_slice(first);
+        }
+    }
+}
+
 fn sanitize_name(title: &str) -> String {
     let name: String = title
         .chars()
@@ -255,21 +277,23 @@ fn main() {
         .frame_interval()
         .unwrap_or_else(|| Duration::from_secs_f64(1.0 / target_fps));
 
+    let (record_width, record_height) = (frame_width * SCALE, frame_height * SCALE);
+
     let mut recorder = record.then(|| {
         let path = format!("{}.gif", sanitize_name(&title));
-        println!("Recording GIF to {path}");
-        Recorder::new(path, target_fps, frame_width, frame_height)
+        println!("Recording GIF to {path} at {record_width}x{record_height}");
+        Recorder::new(path, target_fps, record_width, record_height)
     });
 
     let mut video_recorder = record_video
         .then(|| {
             let path = format!("{}.mp4", sanitize_name(&title));
-            println!("Recording video to {path}");
+            println!("Recording video to {path} at {record_width}x{record_height}");
             VideoRecorder::new(
                 path,
                 target_fps,
-                frame_width,
-                frame_height,
+                record_width,
+                record_height,
                 snes.audio_spec(),
             )
         })
@@ -301,6 +325,11 @@ fn main() {
     let mut audio_buffer: Vec<i16> = Vec::new();
 
     let mut buffer = vec![0u8; frame_width as usize * frame_height as usize * 3];
+    let mut record_buffer = if recorder.is_some() || video_recorder.is_some() {
+        vec![0u8; record_width as usize * record_height as usize * 3]
+    } else {
+        Vec::new()
+    };
     let mut frames = 0u32;
     let mut core_time = Duration::ZERO;
     let mut stats_since = Instant::now();
@@ -357,11 +386,21 @@ fn main() {
             dst[1] = g;
             dst[2] = b;
         }
-        if let Some(rec) = recorder.as_mut() {
-            rec.push(&buffer);
-        }
-        if let Some(rec) = video_recorder.as_mut() {
-            rec.push_video(&buffer);
+
+        if !record_buffer.is_empty() {
+            upscale(
+                &buffer,
+                &mut record_buffer,
+                frame_width as usize,
+                frame_height as usize,
+            );
+
+            if let Some(rec) = recorder.as_mut() {
+                rec.push(&record_buffer);
+            }
+            if let Some(rec) = video_recorder.as_mut() {
+                rec.push_video(&record_buffer);
+            }
         }
 
         texture

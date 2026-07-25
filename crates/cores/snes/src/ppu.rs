@@ -7,6 +7,7 @@ pub(crate) mod mode7;
 pub(crate) mod mosaic;
 pub mod oam;
 pub(crate) mod obj;
+mod opt;
 pub(crate) mod regs;
 mod render;
 pub mod tile;
@@ -188,7 +189,7 @@ impl Ppu {
         data.entries.reserve((data.width * data.height) as usize);
         for y in 0..data.height {
             for x in 0..data.width {
-                let word = self.vram.word(data.entry_addr(x, y) as u16);
+                let word = data.entry(&self.vram, x, y);
                 data.entries.push(word.into());
             }
         }
@@ -198,10 +199,13 @@ impl Ppu {
 
     pub(crate) fn tilemap_header(&self, layer: usize) -> Option<TilemapData> {
         self.bg_mode.bpp(layer)?;
+        Some(self.tilemap_geometry(layer))
+    }
 
+    pub(crate) fn tilemap_geometry(&self, layer: usize) -> TilemapData {
         let bg = &self.bg_layers[layer];
 
-        Some(TilemapData {
+        TilemapData {
             base_addr: bg.tilemap_addr,
             width: bg.horizontal_tilemap_count.count() as u32 * 32,
             height: bg.vertical_tilemap_count.count() as u32 * 32,
@@ -209,7 +213,7 @@ impl Ppu {
             scroll_x: bg.scroll_x(),
             scroll_y: bg.scroll_y(),
             entries: Vec::new(),
-        })
+        }
     }
 
     pub fn sprites(&self) -> Vec<Sprite> {
@@ -411,6 +415,10 @@ impl TilemapData {
     pub fn entry_addr(&self, x: u32, y: u32) -> u32 {
         let screen = y / 32 * (self.width / 32) + x / 32;
         self.base_addr + screen * 0x400 + y % 32 * 32 + x % 32
+    }
+
+    pub(crate) fn entry(&self, vram: &Vram, x: u32, y: u32) -> u16 {
+        vram.word(self.entry_addr(x, y) as u16)
     }
 }
 

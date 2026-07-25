@@ -1,5 +1,6 @@
 use crate::ppu::layer_order::{self, RenderPass};
 use crate::ppu::mode7::{Mode7Settings, mode7_character_pixel};
+use crate::ppu::opt::OffsetPerTile;
 use crate::ppu::regs::{
     BackgroundMode, ColorMathAddend, ColorMathIntensity, ColorSource, LayerMask, LayerWindowEnable,
     Priority,
@@ -271,17 +272,26 @@ impl<'a> ScanlineRenderer<'a> {
             bits_per_pixel == 8 && matches!(self.ppu.color_math.color_source, ColorSource::Direct);
         let mosaic_size = self.ppu.mosaic.size_for_layer(layer);
         let sampled_y = self.y / mosaic_size * mosaic_size;
-        let map_y = (sampled_y + map.scroll_y) % (map.height * map.tile_px);
-        let (tile_y, pixel_y) = (map_y / map.tile_px, map_y % map.tile_px);
         let window_mask = window_enabled.then(|| self.ppu.windows.row_mask(layer as u8));
         let hires = self.ppu.bg_mode.is_hires();
         let scale = if hires { 2 } else { 1 };
         let screen_width = SCREEN_WIDTH * scale;
         let mosaic_width = mosaic_size * scale;
-        let scroll_x = map.scroll_x * scale;
         // Modes 5 and 6 replace the normal 8x8 setting with 16x8 cells.
         // The large setting remains 16x16.
         let tile_width = if hires { 16 } else { map.tile_px };
+
+        let vertical_position = |scroll_y| {
+            let map_y = (sampled_y + scroll_y) % (map.height * map.tile_px);
+            (map_y / map.tile_px, map_y % map.tile_px)
+        };
+
+        // Offset-per-tile can replace either scroll value from one column of
+        // tiles to the next, so both stay mutable for the whole scanline.
+        let offset_per_tile = OffsetPerTile::new(self.ppu, layer);
+        let mut scroll_x = map.scroll_x * scale;
+        let (mut tile_y, mut pixel_y) = vertical_position(map.scroll_y);
+        let mut cached_column = None;
 
         // Adjacent pixels usually come from the same tile and decoded row. With
         // mosaic enabled, all pixels in a horizontal block reuse the same
@@ -298,12 +308,22 @@ impl<'a> ScanlineRenderer<'a> {
             }
 
             let sampled_x = screen_x / mosaic_width * mosaic_width;
+
+            if let Some(offsets) = &offset_per_tile
+                && let Some(column) = offsets.column(sampled_x / scale)
+                && cached_column != Some(column)
+            {
+                cached_column = Some(column);
+                let scroll = offsets.column_scroll(&self.ppu.vram, column);
+                scroll_x = scroll.horizontal * scale;
+                (tile_y, pixel_y) = vertical_position(scroll.vertical);
+            }
+
             let map_x = (sampled_x + scroll_x) % (map.width * tile_width);
             let (tile_x, pixel_x) = (map_x / tile_width, map_x % tile_width);
 
             if cached_entry != Some((tile_x, tile_y)) {
-                entry =
-                    TilemapEntry::from(self.ppu.vram.word(map.entry_addr(tile_x, tile_y) as u16));
+                entry = TilemapEntry::from(map.entry(&self.ppu.vram, tile_x, tile_y));
                 cached_entry = Some((tile_x, tile_y));
             }
             if entry.priority != priority {
