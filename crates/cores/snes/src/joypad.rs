@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 pub const JOYSER0: u16 = 0x4016;
 pub const JOYSER1: u16 = 0x4017;
 
@@ -57,7 +59,7 @@ pub struct SerialPort {
     pub expansion: u8,
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Joypads {
     input: [Buttons; 2],
     latched: [u16; 4],
@@ -153,3 +155,5 @@ impl Joypads {
         (word >> ((index % 2) * 8)) as u8
     }
 }
+
+crate::macros::impl_bitfield_serde!(Buttons, SerialPort,);

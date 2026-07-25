@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 pub const WRMPYA: u16 = 0x4202;
 pub const WRMPYB: u16 = 0x4203;
 pub const WRDIVL: u16 = 0x4204;
@@ -9,6 +11,7 @@ pub const RDDIVH: u16 = 0x4215;
 pub const RDMPYL: u16 = 0x4216;
 pub const RDMPYH: u16 = 0x4217;
 
+#[derive(Serialize, Deserialize)]
 pub struct Math {
     pub mul_factor_a: u8,
     pub mul_factor_b: u8,

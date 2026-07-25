@@ -175,6 +175,8 @@ impl Debugger {
             self.perf = segments.into_iter().map(Into::into).collect();
         }
 
+        self.flush_save_ram();
+
         let keep_going = outcome == RunOutcome::Done;
         if !keep_going {
             self.invalidate_video_keys();
@@ -195,6 +197,15 @@ impl Debugger {
 
         cx.notify();
         keep_going
+    }
+
+    fn flush_save_ram(&mut self) {
+        if self.sram_flushed.elapsed() < SAVE_RAM_FLUSH {
+            return;
+        }
+
+        self.sram_flushed = Instant::now();
+        self.persist_save_ram();
     }
 
     pub(super) fn step(&mut self, cx: &mut Context<Self>) {

@@ -6,6 +6,7 @@ use snes::{Cartridge, MemoryMap, Mmio, Snes};
 
 use crate::harness::{Regs, State, TestCore};
 
+#[derive(Default)]
 pub struct FlatMap;
 
 impl MemoryMap for FlatMap {
@@ -74,6 +75,7 @@ impl TestCore for SnesCpu {
     }
 }
 
+#[derive(Default)]
 struct FlatRam;
 
 impl ApuMap for FlatRam {

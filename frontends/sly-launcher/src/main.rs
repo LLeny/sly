@@ -103,6 +103,9 @@ fn main() {
                 launch::advance_launch.run_if(in_state(LauncherMode::Launching)),
                 launch::update_launch_viewport.run_if(in_state(LauncherMode::Launching)),
                 game::present_game_frame.run_if(in_state(LauncherMode::Playing)),
+                game::flush_save_ram.run_if(
+                    in_state(LauncherMode::Playing).and_then(resource_exists::<game::GameSession>),
+                ),
                 ui::update_ui,
                 ui::update_alphabet_highlight,
                 game::resize_game_frame,

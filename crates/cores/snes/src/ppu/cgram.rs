@@ -1,11 +1,16 @@
 use crate::ppu::latch::WordLatch;
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
 
+#[derive(Serialize, Deserialize)]
 pub struct Cgram {
+    #[serde(with = "BigArray")]
     words: [u16; 256],
     addr: u8,
     latch: WordLatch,
 
     #[cfg(feature = "debug")]
+    #[serde(skip)]
     generation: u64,
 }
 

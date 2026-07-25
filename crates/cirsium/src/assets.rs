@@ -31,6 +31,10 @@ pub mod icon {
     pub const DOWNLOAD: &str = "icons/lucide/download.svg";
     pub const LINK: &str = "icons/lucide/link-2.svg";
 
+    pub const SAVE: &str = "icons/lucide/save.svg";
+    pub const RESTORE: &str = "icons/lucide/history.svg";
+    pub const BOOKMARK: &str = "icons/lucide/bookmark.svg";
+
     pub const RUN: &str = "icons/lucide/play.svg";
     pub const PAUSE: &str = "icons/lucide/pause.svg";
     pub const STEP: &str = "icons/lucide/step-forward.svg";

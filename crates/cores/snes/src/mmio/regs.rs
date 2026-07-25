@@ -387,3 +387,11 @@ impl MmioReg for TimerUp {
         snes.irq.peek_timeup()
     }
 }
+
+crate::macros::impl_bitfield_serde!(
+    TransferPattern,
+    AddressAdjustMode,
+    Direction,
+    DmaAddress,
+    DmaByteCount,
+);

@@ -374,3 +374,205 @@ impl Debugger {
         cx.notify();
     }
 }
+
+impl Debugger {
+    pub(super) fn slot_action(
+        &mut self,
+        action: cirsium::widgets::SlotAction,
+        id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        use cirsium::widgets::SlotAction;
+
+        let Some(slot) = storage::Slot::from_id(id) else {
+            return;
+        };
+
+        match action {
+            SlotAction::Select => self.select_slot(slot, cx),
+            SlotAction::Save => self.save_state(slot, cx),
+            SlotAction::Load => self.load_state(slot, cx),
+            SlotAction::Delete => self.delete_slot(slot, cx),
+        }
+    }
+
+    pub(super) fn save_state(&mut self, slot: storage::Slot, cx: &mut Context<Self>) {
+        match self.session.save_state(&*self.target, slot) {
+            Ok(bytes) => {
+                self.set_state(&format!("saved {}", slot.label().to_lowercase()));
+                self.refresh_slot(slot, Some(&bytes));
+            }
+            Err(err) => {
+                self.set_state("save state failed");
+                tracing::error!("save state: {err}");
+            }
+        }
+
+        self.active_slot = slot;
+        cx.notify();
+    }
+
+    pub(super) fn load_state(&mut self, slot: storage::Slot, cx: &mut Context<Self>) {
+        match self.session.load_state(&mut *self.target, slot) {
+            Ok(true) => {
+                self.after_state_load(&slot.label().to_lowercase());
+                self.active_slot = slot;
+            }
+            Ok(false) => self.set_state(&format!("{} is empty", slot.label().to_lowercase())),
+            Err(err) => {
+                self.set_state("load state failed");
+                tracing::error!("load state: {err}");
+            }
+        }
+
+        cx.notify();
+    }
+
+    pub(crate) fn apply_state(&mut self, bytes: &[u8], what: &str, cx: &mut Context<Self>) {
+        match self.target.load_state(bytes) {
+            Ok(()) => self.after_state_load(what),
+            Err(err) => {
+                self.set_state("load state failed");
+                tracing::error!("loading state: {err}");
+            }
+        }
+
+        cx.notify();
+    }
+
+    fn after_state_load(&mut self, what: &str) {
+        self.invalidate_video_keys();
+        self.framebuffer_dirty = true;
+        self.follow_memory();
+        self.set_state(&format!("loaded {what}"));
+    }
+
+    fn select_slot(&mut self, slot: storage::Slot, cx: &mut Context<Self>) {
+        self.active_slot = slot;
+        cx.notify();
+    }
+
+    pub(super) fn cycle_slot(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let slots = storage::Slot::ALL;
+        let at = slots
+            .iter()
+            .position(|slot| *slot == self.active_slot)
+            .unwrap_or(0);
+        let next = if forward {
+            (at + 1) % slots.len()
+        } else {
+            (at + slots.len() - 1) % slots.len()
+        };
+
+        self.active_slot = slots[next];
+        self.set_state(&format!("{} selected", self.active_slot.label()));
+        cx.notify();
+    }
+
+    fn delete_slot(&mut self, slot: storage::Slot, cx: &mut Context<Self>) {
+        if let Err(err) = self.session.remove_state(slot) {
+            tracing::error!("deleting state: {err}");
+            self.set_state("delete failed");
+        } else {
+            self.set_state(&format!("cleared {}", slot.label().to_lowercase()));
+            self.refresh_slot(slot, None);
+        }
+
+        cx.notify();
+    }
+
+    pub(crate) fn active_slot(&self) -> storage::Slot {
+        self.active_slot
+    }
+
+    pub(crate) fn hydrate_saves(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(), storage::StoreError>> + 'static {
+        self.session.hydrate()
+    }
+
+    pub(crate) fn saves_loaded(&mut self, cx: &mut Context<Self>) {
+        self.restore_save_ram();
+        self.refresh_savestates();
+        self.saves_ready = true;
+        cx.notify();
+    }
+
+    fn restore_save_ram(&mut self) {
+        if let Err(err) = self.session.restore_save_ram(&mut *self.target) {
+            tracing::warn!("restoring save ram: {err}");
+        }
+    }
+
+    pub(crate) fn persist_save_ram(&self) {
+        if !self.saves_ready {
+            return;
+        }
+
+        if let Err(err) = self.session.persist_save_ram(&*self.target) {
+            tracing::error!("writing save ram: {err}");
+        }
+    }
+
+    pub(crate) fn refresh_savestates(&mut self) {
+        let occupied: std::collections::HashMap<storage::Slot, u64> = self
+            .session
+            .slots()
+            .unwrap_or_else(|err| {
+                tracing::error!("listing slots: {err}");
+                Vec::new()
+            })
+            .into_iter()
+            .map(|info| (info.slot, info.len))
+            .collect();
+
+        let slots = storage::Slot::ALL
+            .into_iter()
+            .map(|slot| match occupied.get(&slot).copied() {
+                Some(len) => {
+                    let bytes = self.session.read_state(slot).ok().flatten();
+                    Self::slot_row(slot, Some(len), bytes.as_deref())
+                }
+                None => Self::slot_row(slot, None, None),
+            })
+            .collect();
+
+        self.savestates_view = std::sync::Arc::new(cirsium::widgets::SavestatesView { slots });
+    }
+
+    fn refresh_slot(&mut self, slot: storage::Slot, bytes: Option<&[u8]>) {
+        let row = Self::slot_row(slot, bytes.map(|b| b.len() as u64), bytes);
+        let mut view = (*self.savestates_view).clone();
+        if let Some(existing) = view.slots.iter_mut().find(|slot| slot.id == row.id) {
+            *existing = row;
+        }
+        self.savestates_view = std::sync::Arc::new(view);
+    }
+
+    fn slot_row(
+        slot: storage::Slot,
+        len: Option<u64>,
+        bytes: Option<&[u8]>,
+    ) -> cirsium::widgets::SavestateSlot {
+        let thumbnail = bytes
+            .and_then(core_model::state::peek_thumbnail)
+            .and_then(|thumb| {
+                cirsium::widgets::thumbnail_image(thumb.width, thumb.height, thumb.pixels)
+            });
+
+        cirsium::widgets::SavestateSlot {
+            id: slot.id().into(),
+            label: slot.label().into(),
+            detail: match len {
+                Some(len) => format!("{} KiB", len / 1024).into(),
+                None => "empty".into(),
+            },
+            occupied: len.is_some(),
+            thumbnail,
+        }
+    }
+
+    pub(crate) fn savestates_view(&self) -> std::sync::Arc<cirsium::widgets::SavestatesView> {
+        self.savestates_view.clone()
+    }
+}

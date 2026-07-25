@@ -1,10 +1,12 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::Snes;
 use crate::apu::SPC700_CLOCK;
 use crate::cartridge::TvSystem;
-use crate::mmio::{CartridgeMap, MemoryMap};
+use crate::mmio::MemoryMap;
 
 pub(crate) const MASTER_CLOCKS_PER_SCANLINE: u64 = 1364;
 pub(crate) const MASTER_CLOCK_HZ_NTSC: u64 = 21_477_270;
@@ -22,48 +24,108 @@ pub(crate) const MASTER_CLOCKS_PER_FRAME_NTSC: u64 =
 pub(crate) const MASTER_CLOCKS_PER_FRAME_PAL: u64 =
     MASTER_CLOCKS_PER_SCANLINE * SCANLINES_PER_FRAME_PAL;
 
-pub type Callback<M = CartridgeMap> = fn(&mut Snes<M>, u64);
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum EventKind {
+    Spc700Tick,
+    VblankStart,
+    VblankEnd,
+    DrawScanline,
+    InitHdma,
+    RunHdma,
+    HvTimerLine,
+    HvTimerFire,
+    DramRefresh,
+    Timer01Tick,
+    Timer2Tick,
+    DspTick,
+}
 
+impl EventKind {
+    pub(crate) fn dispatch<M: MemoryMap + 'static>(self, snes: &mut Snes<M>, deadline: u64) {
+        match self {
+            EventKind::Spc700Tick => self::spc700_tick(snes, deadline),
+            EventKind::VblankStart => crate::ppu::vblank_start(snes, deadline),
+            EventKind::VblankEnd => crate::ppu::vblank_end(snes, deadline),
+            EventKind::DrawScanline => crate::ppu::draw_scanline(snes, deadline),
+            EventKind::InitHdma => crate::mmio::dma::init_hdma(snes, deadline),
+            EventKind::RunHdma => crate::mmio::dma::run_hdma(snes, deadline),
+            EventKind::HvTimerLine => crate::interrupt::hv_timer_line(snes, deadline),
+            EventKind::HvTimerFire => crate::interrupt::hv_timer_fire(snes, deadline),
+            EventKind::DramRefresh => self::dram_refresh(snes, deadline),
+            EventKind::Timer01Tick => crate::apu::timer01_tick(snes, deadline),
+            EventKind::Timer2Tick => crate::apu::timer2_tick(snes, deadline),
+            EventKind::DspTick => crate::apu::dsp_tick(snes, deadline),
+        }
+    }
+}
+
+fn sorted_events<S: serde::Serializer>(
+    heap: &BinaryHeap<Reverse<Event>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut events: Vec<&Event> = heap.iter().map(|entry| &entry.0).collect();
+    events.sort_unstable();
+    events.serialize(serializer)
+}
+
+fn heap_from_events<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BinaryHeap<Reverse<Event>>, D::Error> {
+    let events = Vec::<Event>::deserialize(deserializer)?;
+    Ok(events.into_iter().map(Reverse).collect())
+}
+
+#[derive(Serialize, Deserialize)]
 enum Period {
     Master(u64),
     Spc { spc_cycles: u64, remainder: u64 },
 }
 
-pub struct Event<M: MemoryMap = CartridgeMap> {
+#[derive(Serialize, Deserialize)]
+pub struct Event {
     deadline: u64,
+    seq: u64,
     period: Option<Period>,
-    callback: Callback<M>,
+    kind: EventKind,
 }
 
-impl<M: MemoryMap> Eq for Event<M> {}
+impl Eq for Event {}
 
-impl<M: MemoryMap> PartialEq for Event<M> {
+impl PartialEq for Event {
     fn eq(&self, other: &Self) -> bool {
-        self.deadline == other.deadline
+        self.deadline == other.deadline && self.seq == other.seq
     }
 }
 
-impl<M: MemoryMap> Ord for Event<M> {
+impl Ord for Event {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.deadline.cmp(&other.deadline)
+        self.deadline
+            .cmp(&other.deadline)
+            .then_with(|| self.seq.cmp(&other.seq))
     }
 }
 
-impl<M: MemoryMap> PartialOrd for Event<M> {
+impl PartialOrd for Event {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-pub struct Scheduler<M: MemoryMap = CartridgeMap> {
-    events: BinaryHeap<Reverse<Event<M>>>,
+#[derive(Serialize, Deserialize)]
+pub struct Scheduler {
+    #[serde(
+        serialize_with = "sorted_events",
+        deserialize_with = "heap_from_events"
+    )]
+    events: BinaryHeap<Reverse<Event>>,
     cycles: u64,
     cycles_per_frame: u64,
     master_clock_hz: u64,
     spc_remainder: u64,
+    next_seq: u64,
 }
 
-impl<M: MemoryMap> Scheduler<M> {
+impl Scheduler {
     pub fn new(region: TvSystem) -> Self {
         let (cycles_per_frame, master_clock_hz) = match region {
             TvSystem::Ntsc => (MASTER_CLOCKS_PER_FRAME_NTSC, MASTER_CLOCK_HZ_NTSC),
@@ -76,7 +138,19 @@ impl<M: MemoryMap> Scheduler<M> {
             cycles_per_frame,
             master_clock_hz,
             spc_remainder: 0,
+            next_seq: 0,
         }
+    }
+
+    fn push(&mut self, deadline: u64, period: Option<Period>, kind: EventKind) {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        self.events.push(Reverse(Event {
+            deadline,
+            seq,
+            period,
+            kind,
+        }));
     }
 
     pub fn spc_master_clocks(&mut self, spc_cycles: u64) -> u64 {
@@ -110,7 +184,7 @@ impl<M: MemoryMap> Scheduler<M> {
         self.cycles += cycles;
     }
 
-    pub fn pop_current_event(&mut self) -> Option<(u64, Callback<M>)> {
+    pub fn pop_current_event(&mut self) -> Option<(u64, EventKind)> {
         match self.events.peek() {
             Some(next) if next.0.deadline <= self.cycles => {
                 let event = self.events.pop().unwrap().0;
@@ -126,49 +200,43 @@ impl<M: MemoryMap> Scheduler<M> {
                             scaled / SPC700_CLOCK
                         }
                     };
+
                     self.events.push(Reverse(Event {
                         deadline: event.deadline + delay,
+                        seq: event.seq,
                         period: Some(period),
-                        callback: event.callback,
+                        kind: event.kind,
                     }));
                 }
-                Some((event.deadline, event.callback))
+                Some((event.deadline, event.kind))
             }
             _ => None,
         }
     }
 
-    pub fn schedule_event(&mut self, deadline: u64, callback: Callback<M>) {
-        self.events.push(Reverse(Event {
-            deadline,
-            period: None,
-            callback,
-        }));
+    pub fn schedule_event(&mut self, deadline: u64, kind: EventKind) {
+        self.push(deadline, None, kind);
     }
 
-    pub fn schedule_periodic(&mut self, period: u64, callback: Callback<M>) {
-        self.schedule_periodic_at(period, period, callback);
+    pub fn schedule_periodic(&mut self, period: u64, kind: EventKind) {
+        self.schedule_periodic_at(period, period, kind);
     }
 
-    pub fn schedule_periodic_at(&mut self, first: u64, period: u64, callback: Callback<M>) {
-        self.events.push(Reverse(Event {
-            deadline: self.cycles + first,
-            period: Some(Period::Master(period)),
-            callback,
-        }));
+    pub fn schedule_periodic_at(&mut self, first: u64, period: u64, kind: EventKind) {
+        self.push(self.cycles + first, Some(Period::Master(period)), kind);
     }
 
     /// Schedule a recurring event with a period given in SPC700 cycles.
-    pub fn schedule_periodic_spc(&mut self, spc_cycles: u64, callback: Callback<M>) {
+    pub fn schedule_periodic_spc(&mut self, spc_cycles: u64, kind: EventKind) {
         let scaled = spc_cycles * self.master_clock_hz;
-        self.events.push(Reverse(Event {
-            deadline: self.cycles + scaled / SPC700_CLOCK,
-            period: Some(Period::Spc {
+        self.push(
+            self.cycles + scaled / SPC700_CLOCK,
+            Some(Period::Spc {
                 spc_cycles,
                 remainder: scaled % SPC700_CLOCK,
             }),
-            callback,
-        }));
+            kind,
+        );
     }
 
     pub fn next_deadline(&self) -> Option<u64> {
@@ -180,7 +248,7 @@ pub(crate) fn spc700_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: 
     let cycles = crate::apu::spc700::step(&mut snes.apu);
     let delay = snes.scheduler.spc_master_clocks(cycles);
     snes.scheduler
-        .schedule_event(deadline + delay, self::spc700_tick);
+        .schedule_event(deadline + delay, EventKind::Spc700Tick);
 }
 
 pub(crate) fn dram_refresh<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {

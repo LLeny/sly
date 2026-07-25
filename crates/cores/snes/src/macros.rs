@@ -22,6 +22,8 @@ macro_rules! register_mmio {
         $(#[$meta])*
         $vis struct $name { $($body)* }
 
+        $crate::macros::impl_bitfield_serde!($name);
+
         impl $name {
             pub const ADDRESS: u16 = $addr;
             pub const NAME: &'static str = $doc.trim_ascii();
@@ -48,6 +50,8 @@ macro_rules! register_mmio_family {
         $(#[$meta])*
         $vis struct $name { $($body)* }
 
+        $crate::macros::impl_bitfield_serde!($name);
+
         $(
             inventory::submit! {
                 $crate::mmio::MmioSymbol {
@@ -71,6 +75,27 @@ macro_rules! register_mmio_raw {
     };
 }
 
+macro_rules! impl_bitfield_serde {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl serde::Serialize for $ty {
+                fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                    serde::Serialize::serialize(&<$ty as chapa::BitField>::raw(self), s)
+                }
+            }
+
+            impl<'de> serde::Deserialize<'de> for $ty {
+                fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                    Ok(<$ty as chapa::BitField>::from_raw(
+                        serde::Deserialize::deserialize(d)?,
+                    ))
+                }
+            }
+        )+
+    };
+}
+
+pub(crate) use impl_bitfield_serde;
 pub(crate) use register_mmio;
 pub(crate) use register_mmio_family;
 pub(crate) use register_mmio_raw;

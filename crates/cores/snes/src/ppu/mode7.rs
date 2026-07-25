@@ -3,6 +3,7 @@ use crate::macros::{register_mmio, register_mmio_raw};
 use crate::mmio::{MemoryMap, MmioReg};
 use crate::ppu::latch::ByteLatch;
 use crate::ppu::vram::Vram;
+use serde::{Deserialize, Serialize};
 
 const H_OFFSET: u16 = 0x210D;
 const V_OFFSET: u16 = 0x210E;
@@ -54,7 +55,7 @@ struct Signed13 {
     value: i16,
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub(crate) struct Matrix {
     pub(crate) a: i16,
     pub(crate) b: i16,

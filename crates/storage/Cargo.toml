@@ -1,0 +1,37 @@
+[package]
+name = "storage"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+core-model = { path = "../models/core" }
+thiserror = "2.0.18"
+tracing.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+dirs = "6.0.0"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+[target.'cfg(target_family = "wasm")'.dependencies.web-sys]
+version = "0.3"
+features = [
+    "Window",
+    "IdbFactory",
+    "IdbDatabase",
+    "IdbObjectStore",
+    "IdbObjectStoreParameters",
+    "IdbOpenDbRequest",
+    "IdbRequest",
+    "IdbTransaction",
+    "IdbTransactionMode",
+    "IdbKeyRange",
+    "IdbCursorWithValue",
+    "IdbCursorDirection",
+    "DomStringList",
+    "Event",
+    "EventTarget",
+]

@@ -1,5 +1,7 @@
 use super::tables::{COUNTER_RANGE, RATE, RATE_OFFSET};
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
 pub(super) struct RateCounter {
     value: i32,
 }
@@ -21,6 +23,7 @@ impl RateCounter {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub(super) struct NoiseGenerator {
     level: i32,
 }
@@ -42,6 +45,7 @@ impl NoiseGenerator {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub(super) struct KeyOnLatch {
     poll_this_sample: bool,
     current: u8,

@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Spc700 {
     pub a: u8,
     pub x: u8,
@@ -57,3 +59,5 @@ pub struct Flags {
     #[bits(7, alias = "n")]
     pub negative: bool,
 }
+
+crate::macros::impl_bitfield_serde!(Flags,);

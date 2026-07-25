@@ -12,8 +12,9 @@ use crate::Snes;
 use crate::callstack::CallFrame;
 use crate::mmio::{Address, MemoryMap, map};
 use interpreter::Interpreter;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecutionState {
     #[default]
     Running,
@@ -21,6 +22,7 @@ pub enum ExecutionState {
     Stopped,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Cpu {
     pub acc: u16,
     pub index_x: u16,
@@ -35,6 +37,7 @@ pub struct Cpu {
     pub execution: ExecutionState,
 
     #[cfg(feature = "debug")]
+    #[serde(skip)]
     pub call_stack: Vec<CallFrame>,
 }
 
@@ -310,3 +313,5 @@ impl Flags {
         !self.x()
     }
 }
+
+crate::macros::impl_bitfield_serde!(Flags,);

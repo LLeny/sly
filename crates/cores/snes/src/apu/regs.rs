@@ -18,3 +18,5 @@ pub struct Control {
     #[bits(7, default = true)]
     pub ipl_rom_enable: bool,
 }
+
+crate::macros::impl_bitfield_serde!(Control,);

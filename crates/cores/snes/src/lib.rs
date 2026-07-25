@@ -13,6 +13,7 @@ mod math;
 pub mod mmio;
 pub mod ppu;
 pub mod scheduler;
+pub mod state;
 
 pub use cartridge::Cartridge;
 pub use cpu::Cpu;
@@ -27,8 +28,11 @@ use crate::math::Math;
 use crate::mmio::Address;
 use crate::mmio::dma::{self, Dma};
 use crate::ppu::Ppu;
-use crate::scheduler::Scheduler;
+use crate::scheduler::{EventKind, Scheduler};
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub cpu: Cpu,
     pub mmu: Mmio<M>,
@@ -38,7 +42,7 @@ pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub ppu: Ppu,
     pub math: Math,
     pub joypads: Joypads,
-    pub scheduler: Scheduler<M>,
+    pub scheduler: Scheduler,
 }
 
 impl Snes {
@@ -81,42 +85,44 @@ impl<M: MemoryMap + 'static> Snes<M> {
         self.scheduler = Scheduler::new(tv_system);
         let spc_delay = self.scheduler.spc_master_clocks(1);
         self.scheduler
-            .schedule_event(spc_delay, scheduler::spc700_tick);
+            .schedule_event(spc_delay, EventKind::Spc700Tick);
         self.scheduler.schedule_periodic_at(
             scheduler::VBLANK_START_SCANLINE * scheduler::MASTER_CLOCKS_PER_SCANLINE,
             self.scheduler.cycles_per_frame(),
-            ppu::vblank_start,
+            EventKind::VblankStart,
         );
         self.scheduler
-            .schedule_periodic(self.scheduler.cycles_per_frame(), ppu::vblank_end);
-        self.scheduler
-            .schedule_periodic(scheduler::MASTER_CLOCKS_PER_SCANLINE, ppu::draw_scanline);
+            .schedule_periodic(self.scheduler.cycles_per_frame(), EventKind::VblankEnd);
+        self.scheduler.schedule_periodic(
+            scheduler::MASTER_CLOCKS_PER_SCANLINE,
+            EventKind::DrawScanline,
+        );
         self.scheduler.schedule_periodic_at(
             dma::HDMA_INIT_CLOCK,
             self.scheduler.cycles_per_frame(),
-            dma::init_hdma,
+            EventKind::InitHdma,
         );
         self.scheduler.schedule_periodic_at(
             dma::HDMA_RUN_CLOCK,
             scheduler::MASTER_CLOCKS_PER_SCANLINE,
-            dma::run_hdma,
+            EventKind::RunHdma,
         );
         self.scheduler.schedule_periodic(
             scheduler::MASTER_CLOCKS_PER_SCANLINE,
-            interrupt::hv_timer_line,
+            EventKind::HvTimerLine,
         );
         self.scheduler.schedule_periodic_at(
             scheduler::REFRESH_START_CLOCK,
             scheduler::MASTER_CLOCKS_PER_SCANLINE,
-            scheduler::dram_refresh,
+            EventKind::DramRefresh,
         );
 
         self.scheduler
-            .schedule_periodic_spc(apu::SPC_TIMER01_DIVIDER, apu::timer01_tick);
+            .schedule_periodic_spc(apu::SPC_TIMER01_DIVIDER, EventKind::Timer01Tick);
         self.scheduler
-            .schedule_periodic_spc(apu::SPC_TIMER2_DIVIDER, apu::timer2_tick);
+            .schedule_periodic_spc(apu::SPC_TIMER2_DIVIDER, EventKind::Timer2Tick);
         self.scheduler
-            .schedule_periodic_spc(apu::DSP_SAMPLE_PERIOD_SPC, apu::dsp_tick);
+            .schedule_periodic_spc(apu::DSP_SAMPLE_PERIOD_SPC, EventKind::DspTick);
 
         self.mmu.reset();
         self.cpu.pc = self.read16(Address::new(BANK_ZERO, RESET_VECTOR_ADDR));
@@ -142,8 +148,8 @@ impl<M: MemoryMap + 'static> Snes<M> {
         self.end_cpu_instruction();
 
         self.scheduler.advance_by(self.mmu.clocks - clocks_before);
-        while let Some((deadline, callback)) = self.scheduler.pop_current_event() {
-            callback(self, deadline);
+        while let Some((deadline, kind)) = self.scheduler.pop_current_event() {
+            kind.dispatch(self, deadline);
         }
         self.commit_cpu_ppu_writes();
     }
@@ -201,6 +207,22 @@ impl<M: MemoryMap + 'static> core_model::Core for Snes<M> {
             height: ppu::SCREEN_HEIGHT,
             pixels: self.ppu.frame_buffer(),
         })
+    }
+
+    fn save_state(&self) -> Result<Vec<u8>, core_model::StateError> {
+        Snes::save_state(self)
+    }
+
+    fn load_state(&mut self, bytes: &[u8]) -> Result<(), core_model::StateError> {
+        Snes::load_state(self, bytes)
+    }
+
+    fn save_ram(&self) -> Option<&[u8]> {
+        Snes::save_ram(self)
+    }
+
+    fn load_save_ram(&mut self, bytes: &[u8]) -> bool {
+        Snes::load_save_ram(self, bytes)
     }
 
     fn frame_interval(&self) -> Option<std::time::Duration> {

@@ -1,6 +1,7 @@
 use crate::ppu::regs::SpriteSize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Serialize, Deserialize)]
 pub struct ObjLayer {
     pub tileset_addr: u32,
     pub name_offset: u32,

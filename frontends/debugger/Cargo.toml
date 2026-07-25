@@ -11,6 +11,7 @@ core-model = { path = "../../crates/models/core" }
 debugger-model = { path = "../../crates/models/debugger" }
 workspace-model = { path = "../../crates/models/workspace" }
 snes = { path = "../../crates/cores/snes", features = ["debug"] }
+storage = { path = "../../crates/storage" }
 audio = { path = "../../crates/audio" }
 crc32fast = "1.5.0"
 futures = "0.3.31"

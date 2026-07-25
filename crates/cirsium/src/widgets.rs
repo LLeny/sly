@@ -15,6 +15,7 @@ pub mod memory;
 pub mod mmio;
 pub mod palette;
 pub mod ppu;
+pub mod savestates;
 pub(crate) mod scope;
 pub mod sprites;
 pub mod structured;
@@ -46,6 +47,9 @@ pub use memory::{MemoryCell, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};
 pub use mmio::{MmioFieldView, MmioGroup, MmioRegisterView, MmioView, MmioWidget};
 pub use palette::{PaletteColor, PaletteView, PaletteWidget};
 pub use ppu::{PpuGroup, PpuProperty, PpuView, PpuWidget};
+pub use savestates::{
+    SavestateSlot, SavestatesView, SavestatesWidget, SlotAction, SlotThumbnail, thumbnail_image,
+};
 pub use sprites::{SpritesView, SpritesWidget};
 pub use structured::{StructuredPanel, StructuredView};
 pub use table::{TablePanel, TableView};

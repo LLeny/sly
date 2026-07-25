@@ -11,4 +11,5 @@ core-model = { path = "../../crates/models/core" }
 crc32fast = "1.5.0"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 snes = { path = "../../crates/cores/snes" }
+storage = { path = "../../crates/storage" }
 walkdir = "2.5.0"

@@ -10,7 +10,7 @@ pub fn cover_url(system: System, name: &str) -> Option<String> {
 
     let sanitized = self::sanitize(name);
     let file = urlencoding::encode(&sanitized);
-    let repo = system.info().libretro_name.replace(' ', "_");
+    let repo = crate::info(system).libretro_name.replace(' ', "_");
     Some(format!("{BASE_URL}/{repo}/master/Named_Boxarts/{file}.png"))
 }
 

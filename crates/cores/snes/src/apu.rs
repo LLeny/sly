@@ -2,6 +2,8 @@ use crate::apu::regs::Control;
 #[cfg(feature = "debug")]
 use crate::mmio::{AccessTracker, MemKind};
 use crate::{MemoryMap, Snes};
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
 
 pub mod dsp;
 mod map;
@@ -25,23 +27,28 @@ const AUDIO_BUFFER_CAP: usize = 0x10000;
 
 const IPL_ROM: &[u8] = include_bytes!("../assets/spc700.rom");
 
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct Apu<M: ApuMap = HardwareMap> {
+    #[serde(skip)]
     map: M,
 
     // Registers ($00F0-$00FF except $F8-$F9)
-    unknown: u8,             // $F0
-    control: Control,        // $F1 (W)
-    dsp_addr: u8,            // $F2 (DSP register select)
-    pub dsp: Dsp,            // $F3 reads/writes the selected DSP register
-    audio_out: Vec<i16>,     // interleaved stereo samples produced by the DSP
-    cpu_to_apu: [u8; 4],     // written by main CPU $2140-$2143, read by SPC $F4-$F7
-    apu_to_cpu: [u8; 4],     // written by SPC $F4-$F7, read by main CPU $2140-$2143
+    unknown: u8,      // $F0
+    control: Control, // $F1 (W)
+    dsp_addr: u8,     // $F2 (DSP register select)
+    pub dsp: Dsp,     // $F3 reads/writes the selected DSP register
+    #[serde(skip)]
+    audio_out: Vec<i16>, // interleaved stereo samples produced by the DSP
+    cpu_to_apu: [u8; 4], // written by main CPU $2140-$2143, read by SPC $F4-$F7
+    apu_to_cpu: [u8; 4], // written by SPC $F4-$F7, read by main CPU $2140-$2143
     timer_settings: [u8; 3], // $FA-$FC on write
     timer_counters: [u8; 3], // $FD-$FF on read
 
     internal_timers: [u16; 3], // internal counters for timers 0, 1 and 2
 
     // 64 KB RAM
+    #[serde(with = "BigArray")]
     ram: [u8; 0x10000],
 
     // SPC-700 core registers
@@ -49,9 +56,11 @@ pub struct Apu<M: ApuMap = HardwareMap> {
 
     /// Active SPC700 subroutine frames
     #[cfg(feature = "debug")]
+    #[serde(skip)]
     pub call_stack: Vec<crate::callstack::CallFrame>,
 
     #[cfg(feature = "debug")]
+    #[serde(skip)]
     pub access: AccessTracker,
 }
 

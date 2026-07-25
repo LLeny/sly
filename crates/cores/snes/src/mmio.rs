@@ -30,6 +30,7 @@ use crate::ppu::regs::{
 };
 use crate::ppu::window::{LOGIC_END, LOGIC_START, POSITION_END, POSITION_START};
 use crate::{Cartridge, Snes};
+use serde::{Deserialize, Serialize};
 
 pub use addr::Address;
 pub use chapa::{EnumInfo, FieldInfo, FieldKind};
@@ -44,9 +45,12 @@ pub(crate) const RDIO: u16 = 0x4213;
 const PPU_WRITE_START: u16 = 0x2100;
 const PPU_WRITE_END: u16 = 0x2133;
 
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct Mmio<M: MemoryMap = CartridgeMap> {
     pub cartridge: Cartridge,
     pub wram: Box<[u8]>,
+    #[serde(skip)]
     map: M,
     pub fastrom: bool,
     wrio: u8,
@@ -56,6 +60,7 @@ pub struct Mmio<M: MemoryMap = CartridgeMap> {
     pending_ppu_writes: Vec<(u16, u8)>,
 
     #[cfg(feature = "debug")]
+    #[serde(skip)]
     pub access: AccessTracker,
 }
 

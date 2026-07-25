@@ -100,7 +100,7 @@ fn load_file(handle: gpui::WindowHandle<Root>, mut async_cx: gpui::AsyncApp, fil
 
         let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
         let _ = handle.update(&mut async_cx, |root, _window, cx| {
-            root.load_rom(name, bytes, cx);
+            root.load_dropped(name, bytes, cx);
         });
     });
 }

@@ -1,6 +1,5 @@
 use cirsium::Theme;
 use cirsium::components::title_bar;
-use debugger_model::DebugCore;
 use gpui::prelude::*;
 use gpui::{Context, Entity, SharedString, Window, div};
 
@@ -17,11 +16,12 @@ pub(crate) struct Root {
 impl Root {
     pub(crate) fn new(
         logs: LogBuffer,
-        initial: Option<(Box<dyn DebugCore>, ArtQuery)>,
+        initial: Option<crate::LoadedRom>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let debugger = initial.map(|(target, art)| {
-            let debugger = cx.new(|cx| Debugger::new(target, logs.clone(), cx));
+        let debugger = initial.map(|(target, art, game)| {
+            let debugger = cx.new(|cx| Debugger::new(target, game, logs.clone(), cx));
+            Self::load_saves(debugger.clone(), cx);
             Self::resolve_cover_art(debugger.clone(), art, cx);
             debugger
         });
@@ -32,11 +32,37 @@ impl Root {
         }
     }
 
+    pub(crate) fn load_dropped(
+        &mut self,
+        file_name: String,
+        bytes: Vec<u8>,
+        cx: &mut Context<Self>,
+    ) {
+        if core_model::state::is_savestate(&bytes) {
+            match self.debugger.clone() {
+                Some(debugger) => {
+                    debugger.update(cx, |debugger, cx| {
+                        debugger.apply_state(&bytes, &file_name, cx);
+                    });
+                    self.error = None;
+                }
+                None => {
+                    self.error = Some("Load a ROM before loading a savestate".into());
+                }
+            }
+            cx.notify();
+            return;
+        }
+
+        self.load_rom(file_name, bytes, cx);
+    }
+
     pub(crate) fn load_rom(&mut self, file_name: String, rom: Vec<u8>, cx: &mut Context<Self>) {
         match crate::load_snes_rom(rom, file_name) {
-            Ok((target, art)) => {
+            Ok((target, art, game)) => {
                 let logs = self.logs.clone();
-                let debugger = cx.new(|cx| Debugger::new(target, logs, cx));
+                let debugger = cx.new(|cx| Debugger::new(target, game, logs, cx));
+                Self::load_saves(debugger.clone(), cx);
                 Self::resolve_cover_art(debugger.clone(), art, cx);
                 self.debugger = Some(debugger);
                 self.error = None;
@@ -49,13 +75,24 @@ impl Root {
         cx.notify();
     }
 
+    fn load_saves(debugger: Entity<Debugger>, cx: &mut Context<Self>) {
+        let hydrate = debugger.read(cx).hydrate_saves();
+        cx.spawn(async move |_this, cx| {
+            if let Err(err) = hydrate.await {
+                tracing::error!("loading stored saves: {err}");
+            }
+            debugger.update(cx, |debugger, cx| debugger.saves_loaded(cx));
+        })
+        .detach();
+    }
+
     fn resolve_cover_art(debugger: Entity<Debugger>, art: ArtQuery, cx: &mut Context<Self>) {
         let client = cx.http_client();
         cx.spawn(async move |_this, cx| {
             let Some(cover) = crate::cover::resolve(client, &art).await else {
                 return;
             };
-            let _ = debugger.update(cx, |debugger, cx| debugger.set_cover_art(cover, cx));
+            debugger.update(cx, |debugger, cx| debugger.set_cover_art(cover, cx));
         })
         .detach();
     }
@@ -63,7 +100,7 @@ impl Root {
     #[cfg(not(target_family = "wasm"))]
     fn load_rom_from_path(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
         match std::fs::read(path) {
-            Ok(bytes) => self.load_rom(crate::file_name_of(path), bytes, cx),
+            Ok(bytes) => self.load_dropped(crate::file_name_of(path), bytes, cx),
             Err(err) => {
                 self.error = Some(format!("Couldn't read {}: {err}", path.display()).into());
                 cx.notify();
@@ -113,12 +150,6 @@ impl Root {
             .flex_col()
             .items_center()
             .gap_3()
-            .child(
-                div()
-                    .text_2xl()
-                    .text_color(theme.logo)
-                    .child("Sly Debugger"),
-            )
             .child(
                 div()
                     .text_color(theme.text_muted)

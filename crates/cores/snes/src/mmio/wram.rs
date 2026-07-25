@@ -1,4 +1,5 @@
 use crate::macros::register_mmio_raw;
+use serde::{Deserialize, Serialize};
 
 pub(crate) const WMDATA: u16 = 0x2180;
 pub(crate) const WMADDL: u16 = 0x2181;
@@ -14,7 +15,7 @@ register_mmio_raw! {
     WMADDH => "WMADDH",
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub(crate) struct WramPort {
     address: u32,
 }

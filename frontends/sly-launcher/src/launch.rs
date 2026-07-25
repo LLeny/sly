@@ -27,7 +27,7 @@ const LAUNCH_VIEWPORT_Z: i32 = 10;
 
 #[derive(Resource, Default)]
 pub struct PendingGame {
-    pub core: Option<Snes>,
+    pub core: Option<(Snes, storage::GameId)>,
     pub error: Option<String>,
 }
 
@@ -35,7 +35,7 @@ pub struct PendingGame {
 pub struct Blackout;
 
 #[derive(Component)]
-pub struct GameLoadTask(pub Task<Result<Snes, String>>);
+pub struct GameLoadTask(pub Task<Result<(Snes, storage::GameId), String>>);
 
 pub fn poll_game_load(
     mut commands: Commands,
@@ -75,10 +75,15 @@ pub fn advance_launch(
         return;
     }
 
-    let Some(core) = pending.core.take() else {
+    let Some((mut core, game)) = pending.core.take() else {
         state.status = "Still loading cartridge".into();
         return;
     };
+
+    let session = storage::Session::new(storage::FsStore::new(), game);
+    if let Err(err) = session.restore_save_ram(&mut core) {
+        warn!("failed to restore save RAM: {err}");
+    }
 
     let frame_interval = core
         .frame_interval()
@@ -89,6 +94,7 @@ pub fn advance_launch(
         .and_then(|spec| audio::AudioPlayer::new(spec).ok());
     commands.insert_resource(GameSession {
         core: Box::new(core),
+        session,
         audio_samples: Vec::new(),
         frame_dirty: false,
     });

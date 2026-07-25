@@ -1,10 +1,27 @@
+pub mod state;
+
 use std::sync::Arc;
 use std::time::Duration;
+
+pub use state::StateError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AudioSpec {
     pub sample_rate: u32,
     pub channels: u8,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum System {
+    Snes,
+}
+
+impl System {
+    pub const fn slug(self) -> &'static str {
+        match self {
+            System::Snes => "snes",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -178,5 +195,21 @@ pub trait Core {
 
     fn frame_interval(&self) -> Option<Duration> {
         None
+    }
+
+    fn save_state(&self) -> Result<Vec<u8>, StateError> {
+        Err(StateError::Unsupported)
+    }
+
+    fn load_state(&mut self, _bytes: &[u8]) -> Result<(), StateError> {
+        Err(StateError::Unsupported)
+    }
+
+    fn save_ram(&self) -> Option<&[u8]> {
+        None
+    }
+
+    fn load_save_ram(&mut self, _bytes: &[u8]) -> bool {
+        false
     }
 }

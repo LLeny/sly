@@ -2,8 +2,9 @@ use crate::ppu::cgram::{CHANNEL_MASK, CHANNEL_SHIFTS};
 use crate::ppu::regs::{
     ColorMathAddend, ColorMathIntensity, ColorMathOperation, ColorSource, LayerMask, WindowRegion,
 };
+use serde::{Deserialize, Serialize};
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct ColorMath {
     pub layers: LayerMask,
     pub intensity: ColorMathIntensity,

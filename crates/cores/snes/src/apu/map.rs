@@ -1,4 +1,4 @@
-pub trait ApuMap {
+pub trait ApuMap: Default {
     fn region(&self, addr: u16) -> Region;
 }
 
@@ -9,6 +9,7 @@ pub enum Region {
     Ipl,
 }
 
+#[derive(Default)]
 pub struct HardwareMap;
 
 impl ApuMap for HardwareMap {

@@ -39,6 +39,24 @@ fn game_button_from_key(key: &str) -> Option<Button> {
     })
 }
 
+fn savestate_key(key: &str) -> Option<SavestateKey> {
+    Some(match key {
+        "f5" => SavestateKey::Save,
+        "f8" => SavestateKey::Load,
+        "f6" => SavestateKey::PrevSlot,
+        "f7" => SavestateKey::NextSlot,
+        _ => return None,
+    })
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum SavestateKey {
+    Save,
+    Load,
+    PrevSlot,
+    NextSlot,
+}
+
 impl Debugger {
     pub(super) fn game_key(
         &mut self,
@@ -48,6 +66,20 @@ impl Debugger {
         cx: &mut Context<Self>,
     ) {
         if !self.game_focus.is_focused(window) {
+            return;
+        }
+
+        if let Some(action) = savestate_key(&keystroke.key) {
+            if pressed {
+                let slot = self.active_slot();
+                match action {
+                    SavestateKey::Save => self.save_state(slot, cx),
+                    SavestateKey::Load => self.load_state(slot, cx),
+                    SavestateKey::PrevSlot => self.cycle_slot(false, cx),
+                    SavestateKey::NextSlot => self.cycle_slot(true, cx),
+                }
+            }
+            cx.stop_propagation();
             return;
         }
 

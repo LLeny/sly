@@ -1,7 +1,9 @@
 use crate::ppu::regs::{IncrementMode, VramControl};
+use serde::{Deserialize, Serialize};
 
 const WORDS: usize = 0x8000;
 
+#[derive(Serialize, Deserialize)]
 pub struct Vram {
     words: Vec<u16>,
     addr: u16,
@@ -9,6 +11,7 @@ pub struct Vram {
     prefetch: u16,
 
     #[cfg(feature = "debug")]
+    #[serde(skip)]
     generation: u64,
 }
 

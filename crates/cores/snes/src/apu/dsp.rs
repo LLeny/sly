@@ -6,6 +6,7 @@ mod voice;
 
 use echo::{EchoUnit, StereoMix};
 use registers::*;
+use serde::{Deserialize, Serialize};
 use timing::{KeyOnLatch, NoiseGenerator, RateCounter};
 use voice::Voice;
 #[cfg(feature = "debug")]
@@ -29,6 +30,12 @@ const VOICE_SCOPE: usize = 256;
 #[cfg(feature = "debug")]
 const DEBUG_CAPTURE_TICKS: u32 = 32_000;
 
+#[cfg(feature = "debug")]
+fn empty_voice_hist() -> Box<[[i16; VOICE_SCOPE]; VOICE_COUNT]> {
+    Box::new([[0; VOICE_SCOPE]; VOICE_COUNT])
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Dsp {
     regs: RegisterFile,
     voices: [Voice; VOICE_COUNT],
@@ -38,10 +45,13 @@ pub struct Dsp {
     echo: EchoUnit,
 
     #[cfg(feature = "debug")]
+    #[serde(skip, default = "empty_voice_hist")]
     voice_hist: Box<[[i16; VOICE_SCOPE]; VOICE_COUNT]>,
     #[cfg(feature = "debug")]
+    #[serde(skip)]
     voice_hist_pos: usize,
     #[cfg(feature = "debug")]
+    #[serde(skip)]
     debug_capture: std::sync::atomic::AtomicU32,
 }
 

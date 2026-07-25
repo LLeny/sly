@@ -3,6 +3,7 @@ use super::registers::{
     R_FIR_FIRST, R_MASTER_VOLUME_LEFT, R_MASTER_VOLUME_RIGHT, RegisterFile, VOICE_REGISTER_STRIDE,
 };
 use super::{APU_ADDRESS_MASK as ADDRESS_MASK, STEREO_CHANNELS as CHANNELS};
+use serde::{Deserialize, Serialize};
 
 pub(super) type StereoMix = [i32; CHANNELS];
 
@@ -15,6 +16,7 @@ const GLOBAL_MUTE: u8 = 0x40;
 const FIR_COEFFICIENT_SCALE_SHIFT: u32 = 6;
 const VOLUME_SCALE_SHIFT: u32 = 7;
 
+#[derive(Serialize, Deserialize)]
 pub(super) struct EchoUnit {
     history: [[i32; CHANNELS]; FIR_TAPS],
     history_position: usize,

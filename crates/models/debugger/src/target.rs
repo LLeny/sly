@@ -227,6 +227,13 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
     let mut panels = vec![
         PanelDescriptor::new("controls", "Controls", PanelKind::Controls, Left, OnPause),
         PanelDescriptor::new(
+            "savestates",
+            "Save States",
+            PanelKind::Savestates,
+            Left,
+            OnPause,
+        ),
+        PanelDescriptor::new(
             "breakpoints",
             "Breakpoints",
             PanelKind::Breakpoints,

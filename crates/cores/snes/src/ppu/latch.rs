@@ -1,4 +1,6 @@
-#[derive(Default, Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Default, Clone, Copy, Serialize, Deserialize)]
 pub struct ByteLatch(u8);
 
 impl ByteLatch {
@@ -7,7 +9,7 @@ impl ByteLatch {
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Serialize, Deserialize)]
 pub struct WordLatch {
     low: u8,
     high: bool,

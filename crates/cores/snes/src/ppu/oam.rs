@@ -1,7 +1,12 @@
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
+
 const LOW_TABLE: usize = 512;
 const HIGH_TABLE: usize = 32;
 
+#[derive(Serialize, Deserialize)]
 pub struct Oam {
+    #[serde(with = "BigArray")]
     bytes: [u8; LOW_TABLE + HIGH_TABLE],
     addr: u16,
     internal: u16,

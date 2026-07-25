@@ -65,6 +65,7 @@ pub fn handle_keyboard(
     mut carts: Query<&mut DetailCart>,
     ui_sounds: Res<UiSounds>,
     mut repeat: Local<ScrollRepeat>,
+    mut session: Option<ResMut<GameSession>>,
 ) {
     match mode.get() {
         LauncherMode::Browsing => {
@@ -120,9 +121,12 @@ pub fn handle_keyboard(
             }
 
             if keyboard.just_pressed(KeyCode::Enter) {
-                let path = library.entries[state.selected].path.clone();
-                let task = IoTaskPool::get()
-                    .spawn(async move { library::load_cartridge(&path).map(Snes::new) });
+                let entry = &library.entries[state.selected];
+                let path = entry.path.clone();
+                let game = storage::GameId::new(core_model::System::Snes, entry.sha1.clone());
+                let task = IoTaskPool::get().spawn(async move {
+                    library::load_cartridge(&path).map(|cart| (Snes::new(cart), game))
+                });
                 commands.spawn(GameLoadTask(task));
                 commands.spawn(ui_sound(ui_sounds.game_start.clone()));
 
@@ -139,9 +143,24 @@ pub fn handle_keyboard(
             }
         }
         LauncherMode::Playing if keyboard.just_pressed(KeyCode::Escape) => {
+            if let Some(session) = session.as_deref() {
+                session.persist_save_ram();
+            }
+
             next_mode.set(LauncherMode::Browsing);
+
             timers.return_elapsed = 0.0;
             timers.return_active = true;
+        }
+        LauncherMode::Playing => {
+            if let Some(session) = session.as_deref_mut() {
+                if keyboard.just_pressed(KeyCode::F5) {
+                    session.save_state();
+                }
+                if keyboard.just_pressed(KeyCode::F8) {
+                    session.load_state();
+                }
+            }
         }
         _ => {}
     }

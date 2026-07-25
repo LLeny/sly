@@ -25,6 +25,7 @@ pub enum PanelGroupLayout {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum PanelKind {
     Controls,
+    Savestates,
     Breakpoints,
     Cartridge,
     Registers { cpu: Arc<str> },

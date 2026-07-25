@@ -29,6 +29,7 @@ use crate::ppu::window::WindowTrace;
 use crate::ppu::window::Windows;
 use crate::scheduler::{MASTER_CLOCKS_PER_SCANLINE, Scheduler, VBLANK_START_SCANLINE};
 use crate::{MemoryMap, Snes};
+use serde::{Deserialize, Serialize};
 
 const HBLANK_START_CLOCK: u64 = 274 * 4;
 
@@ -36,6 +37,7 @@ const HBLANK_START_CLOCK: u64 = 274 * 4;
 pub const SCREEN_WIDTH: u32 = 256;
 pub const SCREEN_HEIGHT: u32 = 224;
 
+#[derive(Serialize, Deserialize)]
 pub struct Ppu {
     pub(crate) cgram: Cgram,
     pub(crate) vram: Vram,
@@ -52,6 +54,7 @@ pub struct Ppu {
     pub(crate) sub_screen_window: LayerWindowEnable,
     pub(crate) windows: Windows,
     #[cfg(feature = "debug")]
+    #[serde(skip)]
     pub(crate) window_trace: WindowTrace,
     pub(crate) color_math: ColorMath,
     pub(crate) obj: ObjLayer,
@@ -60,6 +63,7 @@ pub struct Ppu {
     pub(crate) brightness: u8,
     pub(crate) pseudo_hires: bool,
     pub(crate) extbg: bool,
+    #[serde(skip)]
     pub(crate) frame_buffer: Vec<(u8, u8, u8)>,
     pub(crate) counter_latch: bool,
     latched_h_counter: u16,
@@ -307,6 +311,28 @@ impl Ppu {
     pub fn frame_buffer(&self) -> &[(u8, u8, u8)] {
         &self.frame_buffer
     }
+
+    pub(crate) fn frame_buffer_rgb(&self) -> Vec<u8> {
+        let mut rgb = Vec::with_capacity(self.frame_buffer.len() * 3);
+        for &(r, g, b) in &self.frame_buffer {
+            rgb.extend_from_slice(&[r, g, b]);
+        }
+        rgb
+    }
+
+    pub(crate) fn restore_frame_buffer(&mut self, rgb: Option<&[u8]>) {
+        self.frame_buffer.clear();
+        self.frame_buffer
+            .resize(SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize, (0, 0, 0));
+
+        let Some(rgb) = rgb else {
+            return;
+        };
+
+        for (pixel, chunk) in self.frame_buffer.iter_mut().zip(rgb.as_chunks::<3>().0) {
+            *pixel = (chunk[0], chunk[1], chunk[2]);
+        }
+    }
 }
 
 pub struct TilesetData {
@@ -437,12 +463,12 @@ pub(crate) fn vblank_end<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: 
     snes.irq.set_vblank(false);
 }
 
-pub(crate) fn in_vblank<M: MemoryMap>(scheduler: &Scheduler<M>) -> bool {
+pub(crate) fn in_vblank(scheduler: &Scheduler) -> bool {
     scheduler.cycles() % scheduler.cycles_per_frame()
         >= VBLANK_START_SCANLINE * MASTER_CLOCKS_PER_SCANLINE
 }
 
-pub(crate) fn in_hblank<M: MemoryMap>(scheduler: &Scheduler<M>) -> bool {
+pub(crate) fn in_hblank(scheduler: &Scheduler) -> bool {
     scheduler.cycles() % MASTER_CLOCKS_PER_SCANLINE >= HBLANK_START_CLOCK
 }
 

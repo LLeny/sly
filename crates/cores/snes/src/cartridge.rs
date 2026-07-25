@@ -1,13 +1,17 @@
 use chapa::{BitField, bitenum};
 pub use core_model::{Region, TvSystem};
+use serde::{Deserialize, Serialize};
 
 use crate::error::SnesError;
 
 pub const TITLE_LENGTH: usize = 21;
 const HEADER_LENGTH: usize = 0x20;
 
+#[derive(Serialize, Deserialize)]
 pub struct Cartridge {
+    #[serde(skip)]
     pub rom: Vec<u8>,
+
     pub sram: Vec<u8>,
     header_offset: usize,
     map_mode: Option<MapMode>,
@@ -15,7 +19,9 @@ pub struct Cartridge {
 }
 
 impl Cartridge {
-    pub fn new(rom: Vec<u8>) -> Result<Self, SnesError> {
+    pub fn new(mut rom: Vec<u8>) -> Result<Self, SnesError> {
+        Self::strip_copier_header(&mut rom);
+
         let header_offset = Self::search_header(&rom).ok_or(SnesError::InvalidRomHeader)?;
 
         let mut cartridge = Self {
@@ -44,6 +50,10 @@ impl Cartridge {
 
     pub fn rom_mask(&self) -> Option<usize> {
         self.rom_mask
+    }
+
+    pub fn rom_crc32(&self) -> u32 {
+        crc32fast::hash(&self.rom)
     }
 
     pub fn title(&self) -> String {
@@ -91,6 +101,14 @@ impl Cartridge {
             .copied()
             .unwrap_or(0xFF);
         region_from_code(code)
+    }
+
+    fn strip_copier_header(rom: &mut Vec<u8>) {
+        const COPIER_HEADER_LENGTH: usize = 512;
+
+        if rom.len() % 1024 == COPIER_HEADER_LENGTH {
+            rom.drain(..COPIER_HEADER_LENGTH);
+        }
     }
 
     fn search_header(rom: &[u8]) -> Option<usize> {
@@ -212,3 +230,5 @@ fn region_from_code(code: u8) -> Region {
         other => Region::Other(other),
     }
 }
+
+crate::macros::impl_bitfield_serde!(Speed, MapMode, MemoryMap,);

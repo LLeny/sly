@@ -1,6 +1,7 @@
 use super::APU_ADDRESS_MASK;
 use super::tables::GAUSS;
 use super::timing::RateCounter;
+use serde::{Deserialize, Serialize};
 
 const BRR_RING_SAMPLES: usize = 12;
 pub(super) const BRR_BLOCK_BYTES: u16 = 9;
@@ -42,7 +43,7 @@ struct SignalDebug {
     mixed_sample: [i32; 2],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub(super) enum EnvelopeMode {
     Release,
     Attack,
@@ -50,7 +51,7 @@ pub(super) enum EnvelopeMode {
     Sustain,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Voice {
     samples: [i32; BRR_RING_SAMPLES * 2],
     pub(super) sample_cursor: usize,
@@ -63,6 +64,7 @@ pub(super) struct Voice {
     hidden_envelope: i32,
 
     #[cfg(feature = "debug")]
+    #[serde(skip)]
     signal_debug: SignalDebug,
 }
 

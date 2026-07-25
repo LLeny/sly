@@ -1,6 +1,7 @@
 use crate::ppu::regs::{TileSize, TilemapCount};
+use serde::{Deserialize, Serialize};
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Serialize, Deserialize)]
 pub struct BackgroundLayer {
     pub tileset_addr: u32,
     pub tilemap_addr: u32,

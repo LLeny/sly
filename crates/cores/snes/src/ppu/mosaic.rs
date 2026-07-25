@@ -1,6 +1,7 @@
 use crate::Snes;
 use crate::macros::register_mmio;
 use crate::mmio::{MemoryMap, MmioReg};
+use serde::{Deserialize, Serialize};
 
 register_mmio! {
     /// MOSAIC
@@ -22,7 +23,7 @@ register_mmio! {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct Mosaic {
     layers: u8,
     size: u8,

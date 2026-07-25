@@ -51,10 +51,12 @@ fn init_logging() -> LogBuffer {
     logs
 }
 
+pub(crate) type LoadedRom = (Box<dyn DebugCore>, cover::ArtQuery, storage::GameId);
+
 pub(crate) fn load_snes_rom(
     rom: Vec<u8>,
     file_name: String,
-) -> Result<(Box<dyn DebugCore>, cover::ArtQuery), Box<dyn std::error::Error>> {
+) -> Result<LoadedRom, Box<dyn std::error::Error>> {
     use artwork::System;
 
     let name = db::title(System::Snes, &rom)
@@ -73,8 +75,9 @@ pub(crate) fn load_snes_rom(
         region: cart.region(),
         fallback: artwork::libretro::cover_url(System::Snes, &name).map(Into::into),
     };
+    let game = storage::GameId::new(System::Snes, art.sha1.clone());
     let core = Box::new(snes::debug::SnesDebug::new(cart, file_name, None));
-    Ok((core, art))
+    Ok((core, art, game))
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -85,7 +88,7 @@ fn file_name_of(path: &std::path::Path) -> String {
         .into_owned()
 }
 
-fn run(initial: Option<(Box<dyn DebugCore>, cover::ArtQuery)>, logs: LogBuffer) {
+fn run(initial: Option<(Box<dyn DebugCore>, cover::ArtQuery, storage::GameId)>, logs: LogBuffer) {
     #[cfg(target_family = "wasm")]
     let app = gpui_platform::single_threaded_web();
     #[cfg(not(target_family = "wasm"))]
@@ -162,9 +165,7 @@ fn main() {
 }
 
 #[cfg(not(target_family = "wasm"))]
-fn load_snes(
-    path: &str,
-) -> Result<(Box<dyn DebugCore>, cover::ArtQuery), Box<dyn std::error::Error>> {
+fn load_snes(path: &str) -> Result<LoadedRom, Box<dyn std::error::Error>> {
     let rom = std::fs::read(path)?;
     load_snes_rom(rom, file_name_of(std::path::Path::new(path)))
 }

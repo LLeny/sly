@@ -19,6 +19,8 @@ pub struct ControlsWidget {
     on_pause: Option<ClickHandler>,
     on_step: Option<ClickHandler>,
     on_reset: Option<ClickHandler>,
+    on_save_state: Option<ClickHandler>,
+    on_load_state: Option<ClickHandler>,
 }
 
 impl ControlsWidget {
@@ -33,6 +35,8 @@ impl ControlsWidget {
             on_pause: None,
             on_step: None,
             on_reset: None,
+            on_save_state: None,
+            on_load_state: None,
         }
     }
 
@@ -80,6 +84,22 @@ impl ControlsWidget {
         self.on_reset = Some(Box::new(handler));
         self
     }
+
+    pub fn on_save_state(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_save_state = Some(Box::new(handler));
+        self
+    }
+
+    pub fn on_load_state(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_load_state = Some(Box::new(handler));
+        self
+    }
 }
 
 impl RenderOnce for ControlsWidget {
@@ -118,6 +138,21 @@ impl RenderOnce for ControlsWidget {
                 icon::RESET,
                 false,
                 self.on_reset,
+            ))
+            .child(div().w(px(1.)).h(px(18.)).mx_1().bg(t.border_subtle))
+            .child(self::ctrl_button(
+                t,
+                "ctrl-save-state",
+                icon::SAVE,
+                false,
+                self.on_save_state,
+            ))
+            .child(self::ctrl_button(
+                t,
+                "ctrl-load-state",
+                icon::RESTORE,
+                false,
+                self.on_load_state,
             ));
 
         let body = div().flex().flex_col().gap_2().child(buttons);

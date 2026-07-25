@@ -14,9 +14,9 @@ use cirsium::widgets::{
     CallStackView, CallStackWidget, CartridgeView, CartridgeWidget, ChannelScopesWidget,
     ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView, DmaWidget,
     FramebufferView, FramebufferWidget, GridPanel, LogWidget, MemoryWidget, MmioView, MmioWidget,
-    PaletteView, PaletteWidget, PpuView, PpuWidget, RowProvider, SpritesView, SpritesWidget,
-    StructuredPanel, StructuredView, TablePanel, TableView, TilemapView, TilemapWidget,
-    TilesetLayer, TilesetView, TilesetWidget, ViewMode,
+    PaletteView, PaletteWidget, PpuView, PpuWidget, RowProvider, SavestatesWidget, SpritesView,
+    SpritesWidget, StructuredPanel, StructuredView, TablePanel, TableView, TilemapView,
+    TilemapWidget, TilesetLayer, TilesetView, TilesetWidget, ViewMode,
 };
 use cirsium::{
     ACCENT_PRESETS, ChangeTracker, GUEST_COLORS, Highlight, Theme, ThemeMode, accent_at, set_theme,
@@ -100,6 +100,10 @@ impl GridState {
 
 pub(crate) struct Debugger {
     target: Box<dyn DebugCore>,
+    session: storage::Session<storage::PlatformStore>,
+    saves_ready: bool,
+    active_slot: storage::Slot,
+    savestates_view: Arc<cirsium::widgets::SavestatesView>,
     cartridge: Arc<CartridgeView>,
     mmio_view: Arc<MmioView>,
     dma_view: Arc<DmaView>,
@@ -152,13 +156,21 @@ pub(crate) struct Debugger {
     stats: crate::stats::RunStats,
     perf: Vec<SharedString>,
     emu_clock: Instant,
+    sram_flushed: Instant,
     accent: usize,
     #[cfg(target_family = "wasm")]
     web_tick_armed: bool,
 }
 
+impl Drop for Debugger {
+    fn drop(&mut self) {
+        self.persist_save_ram();
+    }
+}
+
 const DEFAULT_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const MAX_CATCHUP_FRAMES: u32 = 3;
+const SAVE_RAM_FLUSH: Duration = Duration::from_secs(60);
 #[cfg(not(target_family = "wasm"))]
 const FRAME_PACE_YIELD: Duration = Duration::from_millis(1);
 
@@ -178,6 +190,7 @@ struct GenericRefresh {
 impl Debugger {
     pub(crate) fn new(
         target: Box<dyn DebugCore>,
+        game: storage::GameId,
         log_buffer: LogBuffer,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -273,6 +286,10 @@ impl Debugger {
             bp_input,
             log_filter_input,
             target,
+            session: storage::Session::new(storage::PlatformStore::default(), game),
+            saves_ready: false,
+            active_slot: storage::Slot::Quick,
+            savestates_view: Arc::default(),
             panes,
             collapsed: HashSet::from([SharedString::from(LogWidget::ID)]),
             settings: None,
@@ -286,6 +303,7 @@ impl Debugger {
             stats: crate::stats::RunStats::default(),
             perf: Vec::new(),
             emu_clock: Instant::now(),
+            sram_flushed: Instant::now(),
             accent: 0,
             #[cfg(target_family = "wasm")]
             web_tick_armed: false,

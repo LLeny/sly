@@ -104,8 +104,8 @@ pub fn load_cartridge(path: &Path) -> Result<Cartridge, String> {
 fn read_entry(path: &Path) -> Result<LibraryEntry, String> {
     let bytes = read_rom(path)?;
     let sha1 = artwork::rom_sha1(artwork::System::Snes, &bytes);
-    let crc = crc32fast::hash(&bytes);
     let cartridge = Cartridge::new(bytes).map_err(|err| format!("invalid SNES ROM: {err}"))?;
+    let crc = cartridge.rom_crc32();
     let meta = gamedb::lookup(&sha1, crc);
     let normalized_title = meta.display_title();
     let header_title = cartridge.title().trim().to_string();

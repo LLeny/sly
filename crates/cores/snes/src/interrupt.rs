@@ -1,6 +1,7 @@
 use crate::Snes;
 use crate::mmio::MemoryMap;
 use crate::mmio::regs::{NmiTimerEnable, VblankFlagCpuVersion};
+use serde::{Deserialize, Serialize};
 
 const MASTER_CLOCKS_PER_DOT: u64 = 4;
 const MAX_H_COUNTER: u64 = 339;
@@ -8,7 +9,7 @@ const H_COUNTER_OFFSET: u64 = 10;
 const TIMER_IRQ_PROPAGATION_CLOCKS: u64 = 8;
 const H_TIMER_IRQ_OFFSET: u64 = H_COUNTER_OFFSET + TIMER_IRQ_PROPAGATION_CLOCKS;
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct EdgeLatch {
     level: bool,
     pending: bool,
@@ -28,6 +29,7 @@ impl EdgeLatch {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Timer {
     pub(crate) target: u16,
 }
@@ -56,7 +58,7 @@ impl Timer {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Irq {
     nmitimen: NmiTimerEnable,
     rdnmi: VblankFlagCpuVersion,
@@ -153,7 +155,8 @@ pub(crate) fn hv_timer_line<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline
 
 fn schedule_h_fire<M: MemoryMap + 'static>(snes: &mut Snes<M>, line_start: u64, htime: u64) {
     if let Some(deadline) = h_timer_irq_deadline(line_start, htime) {
-        snes.scheduler.schedule_event(deadline, hv_timer_fire);
+        snes.scheduler
+            .schedule_event(deadline, crate::scheduler::EventKind::HvTimerFire);
     }
 }
 
@@ -162,7 +165,7 @@ fn h_timer_irq_deadline(line_start: u64, htime: u64) -> Option<u64> {
         .then(|| line_start + htime * MASTER_CLOCKS_PER_DOT + H_TIMER_IRQ_OFFSET)
 }
 
-fn hv_timer_fire<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
+pub(crate) fn hv_timer_fire<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
     if snes.irq.hv_timer_condition() & 1 != 0 {
         snes.irq.raise_timer();
     }

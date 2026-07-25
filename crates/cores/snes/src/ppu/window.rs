@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 #[cfg(feature = "debug")]
 use crate::ppu::regs::{BackgroundMode, LayerWindowEnable};
 use crate::ppu::regs::{W12SEL, W34SEL, WBGLOG, WH0, WH3, WOBJLOG, WOBJSEL, WindowMaskSettings};
@@ -10,7 +12,7 @@ type WindowDebugSettings = ([(bool, bool); WINDOW_COUNT], [(u8, u8); WINDOW_COUN
 
 pub(crate) const COLOR_WINDOW: u8 = 5;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub(crate) struct Windows {
     selectors: [WindowMaskSettings; 3],
     positions: [u8; 4],

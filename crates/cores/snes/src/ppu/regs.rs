@@ -1,4 +1,5 @@
 use chapa::bitenum;
+use serde::{Deserialize, Serialize};
 
 use crate::Snes;
 use crate::macros::{register_mmio, register_mmio_family, register_mmio_raw};
@@ -489,7 +490,7 @@ impl LayerWindowEnable {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct LayerMask(u8);
 
 impl LayerMask {
@@ -782,3 +783,19 @@ impl MmioReg for Bg34ChrBase {
         reg.raw()
     }
 }
+
+crate::macros::impl_bitfield_serde!(
+    IncrementMode,
+    IncrementAmount,
+    AddressRemapping,
+    BackgroundMode,
+    Priority,
+    TileSize,
+    TilemapCount,
+    ColorMathOperation,
+    ColorMathIntensity,
+    ColorSource,
+    ColorMathAddend,
+    WindowRegion,
+    SpriteSize,
+);

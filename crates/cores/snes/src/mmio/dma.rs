@@ -5,6 +5,7 @@ use crate::mmio::regs::{
 };
 use crate::mmio::wram::WMDATA;
 use crate::mmio::{Address, AddressSpace, MemoryMap, OPEN_BUS};
+use serde::{Deserialize, Serialize};
 
 pub const CHANNEL_COUNT: usize = 8;
 pub const CHANNEL_REGS_START: u16 = 0x4300;
@@ -17,7 +18,7 @@ pub(crate) const HDMA_RUN_CLOCK: u64 = 1104;
 const HDMA_BASE_CLOCKS: u64 = 18;
 const HDMA_IDLE_CHANNEL_CLOCKS: u64 = 8;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct DmaChannel {
     pub params: DmaChannelParameters,
     pub b_bus_addr: u8,
@@ -88,7 +89,7 @@ impl DmaChannel {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Dma {
     pub hdmaen: HdmaTransferEnable,
     pub mdmaen: MdmaTransferStart,

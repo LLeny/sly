@@ -7,5 +7,7 @@ edition = "2024"
 snes = { path = "../../crates/cores/snes" }
 audio = { path = "../../crates/audio" }
 core-model = { path = "../../crates/models/core" }
+storage = { path = "../../crates/storage" }
+artwork = { path = "../../crates/artwork" }
 sdl3 = { version = "0.18.4", features = ["build-from-source-static"] }
 gif = "0.14.2"

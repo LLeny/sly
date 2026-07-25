@@ -227,6 +227,24 @@ impl Core for SnesDebug {
     fn frame_interval(&self) -> Option<Duration> {
         Some(self::frame_interval(&self.core))
     }
+
+    fn save_state(&self) -> Result<Vec<u8>, core_model::StateError> {
+        self.core.save_state()
+    }
+
+    fn load_state(&mut self, bytes: &[u8]) -> Result<(), core_model::StateError> {
+        self.core.load_state(bytes)?;
+        self.last_access = MemoryAccess::default();
+        Ok(())
+    }
+
+    fn save_ram(&self) -> Option<&[u8]> {
+        self.core.save_ram()
+    }
+
+    fn load_save_ram(&mut self, bytes: &[u8]) -> bool {
+        self.core.load_save_ram(bytes)
+    }
 }
 
 impl DebugCore for SnesDebug {
@@ -566,24 +584,24 @@ impl DebugCore for SnesDebug {
         manifest.insert_after(
             PanelKind::Breakpoints,
             PanelDescriptor::new(
-                "dma",
-                "DMA",
-                PanelKind::Dma,
-                DockLocation::Left,
-                RefreshPolicy::OnPause,
-            )
-            .tag(CPU_WORKSPACE)
-            .tag(VIDEO_WORKSPACE),
-        );
-        manifest.insert_after(
-            PanelKind::Dma,
-            PanelDescriptor::new(
                 "palette",
                 "Palettes",
                 PanelKind::Palette,
                 DockLocation::Left,
                 RefreshPolicy::OnPause,
             )
+            .tag(VIDEO_WORKSPACE),
+        );
+        manifest.insert_after(
+            PanelKind::Mmio,
+            PanelDescriptor::new(
+                "dma",
+                "DMA",
+                PanelKind::Dma,
+                DockLocation::Right,
+                RefreshPolicy::OnPause,
+            )
+            .tag(CPU_WORKSPACE)
             .tag(VIDEO_WORKSPACE),
         );
         manifest.insert_before(

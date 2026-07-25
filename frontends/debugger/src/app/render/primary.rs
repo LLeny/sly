@@ -32,7 +32,26 @@ impl Debugger {
             .on_run(cx.listener(|this, _, _, cx| this.set_running(true, cx)))
             .on_pause(cx.listener(|this, _, _, cx| this.set_running(false, cx)))
             .on_step(cx.listener(|this, _, _, cx| this.step(cx)))
-            .on_reset(cx.listener(|this, _, _, cx| this.reset(cx)));
+            .on_reset(cx.listener(|this, _, _, cx| this.reset(cx)))
+            .on_save_state(cx.listener(|this, _, _, cx| {
+                let slot = this.active_slot();
+                this.save_state(slot, cx);
+            }))
+            .on_load_state(cx.listener(|this, _, _, cx| {
+                let slot = this.active_slot();
+                this.load_state(slot, cx);
+            }));
+
+        let savestates = visible.contains(SavestatesWidget::ID).then(|| {
+            let this = this.clone();
+            SavestatesWidget::new((*self.savestates_view()).clone())
+                .collapsed(self.is_collapsed(SavestatesWidget::ID))
+                .selected(self.active_slot().id())
+                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(SavestatesWidget::ID, cx)))
+                .on_action(move |action, id, _, cx| {
+                    this.update(cx, |debugger, cx| debugger.slot_action(action, &id, cx));
+                })
+        });
 
         let mmio = MmioWidget::new(self.mmio_view.clone())
             .expanded(self.expanded_set(MmioWidget::ID))
@@ -312,6 +331,12 @@ impl Debugger {
             ControlsWidget::ID.into(),
             div().flex_none().child(controls).into_any_element(),
         );
+        if let Some(savestates) = savestates {
+            panels.insert(
+                SavestatesWidget::ID.into(),
+                div().flex_none().child(savestates).into_any_element(),
+            );
+        }
         if let Some(breakpoints) = breakpoints {
             panels.insert(BreakpointsWidget::ID.into(), breakpoints.into_any_element());
         }

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bevy::prelude::*;
 
 use core_model::Core;
@@ -17,8 +19,52 @@ const MAX_CATCH_UP_FRAMES: u32 = 3;
 #[derive(Resource)]
 pub struct GameSession {
     pub core: Box<dyn Core + Send + Sync>,
+    pub session: storage::Session<storage::FsStore>,
     pub audio_samples: Vec<i16>,
     pub frame_dirty: bool,
+}
+
+impl GameSession {
+    pub fn save_state(&self) {
+        if let Err(err) = self.session.save_state(&*self.core, storage::Slot::Quick) {
+            warn!("failed to save state: {err}");
+        }
+    }
+
+    pub fn load_state(&mut self) {
+        match self
+            .session
+            .load_state(&mut *self.core, storage::Slot::Quick)
+        {
+            Ok(true) => self.frame_dirty = true,
+            Ok(false) => {}
+            Err(err) => warn!("failed to load state: {err}"),
+        }
+    }
+
+    pub fn persist_save_ram(&self) {
+        if let Err(err) = self.session.persist_save_ram(&*self.core) {
+            warn!("failed to write save RAM: {err}");
+        }
+    }
+}
+
+impl Drop for GameSession {
+    fn drop(&mut self) {
+        self.persist_save_ram();
+    }
+}
+
+const SAVE_RAM_FLUSH: Duration = Duration::from_secs(60);
+
+pub fn flush_save_ram(session: Res<GameSession>, time: Res<Time>, mut due: Local<Duration>) {
+    *due += time.delta();
+    if *due < SAVE_RAM_FLUSH {
+        return;
+    }
+
+    *due = Duration::ZERO;
+    session.persist_save_ram();
 }
 
 pub struct AudioState(pub Option<audio::AudioPlayer>);

@@ -1,12 +1,7 @@
 pub mod layle;
 pub mod libretro;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum System {
-    #[allow(dead_code)]
-    Nes,
-    Snes,
-}
+pub use core_model::System;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Header {
@@ -29,18 +24,12 @@ pub struct SystemInfo {
     pub header: Header,
 }
 
-impl System {
-    pub const fn info(self) -> SystemInfo {
-        match self {
-            System::Nes => SystemInfo {
-                libretro_name: "Nintendo - Nintendo Entertainment System",
-                header: Header::None,
-            },
-            System::Snes => SystemInfo {
-                libretro_name: "Nintendo - Super Nintendo Entertainment System",
-                header: Header::SnesCopier,
-            },
-        }
+pub const fn info(system: System) -> SystemInfo {
+    match system {
+        System::Snes => SystemInfo {
+            libretro_name: "Nintendo - Super Nintendo Entertainment System",
+            header: Header::SnesCopier,
+        },
     }
 }
 
@@ -49,11 +38,10 @@ pub fn rom_sha1(system: System, rom: &[u8]) -> String {
 
     use sha1::{Digest, Sha1};
 
-    Sha1::digest(system.info().header.strip(rom)).iter().fold(
-        String::with_capacity(40),
-        |mut hex, byte| {
+    Sha1::digest(self::info(system).header.strip(rom))
+        .iter()
+        .fold(String::with_capacity(40), |mut hex, byte| {
             write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
             hex
-        },
-    )
+        })
 }

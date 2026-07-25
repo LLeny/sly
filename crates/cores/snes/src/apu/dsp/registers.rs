@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
 use std::ops::{Index, IndexMut};
 
 pub(crate) const REGISTER_COUNT: usize = 128;
@@ -35,7 +37,8 @@ pub(crate) const R_FIR_FIRST: usize = 0x0F;
 
 const POWER_ON_FLAGS: u8 = 0xE0;
 
-pub(super) struct RegisterFile([u8; REGISTER_COUNT]);
+#[derive(Serialize, Deserialize)]
+pub(super) struct RegisterFile(#[serde(with = "BigArray")] [u8; REGISTER_COUNT]);
 
 impl RegisterFile {
     pub(super) fn power_on() -> Self {

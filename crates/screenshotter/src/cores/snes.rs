@@ -26,11 +26,7 @@ struct SnesScreenshotter {
 }
 
 impl SnesScreenshotter {
-    fn new(mut rom: Vec<u8>) -> Result<Self> {
-        if rom.len() % 1024 == 512 {
-            rom.drain(..512);
-        }
-
+    fn new(rom: Vec<u8>) -> Result<Self> {
         let cartridge = Cartridge::new(rom).context("parsing cartridge header")?;
         let game_id = Self::game_id(&cartridge);
         let frame_rate = snes::cartridge::frame_rate(cartridge.region().tv_system());
