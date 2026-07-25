@@ -1365,8 +1365,7 @@ fn background_mode_name(mode: crate::ppu::regs::BackgroundMode, extbg: bool) -> 
 
     match mode {
         BackgroundMode::Invalid => "Invalid".to_string(),
-        BackgroundMode::Mode7 if extbg => "M7 EXTBG".to_string(),
-        BackgroundMode::Mode7 => "M7".to_string(),
+        BackgroundMode::Mode7 if extbg => "Mode 7 EXTBG".to_string(),
         mode => format!("Mode {}", mode as u8),
     }
 }

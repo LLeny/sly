@@ -68,6 +68,8 @@ const TWO_BACKGROUNDS: &[RenderPass] = &[
     bg(1, Normal),
 ];
 
+const MODE6: &[RenderPass] = &[obj(3), bg(0, High), obj(2), obj(1), bg(0, Normal), obj(0)];
+
 const MODE7: &[RenderPass] = &[obj(3), obj(2), obj(1), bg(0, Normal), obj(0)];
 
 const MODE7_EXTBG: &[RenderPass] = &[
@@ -89,9 +91,9 @@ pub(super) fn front_to_back_passes(
         (BackgroundMode::Mode0, _) => MODE0,
         (BackgroundMode::Mode1, Priority::High) => MODE1_BG3_FRONT,
         (BackgroundMode::Mode1, Priority::Normal) => MODE1,
+        (BackgroundMode::Mode6, _) => MODE6,
         (BackgroundMode::Mode7, _) if extbg => MODE7_EXTBG,
         (BackgroundMode::Mode7, _) => MODE7,
-        // TODO: define priority orders for modes 2-6.
         _ => TWO_BACKGROUNDS,
     }
 }
