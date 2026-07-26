@@ -72,6 +72,13 @@ impl WorkspaceDescriptor {
 }
 
 #[derive(Clone, Debug)]
+pub struct PanelPlacement {
+    pub workspace: Arc<str>,
+    pub location: DockLocation,
+    pub after: PanelKind,
+}
+
+#[derive(Clone, Debug)]
 pub struct PanelDescriptor {
     pub id: Arc<str>,
     pub title: Arc<str>,
@@ -80,6 +87,7 @@ pub struct PanelDescriptor {
     pub refresh: RefreshPolicy,
     pub workspaces: Vec<Arc<str>>,
     pub selection_from: Option<Arc<str>>,
+    pub placements: Vec<PanelPlacement>,
 }
 
 impl PanelDescriptor {
@@ -98,6 +106,7 @@ impl PanelDescriptor {
             refresh,
             workspaces: Vec::new(),
             selection_from: None,
+            placements: Vec::new(),
         }
     }
 
@@ -115,6 +124,17 @@ impl PanelDescriptor {
     /// visible only in the workspaces it is tagged for.
     pub fn visible_in(&self, workspace: &str) -> bool {
         self.workspaces.is_empty() || self.workspaces.iter().any(|tag| tag.as_ref() == workspace)
+    }
+
+    fn placement_in(&self, workspace: &str) -> Option<&PanelPlacement> {
+        self.placements
+            .iter()
+            .find(|placement| placement.workspace.as_ref() == workspace)
+    }
+
+    pub fn location_in(&self, workspace: &str) -> DockLocation {
+        self.placement_in(workspace)
+            .map_or(self.location, |placement| placement.location)
     }
 }
 
@@ -184,8 +204,29 @@ impl ComponentManifest {
         workspace: &'a str,
         location: DockLocation,
     ) -> impl Iterator<Item = &'a PanelDescriptor> {
-        self.in_workspace(workspace)
-            .filter(move |p| p.location == location)
+        let mut docked: Vec<&PanelDescriptor> = self
+            .in_workspace(workspace)
+            .filter(move |p| p.location_in(workspace) == location)
+            .collect();
+
+        let mut placed = Vec::new();
+        docked.retain(|p| match p.placement_in(workspace) {
+            Some(placement) => {
+                placed.push((*p, placement.after.clone()));
+                false
+            }
+            None => true,
+        });
+
+        for (panel, anchor) in placed {
+            let ix = docked
+                .iter()
+                .position(|p| p.kind == anchor)
+                .map_or(docked.len(), |ix| ix + 1);
+            docked.insert(ix, panel);
+        }
+
+        docked.into_iter()
     }
 
     pub fn host_of<'a>(&'a self, workspace: &str, id: &str) -> Option<&'a str> {
@@ -237,6 +278,24 @@ impl ComponentManifest {
         self.insert_after(anchor, panel);
     }
 
+    /// Dock the panel with the given id somewhere else in one workspace only,
+    /// under the first panel of `anchor` kind in that dock.
+    pub fn place_after(
+        &mut self,
+        id: &str,
+        workspace: impl Into<Arc<str>>,
+        anchor: PanelKind,
+        location: DockLocation,
+    ) {
+        if let Some(panel) = self.panels.iter_mut().find(|p| &*p.id == id) {
+            panel.placements.push(PanelPlacement {
+                workspace: workspace.into(),
+                location,
+                after: anchor,
+            });
+        }
+    }
+
     pub fn restrict(&mut self, kind: PanelKind, workspace: impl Into<Arc<str>>) {
         if let Some(panel) = self.panels.iter_mut().find(|p| p.kind == kind) {
             debug_assert!(
@@ -281,6 +340,22 @@ impl ComponentManifest {
                 if !workspace_ids.contains(tag.as_ref()) {
                     return Err(ManifestError::new(format!(
                         "panel `{}` tagged with undeclared workspace `{tag}`",
+                        panel.id
+                    )));
+                }
+            }
+
+            for placement in &panel.placements {
+                let workspace = placement.workspace.as_ref();
+                if !workspace_ids.contains(workspace) {
+                    return Err(ManifestError::new(format!(
+                        "panel `{}` placed in undeclared workspace `{workspace}`",
+                        panel.id
+                    )));
+                }
+                if !panel.visible_in(workspace) {
+                    return Err(ManifestError::new(format!(
+                        "panel `{}` placed in workspace `{workspace}` it is hidden from",
                         panel.id
                     )));
                 }

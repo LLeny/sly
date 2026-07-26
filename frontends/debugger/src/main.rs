@@ -134,7 +134,7 @@ fn window_options(bounds: Bounds<gpui::Pixels>) -> WindowOptions {
         titlebar: Some(gpui::TitlebarOptions {
             title: Some("Sly Debugger".into()),
             appears_transparent: true,
-            traffic_light_position: Some(gpui::Point::new(px(12.), px(10.))),
+            traffic_light_position: Some(cirsium::components::traffic_light_position()),
         }),
         #[cfg(not(target_family = "wasm"))]
         window_decorations: Some(gpui::WindowDecorations::Client),

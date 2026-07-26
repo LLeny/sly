@@ -25,7 +25,7 @@ pub use rows::{
 pub use segmented::Segmented;
 pub use status_bar::{StatusView, console_pill, status_bar};
 pub use text_input::{TextInput, TextInputEvent, register_text_input_keys};
-pub use window::{icon_button, title_bar, window_button};
+pub use window::{TITLE_BAR_HEIGHT, icon_button, title_bar, traffic_light_position, window_button};
 
 use gpui::{App, ClickEvent, Window};
 

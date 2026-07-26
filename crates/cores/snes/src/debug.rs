@@ -728,11 +728,16 @@ impl DebugCore for SnesDebug {
             CPU_SPC,
             &format!("{CPU_SPC}.disasm"),
             &format!("{CPU_SPC}.callstack"),
-            "breakpoints",
             "log",
         ] {
             manifest.tag(id, SOUND_WORKSPACE);
         }
+        manifest.place_after(
+            "savestates",
+            SOUND_WORKSPACE,
+            PanelKind::Mmio,
+            DockLocation::Right,
+        );
         manifest.compose_in(
             SOUND_WORKSPACE,
             format!("{CPU_SPC}.disasm"),

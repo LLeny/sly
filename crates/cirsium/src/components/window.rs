@@ -1,13 +1,23 @@
 use gpui::prelude::*;
 
 use gpui::{
-    App, ClickEvent, Div, FontWeight, Hsla, MouseButton, SharedString, Stateful, Window, div, px,
-    svg,
+    App, ClickEvent, Div, FontWeight, Hsla, MouseButton, Pixels, Point, SharedString, Stateful,
+    Window, div, point, px, svg,
 };
 
 #[cfg(all(not(target_os = "macos"), not(target_family = "wasm")))]
 use crate::assets::icon;
 use crate::theme::Theme;
+
+pub const TITLE_BAR_HEIGHT: f32 = 36.;
+const MAC_WINDOW_BUTTON_HEIGHT: f32 = 16.;
+
+pub fn traffic_light_position() -> Point<Pixels> {
+    point(
+        px(12.),
+        px((TITLE_BAR_HEIGHT - MAC_WINDOW_BUTTON_HEIGHT) / 2.),
+    )
+}
 
 /// A titlebar region that swallows left-clicks so its contents don't start a
 /// window drag.
@@ -91,7 +101,7 @@ pub fn title_bar(
     let bar = div()
         .flex()
         .items_center()
-        .h(px(40.))
+        .h(px(TITLE_BAR_HEIGHT))
         .flex_none()
         .bg(theme.bg_panel)
         .border_b_1()
