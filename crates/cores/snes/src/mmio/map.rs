@@ -6,7 +6,7 @@ pub(crate) const WAITSTATES_FAST: u64 = 6;
 const WAITSTATES_SLOW: u64 = 8;
 const WAITSTATES_XSLOW: u64 = 12;
 
-pub trait MemoryMap: Default {
+pub trait MemoryMap: Default + 'static {
     const WRAM_SIZE: usize;
 
     fn map(&self, cartridge: &Cartridge, addr: Address) -> AddressSpace;

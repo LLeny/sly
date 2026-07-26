@@ -13,7 +13,7 @@ pub const CHANNEL_REGS_END: u16 = 0x437F;
 
 pub(crate) const B_BUS_BASE: u16 = 0x2100;
 pub(crate) const HDMA_INIT_CLOCK: u64 = 6 * 4;
-pub(crate) const HDMA_RUN_CLOCK: u64 = 1104;
+pub(crate) const HDMA_RUN_CLOCK: u64 = 1112;
 
 const HDMA_BASE_CLOCKS: u64 = 18;
 const HDMA_IDLE_CHANNEL_CLOCKS: u64 = 8;
@@ -126,7 +126,7 @@ pub(crate) fn transfer_pattern_offsets(pattern: TransferPattern) -> &'static [u8
     }
 }
 
-pub(crate) fn init_hdma<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
+pub(crate) fn init_hdma<M: MemoryMap>(snes: &mut Snes<M>, _deadline: u64) {
     let clocks_before = snes.mmu.clocks;
     let enabled = snes.dma.hdmaen.raw();
 
@@ -156,7 +156,7 @@ pub(crate) fn init_hdma<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u
 
 /// Performs one HDMA step during HBLANK. A transfer at the end of line N
 /// changes PPU state used to render line N + 1.
-pub(crate) fn run_hdma<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: u64) {
+pub(crate) fn run_hdma<M: MemoryMap>(snes: &mut Snes<M>, deadline: u64) {
     if snes.scheduler.scanline_at(deadline) > crate::ppu::SCREEN_HEIGHT as u64 {
         return;
     }
@@ -305,11 +305,11 @@ fn transfer_dma_byte(
     let value = if a_bus_blocked && matches!(direction, Direction::AToB) {
         OPEN_BUS
     } else {
-        snes.read8(src)
+        snes.read8_direct(src)
     };
 
     if !(a_bus_blocked && matches!(direction, Direction::BToA)) {
-        snes.write8(dst, value);
+        snes.write8_direct(dst, value);
     }
 
     snes.mmu.clocks = clocks_before + 8;
@@ -323,7 +323,7 @@ fn read_hdma_table_byte(snes: &mut Snes<impl MemoryMap>, channel: &mut DmaChanne
     let value = if matches!(snes.mmu.map(address), AddressSpace::Io(_)) {
         OPEN_BUS
     } else {
-        snes.read8(address)
+        snes.read8_direct(address)
     };
     snes.mmu.clocks = clocks_before + 8;
     value

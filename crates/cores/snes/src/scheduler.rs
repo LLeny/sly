@@ -41,7 +41,7 @@ pub enum EventKind {
 }
 
 impl EventKind {
-    pub(crate) fn dispatch<M: MemoryMap + 'static>(self, snes: &mut Snes<M>, deadline: u64) {
+    pub(crate) fn dispatch<M: MemoryMap>(self, snes: &mut Snes<M>, deadline: u64) {
         match self {
             EventKind::Spc700Tick => self::spc700_tick(snes, deadline),
             EventKind::VblankStart => crate::ppu::vblank_start(snes, deadline),
@@ -123,6 +123,9 @@ pub struct Scheduler {
     master_clock_hz: u64,
     spc_remainder: u64,
     next_seq: u64,
+
+    #[serde(skip)]
+    cached_deadline: u64,
 }
 
 impl Scheduler {
@@ -139,6 +142,7 @@ impl Scheduler {
             master_clock_hz,
             spc_remainder: 0,
             next_seq: 0,
+            cached_deadline: u64::MAX,
         }
     }
 
@@ -151,6 +155,16 @@ impl Scheduler {
             period,
             kind,
         }));
+        self.refresh_deadline();
+    }
+
+    fn refresh_deadline(&mut self) {
+        self.cached_deadline = self.events.peek().map_or(u64::MAX, |next| next.0.deadline);
+    }
+
+    #[inline]
+    pub fn event_due(&self, clock: u64) -> bool {
+        clock >= self.cached_deadline
     }
 
     pub fn spc_master_clocks(&mut self, spc_cycles: u64) -> u64 {
@@ -184,6 +198,11 @@ impl Scheduler {
         self.cycles += cycles;
     }
 
+    pub fn advance_to(&mut self, clock: u64) {
+        debug_assert!(clock >= self.cycles, "scheduler ran ahead of the bus clock");
+        self.cycles = clock;
+    }
+
     pub fn pop_current_event(&mut self) -> Option<(u64, EventKind)> {
         match self.events.peek() {
             Some(next) if next.0.deadline <= self.cycles => {
@@ -208,9 +227,13 @@ impl Scheduler {
                         kind: event.kind,
                     }));
                 }
+                self.refresh_deadline();
                 Some((event.deadline, event.kind))
             }
-            _ => None,
+            _ => {
+                self.refresh_deadline();
+                None
+            }
         }
     }
 
@@ -244,13 +267,14 @@ impl Scheduler {
     }
 }
 
-pub(crate) fn spc700_tick<M: MemoryMap + 'static>(snes: &mut Snes<M>, deadline: u64) {
+pub(crate) fn spc700_tick<M: MemoryMap>(snes: &mut Snes<M>, deadline: u64) {
     let cycles = crate::apu::spc700::step(&mut snes.apu);
     let delay = snes.scheduler.spc_master_clocks(cycles);
     snes.scheduler
         .schedule_event(deadline + delay, EventKind::Spc700Tick);
 }
 
-pub(crate) fn dram_refresh<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
+pub(crate) fn dram_refresh<M: MemoryMap>(snes: &mut Snes<M>, _deadline: u64) {
+    snes.mmu.clocks += REFRESH_MASTER_CLOCKS;
     snes.scheduler.advance_by(REFRESH_MASTER_CLOCKS);
 }

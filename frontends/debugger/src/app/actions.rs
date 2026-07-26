@@ -537,16 +537,27 @@ impl Debugger {
             })
             .collect();
 
-        self.savestates_view = std::sync::Arc::new(cirsium::widgets::SavestatesView { slots });
+        let screen = self.screen_size();
+        self.savestates_view =
+            std::sync::Arc::new(cirsium::widgets::SavestatesView { slots, screen });
     }
 
     fn refresh_slot(&mut self, slot: storage::Slot, bytes: Option<&[u8]>) {
         let row = Self::slot_row(slot, bytes.map(|b| b.len() as u64), bytes);
+        let screen = self.screen_size();
         let mut view = (*self.savestates_view).clone();
         if let Some(existing) = view.slots.iter_mut().find(|slot| slot.id == row.id) {
             *existing = row;
         }
+        view.screen = screen;
         self.savestates_view = std::sync::Arc::new(view);
+    }
+
+    fn screen_size(&self) -> Option<(u32, u32)> {
+        self.target
+            .software_frame()
+            .filter(core_model::SoftwareFrame::is_valid)
+            .map(|frame| (frame.width, frame.height))
     }
 
     fn slot_row(

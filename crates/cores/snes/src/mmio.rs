@@ -42,8 +42,6 @@ pub(crate) const OPEN_BUS: u8 = 0xFF;
 pub(crate) const WRIO: u16 = 0x4201;
 pub(crate) const MEMSEL: u16 = 0x420D;
 pub(crate) const RDIO: u16 = 0x4213;
-const PPU_WRITE_START: u16 = 0x2100;
-const PPU_WRITE_END: u16 = 0x2133;
 
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
@@ -56,8 +54,6 @@ pub struct Mmio<M: MemoryMap = CartridgeMap> {
     wrio: u8,
     pub(crate) wram_port: WramPort,
     pub clocks: u64,
-    defer_ppu_writes: bool,
-    pending_ppu_writes: Vec<(u16, u8)>,
 
     #[cfg(feature = "debug")]
     #[serde(skip)]
@@ -107,8 +103,6 @@ impl<M: MemoryMap> Mmio<M> {
             wrio: 0xFF,
             wram_port: WramPort::default(),
             clocks: 0,
-            defer_ppu_writes: false,
-            pending_ppu_writes: Vec::new(),
 
             #[cfg(feature = "debug")]
             access: AccessTracker::default(),
@@ -121,8 +115,6 @@ impl<M: MemoryMap> Mmio<M> {
         self.wrio = 0xFF;
         self.wram_port.reset();
         self.clocks = 0;
-        self.defer_ppu_writes = false;
-        self.pending_ppu_writes.clear();
 
         #[cfg(feature = "debug")]
         {
@@ -147,24 +139,6 @@ impl<M: MemoryMap> Mmio<M> {
 }
 
 impl<M: MemoryMap> Snes<M> {
-    pub(crate) fn begin_cpu_instruction(&mut self) {
-        debug_assert!(!self.mmu.defer_ppu_writes);
-        debug_assert!(self.mmu.pending_ppu_writes.is_empty());
-        self.mmu.defer_ppu_writes = true;
-    }
-
-    pub(crate) fn end_cpu_instruction(&mut self) {
-        self.mmu.defer_ppu_writes = false;
-    }
-
-    pub(crate) fn commit_cpu_ppu_writes(&mut self) {
-        let mut writes = core::mem::take(&mut self.mmu.pending_ppu_writes);
-        for (reg, value) in writes.drain(..) {
-            self.write_io(reg, value);
-        }
-        self.mmu.pending_ppu_writes = writes;
-    }
-
     pub fn read16(&mut self, addr: Address) -> u16 {
         let lo = self.read8(addr) as u16;
         let hi = self.read8(addr.wrapping_add(1)) as u16;
@@ -198,9 +172,16 @@ impl<M: MemoryMap> Snes<M> {
         }
     }
 
+    /// A read issued by the CPU. Bills cycles and syncs the scheduler first.
     pub fn read8(&mut self, addr: Address) -> u8 {
-        let space = self.mmu.map(addr);
         self.mmu.clocks += self.mmu.waitstates(addr);
+        self.sync();
+        self.read8_direct(addr)
+    }
+
+    /// Does not bill cycles or sync scheduler. Used by DMA.
+    pub(crate) fn read8_direct(&mut self, addr: Address) -> u8 {
+        let space = self.mmu.map(addr);
 
         #[cfg(feature = "debug")]
         self.record_access(&space, false);
@@ -231,9 +212,16 @@ impl<M: MemoryMap> Snes<M> {
         }
     }
 
+    /// A write issued by the CPU. Bills cycles and syncs the scheduler first.
     pub fn write8(&mut self, addr: Address, value: u8) {
-        let space = self.mmu.map(addr);
         self.mmu.clocks += self.mmu.waitstates(addr);
+        self.sync();
+        self.write8_direct(addr, value);
+    }
+
+    /// Does not bill cycles or sync scheduler. Used by DMA.
+    pub(crate) fn write8_direct(&mut self, addr: Address, value: u8) {
+        let space = self.mmu.map(addr);
 
         #[cfg(feature = "debug")]
         self.record_access(&space, true);
@@ -247,12 +235,6 @@ impl<M: MemoryMap> Snes<M> {
                     value = format!("{:02X}", value),
                     "Write to ROM"
                 );
-            }
-            AddressSpace::Io(reg)
-                if self.mmu.defer_ppu_writes
-                    && (PPU_WRITE_START..=PPU_WRITE_END).contains(&reg) =>
-            {
-                self.mmu.pending_ppu_writes.push((reg, value));
             }
             AddressSpace::Io(reg) => self.write_io(reg, value),
             AddressSpace::Unmapped => {

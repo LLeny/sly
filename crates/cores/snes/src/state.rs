@@ -4,7 +4,7 @@ use core_model::state::{Envelope, StateError, Thumbnail};
 use crate::mmio::MemoryMap;
 use crate::{Snes, ppu};
 
-impl<M: MemoryMap + 'static> Snes<M> {
+impl<M: MemoryMap> Snes<M> {
     pub fn save_state(&self) -> Result<Vec<u8>, StateError> {
         let payload = postcard::to_allocvec(self)
             .map_err(|err| StateError::Corrupt(format!("encoding state: {err}")))?;

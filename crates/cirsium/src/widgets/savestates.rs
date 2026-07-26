@@ -40,6 +40,7 @@ pub struct SavestateSlot {
 #[derive(Clone, Default)]
 pub struct SavestatesView {
     pub slots: Vec<SavestateSlot>,
+    pub screen: Option<(u32, u32)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -113,6 +114,7 @@ impl RenderOnce for SavestatesWidget {
         } else {
             let on_action = self.on_action;
             let selected = self.selected;
+            let thumb_width = thumb_width(&self.view);
 
             div()
                 .id("savestate-list")
@@ -123,7 +125,7 @@ impl RenderOnce for SavestatesWidget {
                 .overflow_y_scroll()
                 .children(self.view.slots.into_iter().map(|slot| {
                     let is_selected = selected.as_ref() == Some(&slot.id);
-                    row(t, slot, is_selected, on_action.clone())
+                    row(t, slot, thumb_width, is_selected, on_action.clone())
                 }))
                 .into_any_element()
         };
@@ -154,22 +156,32 @@ pub fn thumbnail_image(width: u32, height: u32, rgb: &[u8]) -> Option<SlotThumbn
 }
 
 const THUMB_HEIGHT: f32 = 56.;
-const PLACEHOLDER_ASPECT: f32 = 4. / 3.;
+const FALLBACK_ASPECT: f32 = 4. / 3.;
 const LIST_MAX_HEIGHT: f32 = 210.;
+
+fn thumb_width(view: &SavestatesView) -> f32 {
+    let aspect = view
+        .screen
+        .filter(|(_, height)| *height != 0)
+        .map(|(width, height)| width as f32 / height as f32)
+        .or_else(|| {
+            view.slots
+                .iter()
+                .find_map(|slot| slot.thumbnail.as_ref().map(SlotThumbnail::aspect))
+        })
+        .unwrap_or(FALLBACK_ASPECT);
+
+    (THUMB_HEIGHT * aspect).round()
+}
 
 fn row(
     t: &Theme,
     slot: SavestateSlot,
+    thumb_width: f32,
     selected: bool,
     on_action: Option<SlotHandler>,
 ) -> impl IntoElement {
     let id = slot.id.clone();
-
-    let aspect = slot
-        .thumbnail
-        .as_ref()
-        .map_or(PLACEHOLDER_ASPECT, SlotThumbnail::aspect);
-    let thumb_width = (THUMB_HEIGHT * aspect).round();
 
     let thumb = div()
         .flex_none()

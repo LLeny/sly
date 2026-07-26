@@ -51,7 +51,7 @@ impl Snes {
     }
 }
 
-impl<M: MemoryMap + 'static> Snes<M> {
+impl<M: MemoryMap> Snes<M> {
     pub fn with_mmu(mmu: Mmio<M>) -> Self {
         let tv_system = mmu.cartridge.region().tv_system();
         let mut snes = Self {
@@ -136,22 +136,25 @@ impl<M: MemoryMap + 'static> Snes<M> {
         self.disassemble_at(self.cpu.pc)
     }
 
-    pub fn step(&mut self) {
-        let clocks_before = self.mmu.clocks;
+    #[inline]
+    pub(crate) fn sync(&mut self) {
+        let clocks = self.mmu.clocks;
+        self.scheduler.advance_to(clocks);
+        if self.scheduler.event_due(clocks) {
+            self.drain_events();
+        }
+    }
 
-        // TODO: STORES OCCUR ON FINAL BUS CYCLES!!!
-        // Hold PPU stores their visible effects until scheduler
-        // events crossed by the instruction, such as HDMA, have run!
-        // THIS IS A HACK FOR MODE 7 IN SECRET OF MANA FOR NOW
-        self.begin_cpu_instruction();
-        cpu::step(self);
-        self.end_cpu_instruction();
-
-        self.scheduler.advance_by(self.mmu.clocks - clocks_before);
+    #[inline(never)]
+    fn drain_events(&mut self) {
         while let Some((deadline, kind)) = self.scheduler.pop_current_event() {
             kind.dispatch(self, deadline);
         }
-        self.commit_cpu_ppu_writes();
+    }
+
+    pub fn step(&mut self) {
+        cpu::step(self);
+        self.sync();
     }
 
     pub fn run_frame(&mut self) {
@@ -162,7 +165,7 @@ impl<M: MemoryMap + 'static> Snes<M> {
     }
 }
 
-impl<M: MemoryMap + 'static> core_model::Core for Snes<M> {
+impl<M: MemoryMap> core_model::Core for Snes<M> {
     fn reset(&mut self) {
         Snes::reset(self);
     }

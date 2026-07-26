@@ -448,7 +448,7 @@ impl TilemapData {
     }
 }
 
-pub(crate) fn vblank_start<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
+pub(crate) fn vblank_start<M: MemoryMap>(snes: &mut Snes<M>, _deadline: u64) {
     #[cfg(feature = "debug")]
     snes.ppu.window_trace.finish_frame();
 
@@ -459,7 +459,7 @@ pub(crate) fn vblank_start<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline
     }
 }
 
-pub(crate) fn vblank_end<M: MemoryMap + 'static>(snes: &mut Snes<M>, _deadline: u64) {
+pub(crate) fn vblank_end<M: MemoryMap>(snes: &mut Snes<M>, _deadline: u64) {
     snes.irq.set_vblank(false);
 }
 

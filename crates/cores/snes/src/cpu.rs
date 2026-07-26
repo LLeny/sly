@@ -192,29 +192,36 @@ pub fn effective_address<M: MemoryMap>(snes: &Snes<M>, pc: u16) -> Option<Addres
 
 /// Execute one instruction and return the CPU cycles it took.
 pub fn step<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
-    let cycles = match snes.cpu.execution {
-        ExecutionState::Stopped => self::idle_cycles(snes),
-        _ if snes.irq.take_nmi() => {
-            snes.cpu.execution = ExecutionState::Running;
-            self::service_vectored(snes, 0xFFEA, 0xFFFA);
-            timing::interrupt_cycles(&snes.cpu)
-        }
+    match snes.cpu.execution {
+        ExecutionState::Stopped => self::idle(snes),
+        _ if snes.irq.take_nmi() => self::service_interrupt(snes, 0xFFEA, 0xFFFA),
         _ if snes.irq.irq_pending() && !snes.cpu.flags.irq_disable() => {
-            snes.cpu.execution = ExecutionState::Running;
-            self::service_vectored(snes, 0xFFEE, 0xFFFE);
-            timing::interrupt_cycles(&snes.cpu)
+            self::service_interrupt(snes, 0xFFEE, 0xFFFE)
         }
         ExecutionState::Waiting if snes.irq.irq_pending() => {
             snes.cpu.execution = ExecutionState::Running;
             self::execute_instruction(snes)
         }
-        ExecutionState::Waiting => self::idle_cycles(snes),
+        ExecutionState::Waiting => self::idle(snes),
         ExecutionState::Running => self::execute_instruction(snes),
-    };
+    }
+}
 
+fn charge<M: MemoryMap>(snes: &mut Snes<M>, cycles: u64) -> u64 {
     snes.mmu.clocks += map::WAITSTATES_FAST * cycles;
-
     cycles
+}
+
+fn idle<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
+    let cycles = self::idle_cycles(snes);
+    self::charge(snes, cycles)
+}
+
+fn service_interrupt<M: MemoryMap>(snes: &mut Snes<M>, native: u16, emulation: u16) -> u64 {
+    snes.cpu.execution = ExecutionState::Running;
+    self::service_vectored(snes, native, emulation);
+    let cycles = timing::interrupt_cycles(&snes.cpu);
+    self::charge(snes, cycles)
 }
 
 fn idle_cycles<M: MemoryMap>(snes: &Snes<M>) -> u64 {
@@ -255,7 +262,7 @@ fn execute_instruction<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
         }
     }
 
-    let cycles = timing::cycles(snes, mnemonic, form, arg);
+    let cycles = self::charge(snes, timing::cycles(snes, mnemonic, form, arg));
 
     #[cfg(feature = "debug")]
     snes.mmu.access.resume();
