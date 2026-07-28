@@ -135,11 +135,13 @@ impl<'a> ScanlineRenderer<'a> {
     }
 
     fn visible_objects_on_scanline(&self) -> [Option<Sprite>; MAX_OBJECTS_PER_SCANLINE] {
-        // TODO: apply OAM priority rotation
         let mut objects = [None; MAX_OBJECTS_PER_SCANLINE];
         let mut count = 0;
 
-        for index in 0..128 {
+        let first = self.ppu.oam.first_sprite();
+
+        for offset in 0..128u8 {
+            let index = (first + offset) & 0x7F;
             if !self.ppu.sprite_covers_line(index, self.y) {
                 continue;
             }

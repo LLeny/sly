@@ -35,6 +35,14 @@ impl Oam {
         self.addr & 0x8000 != 0
     }
 
+    pub fn first_sprite(&self) -> u8 {
+        if self.priority_rotation() {
+            ((self.internal >> 2) & 0x7F) as u8
+        } else {
+            0
+        }
+    }
+
     pub(crate) fn set_addr_low(&mut self, value: u8) {
         self.addr = (self.addr & 0xFF00) | value as u16;
         self.reload();
