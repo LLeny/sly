@@ -37,6 +37,51 @@ pub(crate) const R_FIR_FIRST: usize = 0x0F;
 
 const POWER_ON_FLAGS: u8 = 0xE0;
 
+#[chapa::bitfield(u8, order = lsb0)]
+pub(crate) struct AdsrControl {
+    #[bits(0..=3)]
+    pub attack: u8,
+
+    #[bits(4..=6)]
+    pub decay: u8,
+
+    #[bits(7)]
+    pub use_adsr: bool,
+}
+
+#[chapa::bitfield(u8, order = lsb0)]
+pub(crate) struct AdsrSustain {
+    #[bits(0..=4)]
+    pub rate: u8,
+
+    #[bits(5..=7)]
+    pub level: u8,
+}
+
+#[chapa::bitfield(u8, order = lsb0)]
+pub(crate) struct Gain {
+    #[bits(0..=4)]
+    pub rate: u8,
+
+    #[bits(5..=7)]
+    pub mode: u8,
+}
+
+#[chapa::bitfield(u8, order = lsb0)]
+pub(crate) struct BrrHeader {
+    #[bits(0)]
+    pub end: bool,
+
+    #[bits(1)]
+    pub looping: bool,
+
+    #[bits(2..=3)]
+    pub filter: u8,
+
+    #[bits(4..=7)]
+    pub shift: u8,
+}
+
 #[derive(Serialize, Deserialize)]
 pub(super) struct RegisterFile(#[serde(with = "BigArray")] [u8; REGISTER_COUNT]);
 

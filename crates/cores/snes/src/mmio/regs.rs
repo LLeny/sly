@@ -34,12 +34,29 @@ register_mmio_raw! {
     0x4204 => "WRDIVL",
     0x4205 => "WRDIVH",
     0x4206 => "WRDIVB",
-    0x420D => "MEMSEL",
     0x4213 => "RDIO",
     0x4214 => "RDDIVL",
     0x4215 => "RDDIVH",
     0x4216 => "RDMPYL",
     0x4217 => "RDMPYH",
+}
+
+register_mmio! {
+    /// MEMSEL
+    pub struct MemorySelect @ 0x420D {
+        #[bits(0)]
+        pub fast_rom: bool,
+    }
+}
+
+impl MmioReg for MemorySelect {
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
+        snes.mmu.fastrom = Self::from_raw(value).fast_rom();
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        Self::default().with_fast_rom(snes.mmu.fastrom).raw()
+    }
 }
 
 register_mmio! {

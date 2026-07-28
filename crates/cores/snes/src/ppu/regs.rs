@@ -1,11 +1,9 @@
 use chapa::bitenum;
-use serde::{Deserialize, Serialize};
 
 use crate::Snes;
 use crate::macros::{register_mmio, register_mmio_family, register_mmio_raw};
 use crate::mmio::{MemoryMap, MmioReg};
-
-pub(crate) const INIDISP: u16 = 0x2100;
+use crate::scheduler::VBLANK_START_SCANLINE;
 
 pub(crate) const OAMADDL: u16 = 0x2102;
 pub(crate) const OAMADDH: u16 = 0x2103;
@@ -30,9 +28,6 @@ pub(crate) const WOBJLOG: u16 = 0x212B;
 pub(crate) const TMW: u16 = 0x212E;
 pub(crate) const TSW: u16 = 0x212F;
 pub(crate) const COLDATA: u16 = 0x2132;
-
-// TODO
-pub(crate) const SETINI: u16 = 0x2133;
 
 pub(crate) const VMADDL: u16 = 0x2116;
 pub(crate) const VMADDH: u16 = 0x2117;
@@ -67,16 +62,11 @@ register_mmio_raw! {
     SLHV => "SLHV",
     OPHCT => "OPHCT",
     OPVCT => "OPVCT",
-    TM => "TM",
-    TS => "TS",
     WH0 => "WH0",
     WH1 => "WH1",
     WH2 => "WH2",
     WH3 => "WH3",
-    WBGLOG => "WBGLOG",
-    WOBJLOG => "WOBJLOG",
     COLDATA => "COLDATA",
-    SETINI => "SETINI",
     0x210D => "BG1HOFS",
     0x210E => "BG1VOFS",
     0x210F => "BG2HOFS",
@@ -161,6 +151,77 @@ impl AddressRemapping {
             Self::Bpp4 => (addr & 0xFE00) | ((addr << 3) & 0x01F8) | ((addr >> 6) & 0x0007),
             Self::Bpp8 => (addr & 0xFC00) | ((addr << 3) & 0x03F8) | ((addr >> 7) & 0x0007),
         }
+    }
+}
+
+register_mmio! {
+    /// INIDISP
+    pub struct DisplayControl @ 0x2100 {
+        #[bits(0..=3)]
+        pub brightness: u8,
+
+        #[bits(7)]
+        pub force_blank: bool,
+    }
+}
+
+impl MmioReg for DisplayControl {
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
+        let control = Self::from_raw(value);
+        let was_blanked = snes.ppu.force_blank;
+        snes.ppu.set_display_control(control);
+
+        if was_blanked
+            && !control.force_blank()
+            && snes.scheduler.scanline_at(snes.scheduler.cycles()) == VBLANK_START_SCANLINE
+        {
+            snes.ppu.oam.reload();
+        }
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        Self::default()
+            .with_brightness(snes.ppu.brightness)
+            .with_force_blank(snes.ppu.force_blank)
+            .raw()
+    }
+}
+
+register_mmio! {
+    /// SETINI
+    pub struct DisplayControl2 @ 0x2133 {
+        #[bits(0)]
+        pub interlace: bool,
+
+        #[bits(1)]
+        pub obj_interlace: bool,
+
+        #[bits(2)]
+        pub overscan: bool,
+
+        #[bits(3)]
+        pub pseudo_hires: bool,
+
+        #[bits(6)]
+        pub extbg: bool,
+
+        #[bits(7)]
+        pub external_sync: bool,
+    }
+}
+
+impl MmioReg for DisplayControl2 {
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
+        let control = Self::from_raw(value);
+        snes.ppu.pseudo_hires = control.pseudo_hires();
+        snes.ppu.extbg = control.extbg();
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+        Self::default()
+            .with_pseudo_hires(snes.ppu.pseudo_hires)
+            .with_extbg(snes.ppu.extbg)
+            .raw()
     }
 }
 
@@ -490,33 +551,79 @@ impl LayerWindowEnable {
     }
 }
 
-#[derive(Clone, Copy, Default, Serialize, Deserialize)]
-pub struct LayerMask(u8);
+#[bitenum]
+#[derive(Default)]
+pub enum MaskLogic {
+    #[fallback]
+    #[default]
+    Or = 0,
+    And = 1,
+    Xor = 2,
+    Xnor = 3,
+}
+
+register_mmio_family! {
+    #[derive(Default)]
+    pub struct WindowMaskLogic {
+        #[bits(0..=1, alias = "obj")]
+        pub bg1: MaskLogic,
+
+        #[bits(2..=3, alias = "color")]
+        pub bg2: MaskLogic,
+
+        #[bits(4..=5)]
+        pub bg3: MaskLogic,
+
+        #[bits(6..=7)]
+        pub bg4: MaskLogic,
+    }
+    symbols {
+        0x212A => "WBGLOG",
+        0x212B => "WOBJLOG",
+    }
+}
+
+register_mmio_family! {
+    #[derive(Default)]
+    pub struct LayerMask {
+        #[bits(0)]
+        pub bg1: bool,
+
+        #[bits(1)]
+        pub bg2: bool,
+
+        #[bits(2)]
+        pub bg3: bool,
+
+        #[bits(3)]
+        pub bg4: bool,
+
+        #[bits(4)]
+        pub obj: bool,
+
+        #[bits(5)]
+        pub backdrop: bool,
+    }
+    symbols {
+        0x212C => "TM",
+        0x212D => "TS",
+    }
+}
 
 impl LayerMask {
     pub const OBJ: u8 = 4;
     pub const BACKDROP: u8 = 5;
 
     pub fn layer(self, index: u8) -> bool {
-        self.0 & 1 << index != 0
+        self.raw() & 1 << index != 0
     }
 
     pub fn bg(self, layer: usize) -> bool {
         self.layer(layer as u8)
     }
 
-    pub fn obj(self) -> bool {
-        self.layer(Self::OBJ)
-    }
-
-    pub fn raw(self) -> u8 {
-        self.0
-    }
-}
-
-impl From<u8> for LayerMask {
-    fn from(value: u8) -> Self {
-        Self(value & 0x3F)
+    pub fn from_bits(value: u8) -> Self {
+        Self::from_raw(value & 0x3F)
     }
 }
 
@@ -634,7 +741,7 @@ impl MmioReg for ColorMathControl {
     fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
         let reg = Self::from_raw(value);
         let math = &mut snes.ppu.color_math;
-        math.layers = reg.layers().into();
+        math.layers = LayerMask::from_bits(reg.layers());
         math.intensity = reg.intensity();
         math.operation = reg.operation();
     }

@@ -1,4 +1,5 @@
 use super::APU_ADDRESS_MASK;
+use super::registers::{AdsrControl, AdsrSustain, BrrHeader, Gain};
 use super::tables::GAUSS;
 use super::timing::RateCounter;
 use serde::{Deserialize, Serialize};
@@ -239,8 +240,9 @@ impl Voice {
         let group_start = self.sample_cursor;
         self.sample_cursor = (group_start + 4) % BRR_RING_SAMPLES;
 
-        let shift = (header >> 4) as i32;
-        let filter = (header & 0x0C) as i32;
+        let header = BrrHeader::from_raw(header);
+        let shift = header.shift() as i32;
+        let filter = header.filter();
 
         for sample_index in 0..4 {
             let mut sample = (nibbles as i16 >> 12) as i32;
@@ -254,11 +256,11 @@ impl Voice {
             let previous = self.samples[index + BRR_RING_SAMPLES - 1];
             let previous_two = self.samples[index + BRR_RING_SAMPLES - 2] >> 1;
 
-            if filter >= 8 {
+            if filter >= 2 {
                 sample += previous;
                 sample -= previous_two;
 
-                if filter == 8 {
+                if filter == 2 {
                     sample += previous_two >> 4;
                     sample += (previous * -3) >> 6;
                 } else {
@@ -286,7 +288,7 @@ impl Voice {
 
         self.brr_address = self.brr_address.wrapping_add(BRR_BLOCK_BYTES);
 
-        let looped = header & 1 != 0;
+        let looped = BrrHeader::from_raw(header).end();
         if looped {
             self.brr_address = loop_address;
         }
@@ -309,31 +311,35 @@ impl Voice {
             return;
         }
 
+        let adsr = AdsrControl::from_raw(adsr_control);
+        let sustain = AdsrSustain::from_raw(adsr_sustain);
+        let gain_reg = Gain::from_raw(gain);
+
         let rate;
         let mut envelope_data = adsr_sustain as i32;
-        if adsr_control & 0x80 != 0 {
+        if adsr.use_adsr() {
             if self.envelope_mode >= EnvelopeMode::Decay {
                 envelope -= 1;
                 envelope -= envelope >> 8;
 
                 rate = if self.envelope_mode == EnvelopeMode::Decay {
-                    ((adsr_control as i32) >> 3 & 0x0E) + 0x10
+                    adsr.decay() as i32 * 2 + 0x10
                 } else {
-                    envelope_data & 0x1F
+                    sustain.rate() as i32
                 };
             } else {
-                rate = (adsr_control as i32 & 0x0F) * 2 + 1;
+                rate = adsr.attack() as i32 * 2 + 1;
                 envelope += if rate < 31 { 0x20 } else { 0x400 };
             }
         } else {
             envelope_data = gain as i32;
 
-            let mode = envelope_data >> 5;
+            let mode = gain_reg.mode() as i32;
             if mode < 4 {
                 envelope = envelope_data * 0x10;
                 rate = 31;
             } else {
-                rate = envelope_data & 0x1F;
+                rate = gain_reg.rate() as i32;
 
                 if mode == 4 {
                     envelope -= 0x20;

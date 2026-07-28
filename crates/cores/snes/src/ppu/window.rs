@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "debug")]
 use crate::ppu::regs::{BackgroundMode, LayerWindowEnable};
-use crate::ppu::regs::{W12SEL, W34SEL, WBGLOG, WH0, WH3, WOBJLOG, WOBJSEL, WindowMaskSettings};
+use crate::ppu::regs::{
+    MaskLogic, W12SEL, W34SEL, WBGLOG, WH0, WH3, WOBJLOG, WOBJSEL, WindowMaskLogic,
+    WindowMaskSettings,
+};
 
 const WINDOW_COUNT: usize = 2;
 const LAYER_COUNT: usize = 6;
@@ -16,7 +19,7 @@ pub(crate) const COLOR_WINDOW: u8 = 5;
 pub(crate) struct Windows {
     selectors: [WindowMaskSettings; 3],
     positions: [u8; 4],
-    logic: [u8; 2],
+    logic: [WindowMaskLogic; 2],
 }
 
 #[cfg(feature = "debug")]
@@ -101,7 +104,7 @@ pub(crate) struct WindowRowMask {
     enabled: [bool; WINDOW_COUNT],
     inverted: [bool; WINDOW_COUNT],
     bounds: [(u8, u8); WINDOW_COUNT],
-    logic: u8,
+    logic: MaskLogic,
 }
 
 impl WindowRowMask {
@@ -118,11 +121,10 @@ impl WindowRowMask {
             [true, false] => areas[0],
             [false, true] => areas[1],
             [true, true] => match self.logic {
-                0 => areas[0] || areas[1],
-                1 => areas[0] && areas[1],
-                2 => areas[0] ^ areas[1],
-                3 => areas[0] == areas[1],
-                _ => unreachable!(),
+                MaskLogic::Or => areas[0] || areas[1],
+                MaskLogic::And => areas[0] && areas[1],
+                MaskLogic::Xor => areas[0] ^ areas[1],
+                MaskLogic::Xnor => areas[0] == areas[1],
             },
         }
     }
@@ -156,11 +158,11 @@ impl Windows {
     }
 
     pub(crate) fn write_logic(&mut self, reg: u16, value: u8) {
-        self.logic[(reg - WBGLOG) as usize] = value;
+        self.logic[(reg - WBGLOG) as usize] = WindowMaskLogic::from_raw(value);
     }
 
     pub(crate) fn logic(&self, reg: u16) -> u8 {
-        self.logic[(reg - WBGLOG) as usize]
+        self.logic[(reg - WBGLOG) as usize].raw()
     }
 
     pub(crate) fn row_mask(&self, layer: u8) -> WindowRowMask {
@@ -234,17 +236,16 @@ impl Windows {
         }
     }
 
-    fn logic_for_layer(&self, layer: u8) -> u8 {
-        let (register, shift) = match layer {
-            0 => (0, 0),
-            1 => (0, 2),
-            2 => (0, 4),
-            3 => (0, 6),
-            4 => (1, 0),
-            5 => (1, 2),
+    fn logic_for_layer(&self, layer: u8) -> MaskLogic {
+        match layer {
+            0 => self.logic[0].bg1(),
+            1 => self.logic[0].bg2(),
+            2 => self.logic[0].bg3(),
+            3 => self.logic[0].bg4(),
+            4 => self.logic[1].obj(),
+            5 => self.logic[1].color(),
             _ => unreachable!(),
-        };
-        (self.logic[register] >> shift) & 0x03
+        }
     }
 }
 

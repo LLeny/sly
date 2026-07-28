@@ -6,17 +6,20 @@ use serde::{Deserialize, Serialize};
 register_mmio! {
     /// MOSAIC
     pub(crate) struct MosaicRegister @ 0x2106 {
-        #[bits(0)]
+        #[bits(0, overlay = "layers")]
         pub enable_bg1: bool,
 
-        #[bits(1)]
+        #[bits(1, overlay = "layers")]
         pub enable_bg2: bool,
 
-        #[bits(2)]
+        #[bits(2, overlay = "layers")]
         pub enable_bg3: bool,
 
-        #[bits(3)]
+        #[bits(3, overlay = "layers")]
         pub enable_bg4: bool,
+
+        #[bits(0..=3, overlay = "mask")]
+        pub enabled_mask: u8,
 
         #[bits(4..=7)]
         pub size: u8,
@@ -37,12 +40,16 @@ impl Default for Mosaic {
 
 impl Mosaic {
     fn write(&mut self, value: u8) {
-        self.layers = value & 0x0F;
-        self.size = (value >> 4) + 1;
+        let reg = MosaicRegister::from_raw(value);
+        self.layers = reg.enabled_mask();
+        self.size = reg.size() + 1;
     }
 
     fn raw(self) -> u8 {
-        (self.size - 1) << 4 | self.layers
+        MosaicRegister::default()
+            .with_enabled_mask(self.layers)
+            .with_size(self.size - 1)
+            .raw()
     }
 
     pub(crate) fn size_for_layer(self, layer: usize) -> u32 {

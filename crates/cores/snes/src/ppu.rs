@@ -21,7 +21,7 @@ use crate::ppu::mode7::Matrix;
 use crate::ppu::mosaic::Mosaic;
 use crate::ppu::oam::Oam;
 use crate::ppu::obj::ObjLayer;
-use crate::ppu::regs::{BackgroundMode, LayerMask, LayerWindowEnable, Priority};
+use crate::ppu::regs::{BackgroundMode, DisplayControl, LayerMask, LayerWindowEnable, Priority};
 use crate::ppu::tile::Tile;
 use crate::ppu::vram::Vram;
 #[cfg(feature = "debug")]
@@ -150,9 +150,9 @@ impl Ppu {
         self.opvct_latch.reset();
     }
 
-    pub(crate) fn set_display_control(&mut self, value: u8) {
-        self.force_blank = value & 0x80 != 0;
-        self.brightness = value & 0x0F;
+    pub(crate) fn set_display_control(&mut self, control: DisplayControl) {
+        self.force_blank = control.force_blank();
+        self.brightness = control.brightness();
     }
 
     pub fn palette(&self, index: usize) -> [u16; 16] {
@@ -226,13 +226,12 @@ impl Ppu {
 
     pub fn sprite(&self, index: u8) -> Sprite {
         let base = index as usize * 4;
-        let attr = self.oam.byte(base + 3);
-        let extra = self.oam.byte(512 + index as usize / 4) >> ((index as usize % 4) * 2);
+        let attr = self.oam.attributes(index);
+        let high = self.oam.high_bits(index);
 
-        let large = extra & 2 != 0;
-        let x = self.oam.byte(base) as u16 | ((extra as u16 & 1) << 8);
-        let tile = self.oam.byte(base + 2) as u16 | ((attr as u16 & 1) << 8);
-        let (width, height) = self.obj.sprite_size.dimensions(large);
+        let x = self.oam.byte(base) as u16 | ((high.x_high() as u16) << 8);
+        let tile = self.oam.byte(base + 2) as u16 | ((attr.tile_high() as u16) << 8);
+        let (width, height) = self.obj.sprite_size.dimensions(high.large());
 
         Sprite {
             x: if x & 0x100 != 0 {
@@ -243,10 +242,10 @@ impl Ppu {
             y: self.oam.byte(base + 1),
             tile,
             tile_addr: self.obj.tile_addr(tile),
-            palette: (attr >> 1) & 7,
-            priority: (attr >> 4) & 3,
-            flip_h: attr & 0x40 != 0,
-            flip_v: attr & 0x80 != 0,
+            palette: attr.palette(),
+            priority: attr.priority(),
+            flip_h: attr.flip_h(),
+            flip_v: attr.flip_v(),
             width,
             height,
         }
@@ -283,8 +282,8 @@ impl Ppu {
     }
 
     pub(crate) fn sprite_covers_line(&self, index: u8, y: u32) -> bool {
-        let extra = self.oam.byte(512 + index as usize / 4) >> ((index as usize % 4) * 2);
-        let (_, height) = self.obj.sprite_size.dimensions(extra & 2 != 0);
+        let large = self.oam.high_bits(index).large();
+        let (_, height) = self.obj.sprite_size.dimensions(large);
         let sprite_y = self.oam.byte(index as usize * 4 + 1);
         (y + 256 - sprite_y as u32) & 0xFF < height
     }

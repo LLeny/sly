@@ -4,6 +4,21 @@ use crate::ppu::regs::{
 };
 use serde::{Deserialize, Serialize};
 
+#[chapa::bitfield(u8, order = lsb0)]
+pub struct FixedColorData {
+    #[bits(0..=4)]
+    pub intensity: u8,
+
+    #[bits(5)]
+    pub apply_red: bool,
+
+    #[bits(6)]
+    pub apply_green: bool,
+
+    #[bits(7)]
+    pub apply_blue: bool,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct ColorMath {
     pub layers: LayerMask,
@@ -18,10 +33,12 @@ pub struct ColorMath {
 
 impl ColorMath {
     pub(crate) fn set_fixed_color(&mut self, value: u8) {
-        let intensity = value as u16 & CHANNEL_MASK;
+        let data = FixedColorData::from_raw(value);
+        let intensity = data.intensity() as u16;
+        let selected = [data.apply_red(), data.apply_green(), data.apply_blue()];
 
-        for (select, shift) in [0x20, 0x40, 0x80].into_iter().zip(CHANNEL_SHIFTS) {
-            if value & select != 0 {
+        for (apply, shift) in selected.into_iter().zip(CHANNEL_SHIFTS) {
+            if apply {
                 self.fixed_color = self.fixed_color & !(CHANNEL_MASK << shift) | intensity << shift;
             }
         }

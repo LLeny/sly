@@ -11,25 +11,24 @@ mod symbol;
 #[cfg(feature = "debug")]
 pub use access::{AccessTracker, MemoryAccess, TrackMode};
 
-use crate::joypad::{JOYPAD_IO_END, JOYPAD_IO_START, JOYSER0, JOYSER1};
+use crate::joypad::{JOYPAD_IO_END, JOYPAD_IO_START, JOYSER0, JOYSER1, JoypadOutput};
 use crate::math::{RDDIVH, RDDIVL, RDMPYH, RDMPYL, WRDIVB, WRDIVH, WRDIVL, WRMPYA, WRMPYB};
 use crate::mmio::dma::{CHANNEL_REGS_END, CHANNEL_REGS_START, Dma};
 use crate::mmio::regs::{
     APU_IO_END, APU_IO_START, HdmaTransferEnable, HvStatusJoypadBusy, MdmaTransferStart,
-    NmiTimerEnable, TimerUp, VblankFlagCpuVersion,
+    MemorySelect, NmiTimerEnable, TimerUp, VblankFlagCpuVersion,
 };
 use crate::mmio::wram::{WMADDH, WMADDL, WMADDM, WMDATA, WramPort};
 use crate::ppu::mode7::{Mode7Registers, Mode7Settings, PRODUCT_HIGH, PRODUCT_LOW, PRODUCT_MIDDLE};
 use crate::ppu::mosaic::MosaicRegister;
 use crate::ppu::regs::{
     Bg12ChrBase, Bg34ChrBase, BgMode, BgScrollOffset, CGADD, CGDATA, COLDATA, ColorMathControl,
-    ColorMathSelect, HTIMEH, HTIMEL, INIDISP, LayerWindowEnable, OAMADDH, OAMADDL, OAMDATA,
-    OAMDATAREAD, OPHCT, OPVCT, Ppu2Status, RDCGRAM, RDVRAMH, RDVRAML, SETINI, SLHV,
-    SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL, VTIMEH,
-    VTIMEL, VramControl, WindowMaskSettings,
+    ColorMathSelect, DisplayControl, DisplayControl2, HTIMEH, HTIMEL, LayerMask, LayerWindowEnable,
+    OAMADDH, OAMADDL, OAMDATA, OAMDATAREAD, OPHCT, OPVCT, Ppu2Status, RDCGRAM, RDVRAMH, RDVRAML,
+    SLHV, SpriteSizeAndTileBase, TM, TS, TilemapAddrAndSize, VMADDH, VMADDL, VMDATAH, VMDATAL,
+    VTIMEH, VTIMEL, VramControl, WindowMaskSettings,
 };
 use crate::ppu::window::{LOGIC_END, LOGIC_START, POSITION_END, POSITION_START};
-use crate::scheduler::VBLANK_START_SCANLINE;
 use crate::{Cartridge, Snes};
 use serde::{Deserialize, Serialize};
 
@@ -41,7 +40,6 @@ pub use symbol::{MmioSymbol, address_of, is_symbol, symbol, symbols};
 
 pub(crate) const OPEN_BUS: u8 = 0xFF;
 pub(crate) const WRIO: u16 = 0x4201;
-pub(crate) const MEMSEL: u16 = 0x420D;
 pub(crate) const RDIO: u16 = 0x4213;
 
 #[derive(Serialize, Deserialize)]
@@ -251,7 +249,7 @@ impl<M: MemoryMap> Snes<M> {
     fn read_io(&mut self, reg: u16) -> u8 {
         match reg {
             RDIO => self.mmu.wrio,
-            MEMSEL => self.mmu.fastrom as u8,
+            MemorySelect::ADDRESS => MemorySelect::peek(self),
             RDDIVL => self.math.div_quotient as u8,
             RDDIVH => (self.math.div_quotient >> 8) as u8,
             RDMPYL => self.math.product_or_remainder as u8,
@@ -370,18 +368,15 @@ impl<M: MemoryMap> Snes<M> {
             }
             POSITION_START..=POSITION_END => self.ppu.windows.write_position(reg, value),
             LOGIC_START..=LOGIC_END => self.ppu.windows.write_logic(reg, value),
-            TM => self.ppu.main_screen = value.into(),
-            TS => self.ppu.sub_screen = value.into(),
+            TM => self.ppu.main_screen = LayerMask::from_bits(value),
+            TS => self.ppu.sub_screen = LayerMask::from_bits(value),
             LayerWindowEnable::START..=LayerWindowEnable::END => {
                 LayerWindowEnable::write(self, reg, value)
             }
             ColorMathControl::ADDRESS => ColorMathControl::write(self, value),
             COLDATA => self.ppu.color_math.set_fixed_color(value),
             ColorMathSelect::ADDRESS => ColorMathSelect::write(self, value),
-            SETINI => {
-                self.ppu.pseudo_hires = value & 0x08 != 0;
-                self.ppu.extbg = value & 0x40 != 0;
-            }
+            DisplayControl2::ADDRESS => DisplayControl2::write(self, value),
             Ppu2Status::ADDRESS => Ppu2Status::write(self, value),
             BgScrollOffset::START..=BgScrollOffset::END => BgScrollOffset::write(self, reg, value),
             Mode7Registers::START..=Mode7Registers::END => Mode7Registers::write(self, reg, value),
@@ -389,7 +384,7 @@ impl<M: MemoryMap> Snes<M> {
             HTIMEH => self.irq.h_timer.set_target_high(value),
             VTIMEL => self.irq.v_timer.set_target_low(value),
             VTIMEH => self.irq.v_timer.set_target_high(value),
-            MEMSEL => self.mmu.fastrom = value & 0x01 != 0,
+            MemorySelect::ADDRESS => MemorySelect::write(self, value),
             NmiTimerEnable::ADDRESS => NmiTimerEnable::write(self, value),
             VblankFlagCpuVersion::ADDRESS => VblankFlagCpuVersion::write(self, value),
             TimerUp::ADDRESS => TimerUp::write(self, value),
@@ -402,18 +397,10 @@ impl<M: MemoryMap> Snes<M> {
             APU_IO_START..=APU_IO_END => self
                 .apu
                 .cpu_write_port((reg - APU_IO_START) as usize, value),
-            JOYSER0 => self.joypads.set_strobe(value & 0x01 != 0),
-            INIDISP => {
-                let was_blanked = self.ppu.force_blank;
-                self.ppu.set_display_control(value);
-
-                if was_blanked
-                    && !self.ppu.force_blank
-                    && self.scheduler.scanline_at(self.scheduler.cycles()) == VBLANK_START_SCANLINE
-                {
-                    self.ppu.oam.reload();
-                }
-            }
+            JOYSER0 => self
+                .joypads
+                .set_strobe(JoypadOutput::from_raw(value).strobe()),
+            DisplayControl::ADDRESS => DisplayControl::write(self, value),
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),
@@ -432,7 +419,7 @@ impl<M: MemoryMap> Snes<M> {
     fn peek_io(&self, reg: u16) -> u8 {
         match reg {
             WRIO | RDIO => self.mmu.wrio,
-            MEMSEL => self.mmu.fastrom as u8,
+            MemorySelect::ADDRESS => MemorySelect::peek(self),
             RDDIVL => self.math.div_quotient as u8,
             RDDIVH => (self.math.div_quotient >> 8) as u8,
             RDMPYL => self.math.product_or_remainder as u8,

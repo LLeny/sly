@@ -18,8 +18,6 @@ const SOURCE_DIRECTORY_ENTRY_BYTES: usize = 4;
 const STEREO_CHANNELS: usize = 2;
 const NOISE_RATE_MASK: u8 = 0x1F;
 const SOFT_RESET: u8 = 0x80;
-const BRR_END_FLAGS_MASK: u8 = 0x03;
-const BRR_END_WITHOUT_LOOP: u8 = 0x01;
 const PITCH_MODULATION_SAMPLE_SHIFT: u32 = 5;
 const PITCH_MODULATION_SCALE_SHIFT: u32 = 10;
 const VOICE_VOLUME_SCALE_SHIFT: u32 = 7;
@@ -197,9 +195,7 @@ impl Dsp {
                 self.voice_hist[i][self.voice_hist_pos] = voice_output as i16;
             }
 
-            if settings.flags & SOFT_RESET != 0
-                || (brr_header & BRR_END_FLAGS_MASK) == BRR_END_WITHOUT_LOOP
-            {
+            if settings.flags & SOFT_RESET != 0 || self::brr_ends_without_loop(brr_header) {
                 self.voices[i].silence_and_release();
             }
 
@@ -260,4 +256,9 @@ impl Dsp {
         self.echo
             .process(&self.regs, ram, settings.flags, main_out, echo_out)
     }
+}
+
+fn brr_ends_without_loop(header: u8) -> bool {
+    let header = BrrHeader::from_raw(header);
+    header.end() && !header.looping()
 }

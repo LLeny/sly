@@ -6,6 +6,18 @@ pub const JOYSER1: u16 = 0x4017;
 pub const JOYPAD_IO_START: u16 = 0x4218;
 pub const JOYPAD_IO_END: u16 = 0x421F;
 
+#[chapa::bitfield(u8, order = lsb0)]
+pub struct JoypadOutput {
+    #[bits(0)]
+    pub strobe: bool,
+
+    #[bits(1)]
+    pub out1: bool,
+
+    #[bits(2)]
+    pub out2: bool,
+}
+
 #[chapa::bitfield(u16, order = lsb0)]
 #[derive(Default)]
 pub struct Buttons {
