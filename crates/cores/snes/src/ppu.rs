@@ -454,6 +454,10 @@ pub(crate) fn vblank_start<M: MemoryMap>(snes: &mut Snes<M>, _deadline: u64) {
 
     snes.irq.set_vblank(true);
 
+    if !snes.ppu.force_blank {
+        snes.ppu.oam.reload();
+    }
+
     if snes.irq.joypad_autoread_enabled() {
         snes.joypads.autoread();
     }

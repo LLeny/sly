@@ -29,6 +29,7 @@ use crate::ppu::regs::{
     VTIMEL, VramControl, WindowMaskSettings,
 };
 use crate::ppu::window::{LOGIC_END, LOGIC_START, POSITION_END, POSITION_START};
+use crate::scheduler::VBLANK_START_SCANLINE;
 use crate::{Cartridge, Snes};
 use serde::{Deserialize, Serialize};
 
@@ -402,7 +403,17 @@ impl<M: MemoryMap> Snes<M> {
                 .apu
                 .cpu_write_port((reg - APU_IO_START) as usize, value),
             JOYSER0 => self.joypads.set_strobe(value & 0x01 != 0),
-            INIDISP => self.ppu.set_display_control(value),
+            INIDISP => {
+                let was_blanked = self.ppu.force_blank;
+                self.ppu.set_display_control(value);
+
+                if was_blanked
+                    && !self.ppu.force_blank
+                    && self.scheduler.scanline_at(self.scheduler.cycles()) == VBLANK_START_SCANLINE
+                {
+                    self.ppu.oam.reload();
+                }
+            }
             _ => {
                 tracing::error!(
                     reg = format!("{:04X}", reg),

@@ -69,7 +69,7 @@ impl Oam {
         self.bytes[self.index()]
     }
 
-    fn reload(&mut self) {
+    pub(crate) fn reload(&mut self) {
         self.internal = (self.addr & 0x1FF) << 1;
     }
 
