@@ -271,7 +271,7 @@ impl<'a> ScanlineRenderer<'a> {
         let use_direct_color =
             bits_per_pixel == 8 && matches!(self.ppu.color_math.color_source, ColorSource::Direct);
         let mosaic_size = self.ppu.mosaic.size_for_layer(layer);
-        let sampled_y = self.y / mosaic_size * mosaic_size;
+        let sampled_y = self.y / mosaic_size * mosaic_size + 1;
         let window_mask = window_enabled.then(|| self.ppu.windows.row_mask(layer as u8));
         let hires = self.ppu.bg_mode.is_hires();
         let scale = if hires { 2 } else { 1 };
