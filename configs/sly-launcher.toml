@@ -8,3 +8,10 @@ roms = ["roms"]
 title = "Sly Launcher"
 fullscreen = false
 #resolution = [1920, 1080]
+
+[ui]
+# The handheld layout, on by default on iOS only.
+#touch = true
+
+[debug]
+#diagnostics = true

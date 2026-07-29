@@ -1,5 +1,7 @@
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
+
+use crate::touch::TouchControls;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 
@@ -20,6 +22,9 @@ const CONTOUR_SCALE_PX: f32 = 430.0;
 const FROSTED_BLUR_RADIUS_PX: f32 = 24.0;
 const FROSTED_LIFT: f32 = 0.86;
 const FROSTED_CORNER_RADIUS_PX: f32 = 26.0;
+
+const FROSTED_BLUR_TAPS: f32 = 13.0;
+const FROSTED_BLUR_TAPS_TOUCH: f32 = 5.0;
 
 pub fn frosted_bubble_parameters(ui_scale: f32) -> Vec4 {
     Vec4::new(
@@ -97,6 +102,15 @@ pub struct BackgroundPattern {
 
 pub fn contour_parameters() -> Vec4 {
     Vec4::new(0.0, CONTOUR_SCALE_PX, 0.0, 0.0)
+}
+
+pub fn frosted_backdrop_parameters(controls: TouchControls) -> Vec4 {
+    let taps = if controls.0 {
+        FROSTED_BLUR_TAPS_TOUCH
+    } else {
+        FROSTED_BLUR_TAPS
+    };
+    Vec4::new(0.0, CONTOUR_SCALE_PX, taps, 0.0)
 }
 
 pub fn pattern_tint_uniform(tint: Vec3) -> Vec4 {

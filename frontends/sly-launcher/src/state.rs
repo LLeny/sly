@@ -18,6 +18,10 @@ pub enum ViewMode {
 }
 
 impl ViewMode {
+    pub fn is_vertical(self) -> bool {
+        matches!(self, ViewMode::Column)
+    }
+
     pub fn next(self) -> Self {
         match self {
             ViewMode::Row => ViewMode::Column,
@@ -34,6 +38,9 @@ pub struct LauncherState {
     pub view_mode: ViewMode,
     pub status: String,
 }
+
+#[derive(Resource, Default)]
+pub struct Paused(pub bool);
 
 #[derive(Resource, Default)]
 pub struct ModeTimers {

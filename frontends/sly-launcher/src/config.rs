@@ -29,6 +29,12 @@ pub struct Config {
     pub storage: StorageConfig,
     pub window: WindowConfig,
 
+    #[serde(default)]
+    pub ui: UiConfig,
+
+    #[serde(default)]
+    pub debug: DebugConfig,
+
     #[serde(skip)]
     pub source: String,
 }
@@ -46,10 +52,25 @@ pub struct StorageConfig {
     pub data_dir: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UiConfig {
+    #[serde(default)]
+    pub touch: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DebugConfig {
+    #[serde(default)]
+    pub diagnostics: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WindowConfig {
     pub title: String,
+
     pub fullscreen: bool,
 
     #[serde(default)]
@@ -58,7 +79,7 @@ pub struct WindowConfig {
 
 impl WindowConfig {
     pub fn window(&self) -> Window {
-        let mode = if self.fullscreen {
+        let mode = if self.fullscreen || cfg!(target_os = "ios") {
             WindowMode::BorderlessFullscreen(MonitorSelection::Current)
         } else {
             WindowMode::Windowed
@@ -78,6 +99,10 @@ impl WindowConfig {
 }
 
 impl Config {
+    pub fn touch_controls(&self) -> bool {
+        self.ui.touch.unwrap_or(cfg!(target_os = "ios"))
+    }
+
     pub fn save_store(&self) -> storage::FsStore {
         match &self.storage.data_dir {
             Some(dir) => storage::FsStore::with_root(dir),
@@ -87,8 +112,6 @@ impl Config {
 }
 
 pub fn load() -> Result<Config, String> {
-    let args = Args::parse();
-
     let mut config = match config_path() {
         Some(path) if path.is_file() => {
             let text = std::fs::read_to_string(&path)
@@ -112,8 +135,9 @@ pub fn load() -> Result<Config, String> {
         None => defaults(),
     };
 
-    if !args.roms.is_empty() {
-        config.library.roms = args.roms;
+    let roms = rom_arguments();
+    if !roms.is_empty() {
+        config.library.roms = roms;
     }
     for root in &mut config.library.roms {
         *root = tilde(root).into_owned();
@@ -124,9 +148,43 @@ pub fn load() -> Result<Config, String> {
         .as_ref()
         .map(|dir| tilde(dir).into_owned());
 
+    resolve_roms(&mut config);
+
     Ok(config)
 }
 
+#[cfg(target_os = "ios")]
+fn rom_arguments() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+#[cfg(not(target_os = "ios"))]
+fn rom_arguments() -> Vec<PathBuf> {
+    Args::parse().roms
+}
+
+#[cfg(target_os = "ios")]
+fn resolve_roms(config: &mut Config) {
+    let documents = crate::ios::documents_dir();
+    for root in &mut config.library.roms {
+        if root.is_relative() {
+            *root = documents.join(&root);
+        }
+        if let Err(err) = std::fs::create_dir_all(&root) {
+            bevy::log::warn!("failed to create {}: {err}", root.display());
+        }
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn resolve_roms(_config: &mut Config) {}
+
+#[cfg(target_os = "ios")]
+fn config_path() -> Option<PathBuf> {
+    Some(crate::ios::documents_dir().join(CONFIG_FILE))
+}
+
+#[cfg(not(target_os = "ios"))]
 fn config_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     Some(exe.with_file_name(CONFIG_FILE))

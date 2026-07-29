@@ -13,11 +13,32 @@ use crate::scene_textures::{BoxTextures, CartLabelTexture};
 use crate::shelf::{RowRoot, spawn_box};
 use crate::state::{LauncherMode, LauncherState};
 
+#[cfg(target_os = "ios")]
+const EMPTY_LIBRARY: &str = "Copy .sfc or .smc files into the Sly folder in Files";
+#[cfg(not(target_os = "ios"))]
+const EMPTY_LIBRARY: &str = "No valid .sfc or .smc files found";
+
 #[derive(Resource, Default)]
 pub struct Library {
     pub entries: Vec<LibraryEntry>,
     pub art: Vec<CartArt>,
     pub box_entities: Vec<Entity>,
+}
+
+impl Library {
+    pub fn first_with_letter(&self, letter: usize) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|entry| title_alphabet_index(&entry.title) == letter)
+    }
+}
+
+pub fn title_alphabet_index(title: &str) -> usize {
+    title
+        .chars()
+        .find(|character| character.is_ascii_alphabetic())
+        .map(|character| (character.to_ascii_uppercase() as u8 - b'A') as usize)
+        .unwrap_or(0)
 }
 
 #[derive(Clone, Default)]
@@ -83,7 +104,7 @@ pub fn poll_discovery(
                 spawn_detail_cart(&mut commands, 0, library, &models);
                 state.status = format!("{} games indexed", library.entries.len());
             }
-            Ok(_) => state.status = "No valid .sfc or .smc files found".into(),
+            Ok(_) => state.status = EMPTY_LIBRARY.into(),
             Err(err) => state.status = err,
         }
     }

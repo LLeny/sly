@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
+use bevy::window::AppLifecycle;
 
 use core_model::Core;
 
@@ -68,6 +69,47 @@ pub fn flush_save_ram(session: Res<GameSession>, time: Res<Time>, mut due: Local
 }
 
 pub struct AudioState(pub Option<audio::AudioPlayer>);
+
+impl AudioState {
+    pub fn open(&mut self, core: &dyn Core) {
+        self.0 = core
+            .audio_spec()
+            .and_then(|spec| audio::AudioPlayer::new(spec).ok());
+    }
+
+    pub fn close(&mut self) {
+        self.0 = None;
+    }
+}
+
+pub fn handle_lifecycle(
+    mut lifecycle: MessageReader<AppLifecycle>,
+    session: Option<Res<GameSession>>,
+    mut audio_state: NonSendMut<AudioState>,
+) {
+    for event in lifecycle.read() {
+        match event {
+            AppLifecycle::WillSuspend | AppLifecycle::Suspended => {
+                if let Some(session) = session.as_deref() {
+                    session.persist_save_ram();
+                }
+                audio_state.close();
+            }
+            AppLifecycle::Running => {
+                if let Some(session) = session.as_deref()
+                    && audio_state.0.is_none()
+                {
+                    audio_state.open(&*session.core);
+                }
+            }
+            AppLifecycle::Idle | AppLifecycle::WillResume => {}
+        }
+    }
+}
+
+pub fn running(paused: Res<crate::state::Paused>) -> bool {
+    !paused.0
+}
 
 pub fn cap_core_backlog(mut fixed: ResMut<Time<Fixed>>) {
     let cap = fixed.timestep() * MAX_CATCH_UP_FRAMES;
@@ -138,7 +180,7 @@ pub fn exit_playing(
     mut audio_state: NonSendMut<AudioState>,
 ) {
     commands.remove_resource::<GameSession>();
-    audio_state.0 = None;
+    audio_state.close();
 
     timers.launch_elapsed = 0.0;
     timers.playing_elapsed = 0.0;
@@ -154,14 +196,15 @@ pub fn resize_game_frame(
     ui_scale: Res<UiScale>,
     mut frame: Single<&mut Node, With<GameFrame>>,
 ) {
-    let scale = (window.width() / FRAME_WIDTH as f32)
-        .min(window.height() / FRAME_HEIGHT as f32)
+    let density = window.scale_factor();
+    let scale = (window.width() * density / FRAME_WIDTH as f32)
+        .min(window.height() * density / FRAME_HEIGHT as f32)
         .max(1.0)
         .floor();
 
-    let width = px(FRAME_WIDTH as f32 * scale / ui_scale.0);
+    let width = px(FRAME_WIDTH as f32 * scale / density / ui_scale.0);
     if frame.width != width {
         frame.width = width;
-        frame.height = px(FRAME_HEIGHT as f32 * scale / ui_scale.0);
+        frame.height = px(FRAME_HEIGHT as f32 * scale / density / ui_scale.0);
     }
 }

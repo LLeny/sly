@@ -17,3 +17,13 @@ storage = { path = "../../crates/storage" }
 toml = "1.1.4"
 walkdir = "2.5.0"
 shellexpand = { version = "3.1.2", features = ["path"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+dirs = "6.0.0"
+objc2 = "0.6.4"
+raw-window-handle = "0.6.2"
+objc2-avf-audio = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "AVAudioSession",
+    "AVAudioSessionTypes",
+] }

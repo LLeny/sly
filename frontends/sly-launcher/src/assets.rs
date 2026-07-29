@@ -43,6 +43,24 @@ pub struct PromptIcons {
     pub key_tab: Handle<Image>,
     pub key_enter: Handle<Image>,
     pub key_escape: Handle<Image>,
+    pub swipe_horizontal: Handle<Image>,
+    pub swipe_vertical: Handle<Image>,
+    pub tap: Handle<Image>,
+}
+
+#[derive(Resource)]
+pub struct Icons {
+    pub calendar: Handle<Image>,
+    pub developer: Handle<Image>,
+    pub publisher: Handle<Image>,
+    pub genre: Handle<Image>,
+    pub players: Handle<Image>,
+    pub play: Handle<Image>,
+    pub flip: Handle<Image>,
+    pub view: Handle<Image>,
+    pub save: Handle<Image>,
+    pub load: Handle<Image>,
+    pub library: Handle<Image>,
 }
 
 #[derive(Resource)]
@@ -120,6 +138,62 @@ fn embed_assets(registry: &EmbeddedAssetRegistry) {
             include_bytes!("../../../vendor/input-prompts/keyboard_escape.png"),
         ),
         (
+            "prompts/touch_swipe_horizontal.png",
+            include_bytes!("../../../vendor/input-prompts/touch_swipe_horizontal.png"),
+        ),
+        (
+            "prompts/touch_swipe_vertical.png",
+            include_bytes!("../../../vendor/input-prompts/touch_swipe_vertical.png"),
+        ),
+        (
+            "prompts/touch_tap.png",
+            include_bytes!("../../../vendor/input-prompts/touch_tap.png"),
+        ),
+        (
+            "icons/calendar.png",
+            include_bytes!("../../../vendor/icons/lucide/calendar.png"),
+        ),
+        (
+            "icons/user.png",
+            include_bytes!("../../../vendor/icons/lucide/user.png"),
+        ),
+        (
+            "icons/building-2.png",
+            include_bytes!("../../../vendor/icons/lucide/building-2.png"),
+        ),
+        (
+            "icons/tag.png",
+            include_bytes!("../../../vendor/icons/lucide/tag.png"),
+        ),
+        (
+            "icons/users.png",
+            include_bytes!("../../../vendor/icons/lucide/users.png"),
+        ),
+        (
+            "icons/play.png",
+            include_bytes!("../../../vendor/icons/lucide/play.png"),
+        ),
+        (
+            "icons/rotate-cw.png",
+            include_bytes!("../../../vendor/icons/lucide/rotate-cw.png"),
+        ),
+        (
+            "icons/eye.png",
+            include_bytes!("../../../vendor/icons/lucide/eye.png"),
+        ),
+        (
+            "icons/save.png",
+            include_bytes!("../../../vendor/icons/lucide/save.png"),
+        ),
+        (
+            "icons/history.png",
+            include_bytes!("../../../vendor/icons/lucide/history.png"),
+        ),
+        (
+            "icons/list.png",
+            include_bytes!("../../../vendor/icons/lucide/list.png"),
+        ),
+        (
             "fonts/IBMPlexSans-Regular.ttf",
             include_bytes!("../../../vendor/fonts/ibm-plex/IBMPlexSans-Regular.ttf"),
         ),
@@ -174,6 +248,23 @@ pub fn setup_assets(
         key_tab: assets.load("embedded://prompts/keyboard_tab.png"),
         key_enter: assets.load("embedded://prompts/keyboard_enter.png"),
         key_escape: assets.load("embedded://prompts/keyboard_escape.png"),
+        swipe_horizontal: assets.load("embedded://prompts/touch_swipe_horizontal.png"),
+        swipe_vertical: assets.load("embedded://prompts/touch_swipe_vertical.png"),
+        tap: assets.load("embedded://prompts/touch_tap.png"),
+    });
+
+    commands.insert_resource(Icons {
+        calendar: assets.load("embedded://icons/calendar.png"),
+        developer: assets.load("embedded://icons/user.png"),
+        publisher: assets.load("embedded://icons/building-2.png"),
+        genre: assets.load("embedded://icons/tag.png"),
+        players: assets.load("embedded://icons/users.png"),
+        play: assets.load("embedded://icons/play.png"),
+        flip: assets.load("embedded://icons/rotate-cw.png"),
+        view: assets.load("embedded://icons/eye.png"),
+        save: assets.load("embedded://icons/save.png"),
+        load: assets.load("embedded://icons/history.png"),
+        library: assets.load("embedded://icons/list.png"),
     });
 
     commands.insert_resource(ShaderLibrary {

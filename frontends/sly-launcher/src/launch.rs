@@ -1,20 +1,25 @@
 use bevy::camera::primitives::Aabb;
 use bevy::prelude::*;
-use bevy::tasks::Task;
 use bevy::tasks::futures::check_ready;
+use bevy::tasks::{IoTaskPool, Task};
 use core_model::Core;
 use snes::Snes;
 
+use crate::assets::UiSounds;
 use crate::camera::DetailCamera;
 use crate::cartridge::{CartMotion, DetailCart};
 use crate::config::Config;
+use crate::discovery::Library;
 use crate::game::{AudioState, GameSession};
+use crate::library;
 use crate::materials::IrisBlackoutMaterial;
 use crate::scene_textures::CartridgeLabelSurface;
-use crate::state::{LauncherMode, LauncherState, ModeTimers, ViewMode};
+use crate::state::{LauncherMode, LauncherState, ModeTimers, Paused, ViewMode};
+use crate::touch::TouchControls;
 use crate::ui::{
-    DetailFacts, DetailViewport, GameUi, LauncherUi, VIEWPORT_Z_IDLE, detail_camera_transform,
-    show_game_screen, style_viewport_idle, viewport_idle_rect,
+    DetailFacts, DetailViewport, GameUi, LauncherUi, SafeArea, VIEWPORT_Z_IDLE,
+    detail_camera_transform, display, show_game_screen, style_viewport_idle, ui_sound,
+    viewport_idle_rect,
 };
 
 pub const LAUNCH_CLOSEUP_DURATION: f32 = 0.64;
@@ -37,6 +42,53 @@ pub struct Blackout;
 
 #[derive(Component)]
 pub struct GameLoadTask(pub Task<Result<(Snes, storage::GameId), String>>);
+
+pub fn begin_launch(
+    commands: &mut Commands,
+    state: &mut LauncherState,
+    timers: &mut ModeTimers,
+    next_mode: &mut NextState<LauncherMode>,
+    library: &Library,
+    carts: &mut Query<&mut DetailCart>,
+    ui_sounds: &UiSounds,
+) {
+    let Some(entry) = library.entries.get(state.selected) else {
+        return;
+    };
+
+    let path = entry.path.clone();
+    let game = storage::GameId::new(core_model::System::Snes, entry.sha1.clone());
+    let task = IoTaskPool::get()
+        .spawn(async move { library::load_cartridge(&path).map(|cart| (Snes::new(cart), game)) });
+    commands.spawn(GameLoadTask(task));
+    commands.spawn(ui_sound(ui_sounds.game_start.clone()));
+
+    next_mode.set(LauncherMode::Launching);
+    timers.launch_elapsed = 0.0;
+    timers.return_active = false;
+    state.status = "Booting selected cartridge".into();
+
+    for mut cart in carts {
+        if cart.index == state.selected {
+            cart.motion = CartMotion::Launching;
+        }
+    }
+}
+
+pub fn return_to_library(
+    session: Option<&GameSession>,
+    next_mode: &mut NextState<LauncherMode>,
+    timers: &mut ModeTimers,
+) {
+    if let Some(session) = session {
+        session.persist_save_ram();
+    }
+
+    next_mode.set(LauncherMode::Browsing);
+
+    timers.return_elapsed = 0.0;
+    timers.return_active = true;
+}
 
 pub fn poll_game_load(
     mut commands: Commands,
@@ -92,9 +144,7 @@ pub fn advance_launch(
         .frame_interval()
         .expect("SNES core reports a region-correct frame interval");
     fixed_time.set_timestep(frame_interval);
-    audio_state.0 = core
-        .audio_spec()
-        .and_then(|spec| audio::AudioPlayer::new(spec).ok());
+    audio_state.open(&core);
     commands.insert_resource(GameSession {
         core: Box::new(core),
         session,
@@ -108,20 +158,24 @@ pub fn advance_launch(
 pub fn enter_playing(
     mut state: ResMut<LauncherState>,
     mut timers: ResMut<ModeTimers>,
+    mut paused: ResMut<Paused>,
     mut launcher_ui: Query<&mut Node, (With<LauncherUi>, Without<GameUi>)>,
     mut game_ui: Query<&mut Node, (With<GameUi>, Without<LauncherUi>)>,
 ) {
     timers.playing_elapsed = 0.0;
+    paused.0 = false;
     state.status = "Press Escape to return to library".into();
     show_game_screen(true, &mut launcher_ui, &mut game_ui);
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn update_launch_viewport(
     state: Res<LauncherState>,
+    controls: Res<TouchControls>,
     timers: Res<ModeTimers>,
     window: Single<&Window>,
     ui_scale: Res<UiScale>,
+    safe_area: Res<SafeArea>,
     mut viewport: Single<
         (&mut Node, &mut GlobalZIndex),
         (With<DetailViewport>, Without<DetailFacts>),
@@ -131,7 +185,12 @@ pub fn update_launch_viewport(
 ) {
     let progress = launch_viewport_progress(timers.launch_elapsed);
     let window_size = Vec2::new(window.width(), window.height()) / ui_scale.0;
-    let (origin, idle_size) = viewport_idle_rect(state.view_mode, window_size);
+
+    let insets = safe_area.0;
+    let inset_start = insets.xy();
+    let safe_size = window_size - inset_start - insets.zw();
+    let (origin, idle_size) = viewport_idle_rect(state.view_mode, *controls, safe_size);
+    let origin = origin + inset_start;
 
     viewport.0.left = px(-origin.x * progress);
     viewport.0.top = px(-origin.y * progress);
@@ -150,6 +209,7 @@ pub fn update_launch_viewport(
 #[allow(clippy::type_complexity)]
 pub fn restore_detail_viewport(
     state: Res<LauncherState>,
+    controls: Res<TouchControls>,
     mut viewport: Single<
         (&mut Node, &mut GlobalZIndex),
         (With<DetailViewport>, Without<DetailFacts>),
@@ -157,7 +217,7 @@ pub fn restore_detail_viewport(
     mut facts: Single<&mut Node, (With<DetailFacts>, Without<DetailViewport>)>,
     mut camera: Single<&mut Transform, With<DetailCamera>>,
 ) {
-    style_viewport_idle(state.view_mode, &mut viewport.0);
+    style_viewport_idle(state.view_mode, *controls, &mut viewport.0);
     viewport.1.0 = VIEWPORT_Z_IDLE;
     facts.display = Display::Flex;
     **camera = detail_camera_transform(state.view_mode);
@@ -181,7 +241,7 @@ pub fn update_blackout(
     mode: Res<State<LauncherMode>>,
     state: Res<LauncherState>,
     mut timers: ResMut<ModeTimers>,
-    blackout: Single<&MaterialNode<IrisBlackoutMaterial>, With<Blackout>>,
+    mut blackout: Single<(&MaterialNode<IrisBlackoutMaterial>, &mut Node), With<Blackout>>,
     mut materials: ResMut<Assets<IrisBlackoutMaterial>>,
     window: Single<&Window>,
     ui_scale: Res<UiScale>,
@@ -207,8 +267,9 @@ pub fn update_blackout(
         _ => (0.0, 1.0),
     };
 
+    let (material_node, blackout_node) = &mut *blackout;
     let mut center = materials
-        .get(&**blackout)
+        .get(&**material_node)
         .map(|material| Vec2::new(material.parameters.y, material.parameters.z))
         .unwrap_or(IRIS_DEFAULT_CENTER);
 
@@ -244,9 +305,14 @@ pub fn update_blackout(
     }
 
     let parameters = Vec4::new(iris, center.x, center.y, opacity);
-    if let Some(mut material) = materials.get_mut(&**blackout)
+    if let Some(mut material) = materials.get_mut(&**material_node)
         && material.parameters != parameters
     {
         material.parameters = parameters;
+    }
+
+    let wanted_display = display(iris > 0.0 && opacity > 0.0);
+    if blackout_node.display != wanted_display {
+        blackout_node.display = wanted_display;
     }
 }

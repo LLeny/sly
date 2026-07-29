@@ -7,12 +7,15 @@ mod discovery;
 mod game;
 mod gamedb;
 mod input;
+#[cfg(target_os = "ios")]
+mod ios;
 mod launch;
 mod library;
 mod materials;
 mod scene_textures;
 mod shelf;
 mod state;
+mod touch;
 mod ui;
 
 use bevy::app::{RunFixedMainLoop, RunFixedMainLoopSystems};
@@ -26,11 +29,43 @@ use camera::{
 use game::AudioState;
 use materials::{
     BackgroundUiMaterial, CardboardMaterial, FrostedBubbleMaterial, IrisBlackoutMaterial,
-    PATTERN_NEUTRAL_TINT, contour_parameters, frosted_bubble_parameters, pattern_tint_uniform,
+    PATTERN_NEUTRAL_TINT, frosted_backdrop_parameters, frosted_bubble_parameters,
+    pattern_tint_uniform,
 };
-use state::{LauncherMode, LauncherState, ModeTimers};
+use state::{LauncherMode, LauncherState, ModeTimers, Paused};
+use touch::TouchControls;
+
+fn report_frame_time(
+    diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
+    time: Res<Time>,
+    mut due: Local<f32>,
+) {
+    use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
+
+    *due -= time.delta_secs();
+    if *due > 0.0 {
+        return;
+    }
+    *due = 1.0;
+
+    let value = |path| {
+        diagnostics
+            .get(path)
+            .and_then(|diagnostic| diagnostic.smoothed())
+            .unwrap_or_default()
+    };
+
+    println!(
+        "fps {:.1}  frame {:.2} ms",
+        value(&FrameTimeDiagnosticsPlugin::FPS),
+        value(&FrameTimeDiagnosticsPlugin::FRAME_TIME),
+    );
+}
 
 fn main() {
+    #[cfg(target_os = "ios")]
+    ios::start_audio_session();
+
     let config = match config::load() {
         Ok(config) => config,
         Err(err) => {
@@ -39,62 +74,70 @@ fn main() {
         }
     };
     let primary_window = config.window.window();
+    let controls = TouchControls(config.touch_controls());
+    let diagnostics = config.debug.diagnostics;
 
-    App::new()
-        .add_plugins(
-            DefaultPlugins
-                .set(LogPlugin {
-                    filter: "info".into(),
-                    ..default()
-                })
-                .set(WindowPlugin {
-                    primary_window: Some(primary_window),
-                    ..default()
-                }),
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(LogPlugin {
+                filter: "info".into(),
+                ..default()
+            })
+            .set(WindowPlugin {
+                primary_window: Some(primary_window),
+                ..default()
+            }),
+    )
+    .insert_resource(config)
+    .insert_resource(controls)
+    .add_plugins(MaterialPlugin::<CardboardMaterial>::default())
+    .add_plugins(UiMaterialPlugin::<BackgroundUiMaterial>::default())
+    .add_plugins(UiMaterialPlugin::<FrostedBubbleMaterial>::default())
+    .add_plugins(UiMaterialPlugin::<IrisBlackoutMaterial>::default())
+    .insert_resource(ClearColor(ui::BG_ROOT))
+    .init_state::<LauncherMode>()
+    .init_resource::<LauncherState>()
+    .init_resource::<ModeTimers>()
+    .init_resource::<discovery::Library>()
+    .init_resource::<shelf::RevealBurst>()
+    .init_resource::<launch::PendingGame>()
+    .init_resource::<Paused>()
+    .init_resource::<ui::SafeArea>()
+    .insert_non_send(AudioState(None))
+    .add_systems(
+        Startup,
+        (
+            assets::setup_assets,
+            setup_scene,
+            discovery::start_discovery,
         )
-        .insert_resource(config)
-        .add_plugins(MaterialPlugin::<CardboardMaterial>::default())
-        .add_plugins(UiMaterialPlugin::<BackgroundUiMaterial>::default())
-        .add_plugins(UiMaterialPlugin::<FrostedBubbleMaterial>::default())
-        .add_plugins(UiMaterialPlugin::<IrisBlackoutMaterial>::default())
-        .insert_resource(ClearColor(ui::BG_ROOT))
-        .init_state::<LauncherMode>()
-        .init_resource::<LauncherState>()
-        .init_resource::<ModeTimers>()
-        .init_resource::<discovery::Library>()
-        .init_resource::<shelf::RevealBurst>()
-        .init_resource::<launch::PendingGame>()
-        .insert_non_send(AudioState(None))
-        .add_systems(
-            Startup,
-            (
-                assets::setup_assets,
-                setup_scene,
-                discovery::start_discovery,
-            )
-                .chain(),
-        )
-        .add_observer(scene_textures::on_scene_ready)
-        .add_systems(OnEnter(LauncherMode::Playing), launch::enter_playing)
-        .add_systems(OnExit(LauncherMode::Playing), game::exit_playing)
-        .add_systems(
-            OnExit(LauncherMode::Launching),
-            launch::restore_detail_viewport,
-        )
-        .add_systems(
-            RunFixedMainLoop,
-            game::cap_core_backlog
-                .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
-                .run_if(in_state(LauncherMode::Playing)),
-        )
-        .add_systems(
-            FixedUpdate,
-            game::step_core.run_if(
-                in_state(LauncherMode::Playing).and_then(resource_exists::<game::GameSession>),
-            ),
-        )
-        .add_systems(
-            Update,
+            .chain(),
+    )
+    .add_observer(scene_textures::on_scene_ready)
+    .add_systems(OnEnter(LauncherMode::Playing), launch::enter_playing)
+    .add_systems(OnExit(LauncherMode::Playing), game::exit_playing)
+    .add_systems(
+        OnExit(LauncherMode::Launching),
+        launch::restore_detail_viewport,
+    )
+    .add_systems(
+        RunFixedMainLoop,
+        game::cap_core_backlog
+            .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
+            .run_if(in_state(LauncherMode::Playing)),
+    )
+    .add_systems(
+        FixedUpdate,
+        game::step_core.run_if(
+            in_state(LauncherMode::Playing)
+                .and_then(resource_exists::<game::GameSession>)
+                .and_then(game::running),
+        ),
+    )
+    .add_systems(
+        Update,
+        (
             (
                 ui::update_ui_scale,
                 discovery::poll_discovery,
@@ -102,9 +145,21 @@ fn main() {
                 scene_textures::refresh_scene_materials,
                 input::handle_keyboard,
                 input::game_input.run_if(in_state(LauncherMode::Playing)),
+                touch::update_swipe_hint.run_if(touch::touch_enabled),
+                touch::update_pause_menu.run_if(touch::touch_enabled),
+                touch::animate_pad
+                    .run_if(in_state(LauncherMode::Playing).and_then(touch::touch_enabled)),
+                touch::browse_touch
+                    .run_if(in_state(LauncherMode::Browsing).and_then(touch::touch_enabled)),
+                touch::game_touch
+                    .run_if(in_state(LauncherMode::Playing).and_then(touch::touch_enabled)),
+                game::handle_lifecycle,
                 ui::apply_view_mode,
                 shelf::animate_library,
                 cartridge::animate_carts,
+            )
+                .chain(),
+            (
                 materials::animate_background_pattern,
                 ui::tint_pills,
                 launch::poll_game_load,
@@ -115,22 +170,36 @@ fn main() {
                     in_state(LauncherMode::Playing).and_then(resource_exists::<game::GameSession>),
                 ),
                 ui::update_ui,
+                ui::fit_alphabet_rail,
                 ui::update_alphabet_highlight,
                 game::resize_game_frame,
                 launch::update_blackout,
             )
                 .chain(),
         )
-        .run();
+            .chain(),
+    );
+
+    if diagnostics {
+        app.add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
+            .add_systems(Update, report_frame_time);
+    }
+
+    #[cfg(target_os = "ios")]
+    app.add_systems(Update, ui::update_safe_area);
+
+    app.run();
 }
 
 #[allow(clippy::too_many_arguments)]
 fn setup_scene(
     mut commands: Commands,
     fonts: Res<assets::Fonts>,
+    icons: Res<assets::Icons>,
     prompts: Res<assets::PromptIcons>,
     game_texture: Res<assets::GameTexture>,
     background_pattern: Res<materials::BackgroundPattern>,
+    controls: Res<TouchControls>,
     mut images: ResMut<Assets<Image>>,
     mut frosted_materials: ResMut<Assets<FrostedBubbleMaterial>>,
     mut iris_materials: ResMut<Assets<IrisBlackoutMaterial>>,
@@ -141,6 +210,7 @@ fn setup_scene(
     let (library_camera, library_view) = spawn_view_camera(
         &mut commands,
         &mut images,
+        *controls,
         ViewCameraSpec {
             layer: SHELF_LAYER,
             transform: Transform::from_xyz(0.0, 0.025, 0.68).looking_at(shelf_focus, Vec3::Y),
@@ -152,6 +222,7 @@ fn setup_scene(
     let (detail_camera, _) = spawn_view_camera(
         &mut commands,
         &mut images,
+        *controls,
         ViewCameraSpec {
             layer: CART_LAYER,
             transform: Transform::from_xyz(0.0, 0.035, 0.50).looking_at(cart_focus, Vec3::Y),
@@ -164,7 +235,7 @@ fn setup_scene(
     let frosted_bubble = frosted_materials.add(FrostedBubbleMaterial {
         parameters: frosted_bubble_parameters(1.0),
         backdrop_tint: pattern_tint_uniform(PATTERN_NEUTRAL_TINT),
-        backdrop_parameters: contour_parameters(),
+        backdrop_parameters: frosted_backdrop_parameters(*controls),
         shelf_view: library_view,
     });
     let iris_blackout = iris_materials.add(IrisBlackoutMaterial {
@@ -176,17 +247,25 @@ fn setup_scene(
         ),
     });
 
-    camera::spawn_lights(&mut commands);
+    camera::spawn_lights(&mut commands, *controls);
     shelf::spawn_row(&mut commands);
 
     commands.spawn_scene(ui::launcher_ui(
         &fonts,
+        &icons,
         &prompts,
         &background_pattern,
         library_camera,
         detail_camera,
         frosted_bubble,
+        *controls,
     ));
-    commands.spawn_scene(ui::game_ui(&game_texture, &fonts, &prompts));
+    commands.spawn_scene(ui::game_ui(
+        &game_texture,
+        &fonts,
+        &icons,
+        &prompts,
+        *controls,
+    ));
     commands.spawn_scene(ui::blackout_ui(iris_blackout));
 }

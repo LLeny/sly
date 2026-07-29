@@ -21,7 +21,7 @@ fn generated_background(pixel: vec2<f32>) -> vec3<f32> {
     let scale = max(backdrop_parameters.y, 1.0);
     let contour = contour_field(pixel, time, scale);
     let distance = abs(contour - round(contour));
-    // A broad transition approximates the contour layer after a soft blur.
+
     let line = 1.0 - smoothstep(0.025, 0.30, distance);
     let alpha = 0.006 + line * 0.34;
     let paper = vec3<f32>(0.902, 0.906, 0.916);
@@ -36,31 +36,57 @@ fn shelf_sample(uv: vec2<f32>) -> vec4<f32> {
     );
 }
 
-fn blurred_shelf(uv: vec2<f32>, texel: vec2<f32>, radius: f32) -> vec4<f32> {
-    const weights = array<f32, 13>(
-        0.018544,
-        0.034167,
-        0.056332,
-        0.083109,
-        0.109719,
-        0.129618,
-        0.137023,
-        0.129618,
-        0.109719,
-        0.083109,
-        0.056332,
-        0.034167,
-        0.018544,
-    );
-    let spacing = texel * vec2<f32>(radius * 1.25, radius) / 6.0;
+const BLUR_WEIGHTS_5 = array<f32, 13>(
+    0.054489,
+    0.244201,
+    0.402620,
+    0.244201,
+    0.054489,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+);
+
+const BLUR_WEIGHTS_13 = array<f32, 13>(
+    0.018544,
+    0.034167,
+    0.056332,
+    0.083109,
+    0.109719,
+    0.129618,
+    0.137023,
+    0.129618,
+    0.109719,
+    0.083109,
+    0.056332,
+    0.034167,
+    0.018544,
+);
+
+fn blurred_shelf(uv: vec2<f32>, texel: vec2<f32>, radius: f32, taps: i32) -> vec4<f32> {
+    let half = f32(taps - 1) * 0.5;
+    let spacing = texel * vec2<f32>(radius * 1.25, radius) / half;
+    let compact = taps == 5;
+
     var color = vec4<f32>(0.0);
-    for (var y = 0; y < 13; y += 1) {
-        for (var x = 0; x < 13; x += 1) {
-            let offset = (vec2<f32>(f32(x), f32(y)) - 6.0) * spacing;
-            color += shelf_sample(uv + offset) * weights[x] * weights[y];
+    var total = 0.0;
+    for (var y = 0; y < taps; y += 1) {
+        let dy = f32(y) - half;
+        let weight_y = select(BLUR_WEIGHTS_13[y], BLUR_WEIGHTS_5[y], compact);
+        for (var x = 0; x < taps; x += 1) {
+            let dx = f32(x) - half;
+            let weight_x = select(BLUR_WEIGHTS_13[x], BLUR_WEIGHTS_5[x], compact);
+            let weight = weight_y * weight_x;
+            color += shelf_sample(uv + vec2<f32>(dx, dy) * spacing) * weight;
+            total += weight;
         }
     }
-    return color;
+    return color / total;
 }
 
 @fragment
@@ -76,7 +102,12 @@ fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
 
     let dimensions = vec2<f32>(textureDimensions(shelf_view));
     let screen_uv = in.position.xy / dimensions;
-    let blurred = blurred_shelf(screen_uv, 1.0 / dimensions, parameters.x);
+    let blurred = blurred_shelf(
+        screen_uv,
+        1.0 / dimensions,
+        parameters.x,
+        i32(backdrop_parameters.z),
+    );
     let background = generated_background(in.position.xy);
     let scene = background * (1.0 - blurred.a) + blurred.rgb;
     var color = mix(scene, vec3<f32>(0.936, 0.945, 0.958), parameters.y);

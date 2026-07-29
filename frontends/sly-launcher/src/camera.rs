@@ -4,6 +4,8 @@ use bevy::camera::{Exposure, RenderTarget};
 use bevy::prelude::*;
 use bevy::render::render_resource::{TextureDimension, TextureFormat, TextureUsages};
 
+use crate::touch::TouchControls;
+
 pub const SHELF_EXPOSURE_EV100: f32 = 11.2;
 pub const CART_EXPOSURE_EV100: f32 = 11.0;
 
@@ -20,9 +22,14 @@ pub struct ViewCameraSpec {
     pub clear: Color,
 }
 
+fn samples(controls: TouchControls) -> Msaa {
+    if controls.0 { Msaa::Off } else { Msaa::Sample4 }
+}
+
 pub fn spawn_view_camera(
     commands: &mut Commands,
     images: &mut Assets<Image>,
+    controls: TouchControls,
     spec: ViewCameraSpec,
 ) -> (Entity, Handle<Image>) {
     let mut image = Image::new_uninit(
@@ -38,7 +45,7 @@ pub fn spawn_view_camera(
     let entity = commands
         .spawn((
             Camera3d::default(),
-            Msaa::Sample4,
+            samples(controls),
             Camera {
                 order: -(spec.layer as isize),
                 clear_color: spec.clear.into(),
@@ -53,7 +60,8 @@ pub fn spawn_view_camera(
     (entity, target)
 }
 
-pub fn spawn_lights(commands: &mut Commands) {
+pub fn spawn_lights(commands: &mut Commands, controls: TouchControls) {
+    let point_shadows = !controls.0;
     const LIGHT_RIGS: [(usize, f32, f32); 2] = [
         (SHELF_LAYER, 44_000.0, 1_750.0),
         (CART_LAYER, 32_000.0, 1_200.0),
@@ -64,7 +72,7 @@ pub fn spawn_lights(commands: &mut Commands) {
             PointLight {
                 intensity: point_intensity,
                 range: 2.0,
-                shadow_maps_enabled: true,
+                shadow_maps_enabled: point_shadows,
                 ..default()
             },
             Transform::from_xyz(-0.26, 0.38, 0.46),

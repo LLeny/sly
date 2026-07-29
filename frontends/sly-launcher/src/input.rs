@@ -1,15 +1,12 @@
 use bevy::prelude::*;
-use bevy::tasks::IoTaskPool;
 
 use core_model::Button;
-use snes::Snes;
 
 use crate::assets::{Models, UiSounds};
-use crate::cartridge::{CartMotion, DetailCart, swap_detail_cart};
+use crate::cartridge::{DetailCart, swap_detail_cart};
 use crate::discovery::Library;
 use crate::game::GameSession;
-use crate::launch::GameLoadTask;
-use crate::library;
+use crate::launch;
 use crate::state::{LauncherMode, LauncherState, ModeTimers};
 use crate::ui::ui_sound;
 
@@ -51,6 +48,48 @@ pub struct ScrollRepeat {
     timer: f32,
 }
 
+pub fn select(
+    index: usize,
+    commands: &mut Commands,
+    state: &mut LauncherState,
+    library: &Library,
+    carts: &mut Query<&mut DetailCart>,
+    models: &Models,
+    ui_sounds: &UiSounds,
+) {
+    if index >= library.entries.len() || index == state.selected {
+        return;
+    }
+
+    state.selected = index;
+    state.box_flipped = false;
+
+    swap_detail_cart(commands, carts, index, library, models);
+    commands.spawn(ui_sound(ui_sounds.scroll.clone()));
+}
+
+pub fn step_selection(
+    delta: i8,
+    commands: &mut Commands,
+    state: &mut LauncherState,
+    library: &Library,
+    carts: &mut Query<&mut DetailCart>,
+    models: &Models,
+    ui_sounds: &UiSounds,
+) {
+    if library.entries.is_empty() {
+        return;
+    }
+
+    let target = if delta > 0 {
+        (state.selected + 1).min(library.entries.len() - 1)
+    } else {
+        state.selected.saturating_sub(1)
+    };
+
+    select(target, commands, state, library, carts, models, ui_sounds);
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn handle_keyboard(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -82,9 +121,20 @@ pub fn handle_keyboard(
                 return;
             }
 
+            let (forward, back) = if state.view_mode.is_vertical() {
+                (
+                    [KeyCode::ArrowDown, KeyCode::KeyS],
+                    [KeyCode::ArrowUp, KeyCode::KeyW],
+                )
+            } else {
+                (
+                    [KeyCode::ArrowRight, KeyCode::KeyD],
+                    [KeyCode::ArrowLeft, KeyCode::KeyA],
+                )
+            };
             let axis = |pressed: &dyn Fn(KeyCode) -> bool| {
-                i8::from(pressed(KeyCode::ArrowRight) || pressed(KeyCode::KeyD))
-                    - i8::from(pressed(KeyCode::ArrowLeft) || pressed(KeyCode::KeyA))
+                i8::from(forward.iter().any(|&key| pressed(key)))
+                    - i8::from(back.iter().any(|&key| pressed(key)))
             };
             let just = axis(&|k| keyboard.just_pressed(k));
             let held = axis(&|k| keyboard.pressed(k));
@@ -105,52 +155,31 @@ pub fn handle_keyboard(
             };
 
             if delta != 0 {
-                let target = if delta > 0 {
-                    (state.selected + 1).min(library.entries.len() - 1)
-                } else {
-                    state.selected.saturating_sub(1)
-                };
-
-                if target != state.selected {
-                    state.selected = target;
-                    state.box_flipped = false;
-
-                    swap_detail_cart(&mut commands, &mut carts, target, &library, &models);
-                    commands.spawn(ui_sound(ui_sounds.scroll.clone()));
-                }
+                step_selection(
+                    delta,
+                    &mut commands,
+                    &mut state,
+                    &library,
+                    &mut carts,
+                    &models,
+                    &ui_sounds,
+                );
             }
 
             if keyboard.just_pressed(KeyCode::Enter) {
-                let entry = &library.entries[state.selected];
-                let path = entry.path.clone();
-                let game = storage::GameId::new(core_model::System::Snes, entry.sha1.clone());
-                let task = IoTaskPool::get().spawn(async move {
-                    library::load_cartridge(&path).map(|cart| (Snes::new(cart), game))
-                });
-                commands.spawn(GameLoadTask(task));
-                commands.spawn(ui_sound(ui_sounds.game_start.clone()));
-
-                next_mode.set(LauncherMode::Launching);
-                timers.launch_elapsed = 0.0;
-                timers.return_active = false;
-                state.status = "Booting selected cartridge".into();
-
-                for mut cart in &mut carts {
-                    if cart.index == state.selected {
-                        cart.motion = CartMotion::Launching;
-                    }
-                }
+                launch::begin_launch(
+                    &mut commands,
+                    &mut state,
+                    &mut timers,
+                    &mut next_mode,
+                    &library,
+                    &mut carts,
+                    &ui_sounds,
+                );
             }
         }
         LauncherMode::Playing if keyboard.just_pressed(KeyCode::Escape) => {
-            if let Some(session) = session.as_deref() {
-                session.persist_save_ram();
-            }
-
-            next_mode.set(LauncherMode::Browsing);
-
-            timers.return_elapsed = 0.0;
-            timers.return_active = true;
+            launch::return_to_library(session.as_deref(), &mut next_mode, &mut timers);
         }
         LauncherMode::Playing => {
             if let Some(session) = session.as_deref_mut() {
