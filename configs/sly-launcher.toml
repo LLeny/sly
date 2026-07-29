@@ -1,0 +1,10 @@
+[library]
+roms = ["roms"]
+
+[storage]
+#data_dir = "~/.local/share/sly"
+
+[window]
+title = "Sly Launcher"
+fullscreen = false
+#resolution = [1920, 1080]

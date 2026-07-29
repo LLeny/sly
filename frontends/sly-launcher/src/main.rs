@@ -2,6 +2,7 @@ mod art_processing;
 mod assets;
 mod camera;
 mod cartridge;
+mod config;
 mod discovery;
 mod game;
 mod gamedb;
@@ -30,6 +31,15 @@ use materials::{
 use state::{LauncherMode, LauncherState, ModeTimers};
 
 fn main() {
+    let config = match config::load() {
+        Ok(config) => config,
+        Err(err) => {
+            eprintln!("sly-launcher: {err}");
+            std::process::exit(1);
+        }
+    };
+    let primary_window = config.window.window();
+
     App::new()
         .add_plugins(
             DefaultPlugins
@@ -38,13 +48,11 @@ fn main() {
                     ..default()
                 })
                 .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "Sly Launcher".into(),
-                        ..default()
-                    }),
+                    primary_window: Some(primary_window),
                     ..default()
                 }),
         )
+        .insert_resource(config)
         .add_plugins(MaterialPlugin::<CardboardMaterial>::default())
         .add_plugins(UiMaterialPlugin::<BackgroundUiMaterial>::default())
         .add_plugins(UiMaterialPlugin::<FrostedBubbleMaterial>::default())

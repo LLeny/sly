@@ -7,6 +7,7 @@ use artwork::layle as artwork;
 use crate::art_processing::{ProcessedArtwork, process_artwork};
 use crate::assets::Models;
 use crate::cartridge::{DetailCart, spawn_detail_cart};
+use crate::config::Config;
 use crate::library::{self, LibraryEntry};
 use crate::scene_textures::{BoxTextures, CartLabelTexture};
 use crate::shelf::{RowRoot, spawn_box};
@@ -34,12 +35,11 @@ pub struct ArtworkTask {
     task: Task<Result<ProcessedArtwork, String>>,
 }
 
-pub fn start_discovery(mut commands: Commands) {
-    let root = std::env::args_os()
-        .nth(1)
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("private"));
-    let task = IoTaskPool::get().spawn(async move { library::discover(&root) });
+pub fn start_discovery(mut commands: Commands, config: Res<Config>) {
+    let roots = config.library.roms.clone();
+    info!("config: {}, scanning {roots:?}", config.source);
+
+    let task = IoTaskPool::get().spawn(async move { library::discover(&roots) });
     commands.spawn(DiscoveryTask(task));
 }
 

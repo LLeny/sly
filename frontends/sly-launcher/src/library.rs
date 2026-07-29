@@ -4,6 +4,7 @@ use core_model::{Region, TvSystem};
 use snes::Cartridge;
 use walkdir::WalkDir;
 
+use crate::config;
 use crate::gamedb::{self, GameMeta};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,15 +56,33 @@ impl LibraryEntry {
     }
 }
 
-pub fn discover(root: &Path) -> Result<Vec<LibraryEntry>, String> {
-    if !root.exists() {
-        return Err(format!(
-            "failed to scan {}: path does not exist",
-            root.display()
-        ));
+pub fn discover(roots: &[PathBuf]) -> Result<Vec<LibraryEntry>, String> {
+    if roots.is_empty() {
+        return Err(format!("Set [library] roms in {}", config::CONFIG_FILE));
     }
 
-    let mut paths: Vec<PathBuf> = WalkDir::new(root)
+    let mut paths = Vec::new();
+    for root in roots {
+        match root.exists() {
+            true => paths.extend(scan(root)),
+            false => eprintln!("skipping {}: path does not exist", root.display()),
+        }
+    }
+    paths.sort_by_cached_key(|path| path.to_string_lossy().to_ascii_lowercase());
+    paths.dedup();
+
+    let mut entries = Vec::new();
+    for path in paths {
+        match read_entry(&path) {
+            Ok(entry) => entries.push(entry),
+            Err(err) => eprintln!("skipping {}: {err}", path.display()),
+        }
+    }
+    Ok(entries)
+}
+
+fn scan(root: &Path) -> impl Iterator<Item = PathBuf> {
+    WalkDir::new(root)
         .follow_links(true)
         .into_iter()
         .filter_map(|entry| match entry {
@@ -75,17 +94,6 @@ pub fn discover(root: &Path) -> Result<Vec<LibraryEntry>, String> {
         })
         .filter(|entry| entry.file_type().is_file() && is_snes_rom(entry.path()))
         .map(walkdir::DirEntry::into_path)
-        .collect();
-    paths.sort_by_cached_key(|path| path.to_string_lossy().to_ascii_lowercase());
-
-    let mut entries = Vec::new();
-    for path in paths {
-        match read_entry(&path) {
-            Ok(entry) => entries.push(entry),
-            Err(err) => eprintln!("skipping {}: {err}", path.display()),
-        }
-    }
-    Ok(entries)
 }
 
 pub fn read_rom(path: &Path) -> Result<Vec<u8>, String> {

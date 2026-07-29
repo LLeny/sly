@@ -7,6 +7,7 @@ use snes::Snes;
 
 use crate::camera::DetailCamera;
 use crate::cartridge::{CartMotion, DetailCart};
+use crate::config::Config;
 use crate::game::{AudioState, GameSession};
 use crate::materials::IrisBlackoutMaterial;
 use crate::scene_textures::CartridgeLabelSurface;
@@ -54,8 +55,10 @@ pub fn poll_game_load(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn advance_launch(
     time: Res<Time>,
+    config: Res<Config>,
     mut commands: Commands,
     mut state: ResMut<LauncherState>,
     mut timers: ResMut<ModeTimers>,
@@ -80,7 +83,7 @@ pub fn advance_launch(
         return;
     };
 
-    let session = storage::Session::new(storage::FsStore::new(), game);
+    let session = storage::Session::new(config.save_store(), game);
     if let Err(err) = session.restore_save_ram(&mut core) {
         warn!("failed to restore save RAM: {err}");
     }

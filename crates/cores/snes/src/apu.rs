@@ -25,7 +25,7 @@ pub const SPC_TIMER2_DIVIDER: u64 = 16;
 pub const DSP_SAMPLE_PERIOD_SPC: u64 = 32;
 const AUDIO_BUFFER_CAP: usize = 0x10000;
 
-const IPL_ROM: &[u8] = include_bytes!("../assets/spc700.rom");
+const IPL_ROM: &[u8] = include_bytes!("../../../../bins/snes/spc700.rom");
 
 #[derive(Serialize, Deserialize)]
 #[serde(bound = "")]
