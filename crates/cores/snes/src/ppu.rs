@@ -1,6 +1,7 @@
 pub(crate) mod bg;
 pub mod cgram;
 pub(crate) mod color_math;
+pub mod io;
 pub(crate) mod latch;
 mod layer_order;
 pub(crate) mod mode7;

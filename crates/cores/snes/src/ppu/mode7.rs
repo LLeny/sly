@@ -1,6 +1,7 @@
 use crate::Snes;
 use crate::macros::{register_mmio, register_mmio_raw};
-use crate::mmio::{MemoryMap, MmioReg};
+use crate::mmio::MemoryMap;
+use crate::mmio::device::IoRegister;
 use crate::ppu::latch::ByteLatch;
 use crate::ppu::vram::Vram;
 use serde::{Deserialize, Serialize};
@@ -147,12 +148,14 @@ pub(crate) fn mode7_character_pixel(vram: &Vram, tile: u8, x: u16, y: u16) -> u8
     (vram.word((tile as u16) << 6 | (y & 7) << 3 | (x & 7)) >> 8) as u8
 }
 
-impl MmioReg for Mode7Settings {
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
+impl IoRegister for Mode7Settings {
+    const START: u16 = Self::ADDRESS;
+
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
         snes.ppu.matrix.settings = value;
     }
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
         snes.ppu.matrix.settings
     }
 }

@@ -1,4 +1,5 @@
 use crate::Snes;
+use crate::mmio::device::{IoRegister, RegEntry};
 use crate::mmio::regs::{
     AddressAdjustMode, Direction, DmaAddress, DmaByteCount, DmaChannelParameters, HdmaLineCounter,
     HdmaTransferEnable, MdmaTransferStart, TransferPattern,
@@ -10,6 +11,29 @@ use serde::{Deserialize, Serialize};
 pub const CHANNEL_COUNT: usize = 8;
 pub const CHANNEL_REGS_START: u16 = 0x4300;
 pub const CHANNEL_REGS_END: u16 = 0x437F;
+
+pub fn registers<M: MemoryMap>() -> Vec<RegEntry<M>> {
+    vec![
+        MdmaTransferStart::entry(),
+        HdmaTransferEnable::entry(),
+        DmaChannelRegs::entry(),
+    ]
+}
+
+struct DmaChannelRegs;
+
+impl IoRegister for DmaChannelRegs {
+    const START: u16 = CHANNEL_REGS_START;
+    const END: u16 = CHANNEL_REGS_END;
+
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, reg: u16, value: u8) {
+        snes.dma.channels[Dma::channel_index(reg)].write(reg, value);
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>, reg: u16) -> u8 {
+        snes.dma.channels[Dma::channel_index(reg)].read(reg)
+    }
+}
 
 pub(crate) const B_BUS_BASE: u16 = 0x2100;
 pub(crate) const HDMA_INIT_CLOCK: u64 = 6 * 4;

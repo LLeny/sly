@@ -1,6 +1,6 @@
 use crate::Cartridge;
 use crate::cartridge::MapMode;
-use crate::mmio::{Address, AddressSpace};
+use crate::mmio::{Address, AddressSpace, device};
 
 pub(crate) const WAITSTATES_FAST: u64 = 6;
 const WAITSTATES_SLOW: u64 = 8;
@@ -52,9 +52,9 @@ impl MemoryMap for CartridgeMap {
             // https://snes.nesdev.org/wiki/Memory_map
             0x00..=0x3F | 0x80..=0xBF => match offset {
                 0x0000..=0x1FFF => AddressSpace::Wram(offset as usize), // 8 KiB WRAM
-                0x2000..=0x5FFF => AddressSpace::Io(offset),            // PPU/APU/CPU/DMA MMIO
-                0x6000..=0x7FFF => AddressSpace::Unmapped,              // TODO: Expansion?
-                0x8000..=0xFFFF => self::map_rom(cartridge, bank, offset), // cartridge ROM
+                device::IO_BASE..=device::IO_END => AddressSpace::Io(offset), // PPU/APU/CPU/DMA MMIO
+                0x6000..=0x7FFF => AddressSpace::Unmapped,                    // TODO: Expansion?
+                0x8000..=0xFFFF => self::map_rom(cartridge, bank, offset),    // cartridge ROM
             },
             // Rest should be ROM
             _ => self::map_rom(cartridge, bank, offset),

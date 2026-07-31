@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
 pub mod dsp;
+pub mod io;
 mod map;
 mod regs;
 pub mod spc700;

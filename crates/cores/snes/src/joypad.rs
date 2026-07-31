@@ -1,3 +1,6 @@
+use crate::Snes;
+use crate::mmio::MemoryMap;
+use crate::mmio::device::{IoRegister, RegEntry};
 use serde::{Deserialize, Serialize};
 
 pub const JOYSER0: u16 = 0x4016;
@@ -5,6 +8,54 @@ pub const JOYSER1: u16 = 0x4017;
 
 pub const JOYPAD_IO_START: u16 = 0x4218;
 pub const JOYPAD_IO_END: u16 = 0x421F;
+
+pub fn registers<M: MemoryMap>() -> Vec<RegEntry<M>> {
+    vec![Serial0::entry(), Serial1::entry(), AutoRead::entry()]
+}
+
+struct Serial0;
+
+impl IoRegister for Serial0 {
+    const START: u16 = JOYSER0;
+
+    fn read<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16) -> u8 {
+        snes.joypads.read_serial(0)
+    }
+
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+        snes.joypads
+            .set_strobe(JoypadOutput::from_raw(value).strobe());
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+        snes.joypads.peek_serial(0)
+    }
+}
+
+struct Serial1;
+
+impl IoRegister for Serial1 {
+    const START: u16 = JOYSER1;
+
+    fn read<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16) -> u8 {
+        snes.joypads.read_serial(1)
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+        snes.joypads.peek_serial(1)
+    }
+}
+
+struct AutoRead;
+
+impl IoRegister for AutoRead {
+    const START: u16 = JOYPAD_IO_START;
+    const END: u16 = JOYPAD_IO_END;
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>, reg: u16) -> u8 {
+        snes.joypads.read(reg)
+    }
+}
 
 #[chapa::bitfield(u8, order = lsb0)]
 pub struct JoypadOutput {

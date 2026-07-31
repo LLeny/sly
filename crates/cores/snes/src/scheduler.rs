@@ -162,7 +162,7 @@ impl Scheduler {
         self.cached_deadline = self.events.peek().map_or(u64::MAX, |next| next.0.deadline);
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn event_due(&self, clock: u64) -> bool {
         clock >= self.cached_deadline
     }

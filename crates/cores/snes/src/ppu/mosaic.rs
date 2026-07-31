@@ -1,6 +1,7 @@
 use crate::Snes;
 use crate::macros::register_mmio;
-use crate::mmio::{MemoryMap, MmioReg};
+use crate::mmio::MemoryMap;
+use crate::mmio::device::IoRegister;
 use serde::{Deserialize, Serialize};
 
 register_mmio! {
@@ -61,12 +62,14 @@ impl Mosaic {
     }
 }
 
-impl MmioReg for MosaicRegister {
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8) {
+impl IoRegister for MosaicRegister {
+    const START: u16 = Self::ADDRESS;
+
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
         snes.ppu.mosaic.write(value);
     }
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
         snes.ppu.mosaic.raw()
     }
 }

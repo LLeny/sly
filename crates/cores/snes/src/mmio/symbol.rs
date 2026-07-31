@@ -1,15 +1,3 @@
-use crate::Snes;
-use crate::mmio::MemoryMap;
-
-pub(crate) trait MmioReg {
-    fn read<M: MemoryMap>(snes: &mut Snes<M>) -> u8 {
-        Self::peek(snes)
-    }
-
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, value: u8);
-    fn peek<M: MemoryMap>(snes: &Snes<M>) -> u8;
-}
-
 pub struct MmioSymbol {
     pub addr: u16,
     pub name: &'static str,

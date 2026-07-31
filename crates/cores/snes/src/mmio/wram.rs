@@ -1,4 +1,7 @@
+use crate::Snes;
 use crate::macros::register_mmio_raw;
+use crate::mmio::MemoryMap;
+use crate::mmio::device::{Access, IoRegister, RegEntry};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const WMDATA: u16 = 0x2180;
@@ -13,6 +16,78 @@ register_mmio_raw! {
     WMADDL => "WMADDL",
     WMADDM => "WMADDM",
     WMADDH => "WMADDH",
+}
+
+pub fn registers<M: MemoryMap>() -> Vec<RegEntry<M>> {
+    vec![
+        WramData::entry(),
+        WramAddrLow::entry(),
+        WramAddrMid::entry(),
+        WramAddrHigh::entry(),
+    ]
+}
+
+struct WramData;
+
+impl IoRegister for WramData {
+    const START: u16 = WMDATA;
+
+    fn read<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16) -> u8 {
+        snes.mmu.wram_port.read(&snes.mmu.wram)
+    }
+
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+        snes.mmu.wram_port.write(&mut snes.mmu.wram, value);
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+        snes.mmu.wram_port.peek(&snes.mmu.wram)
+    }
+}
+
+struct WramAddrLow;
+
+impl IoRegister for WramAddrLow {
+    const START: u16 = WMADDL;
+    const READ: Access = Access::Ignored;
+
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+        snes.mmu.wram_port.set_low(value);
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+        snes.mmu.wram_port.address() as u8
+    }
+}
+
+struct WramAddrMid;
+
+impl IoRegister for WramAddrMid {
+    const START: u16 = WMADDM;
+    const READ: Access = Access::Ignored;
+
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+        snes.mmu.wram_port.set_middle(value);
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+        (snes.mmu.wram_port.address() >> 8) as u8
+    }
+}
+
+struct WramAddrHigh;
+
+impl IoRegister for WramAddrHigh {
+    const START: u16 = WMADDH;
+    const READ: Access = Access::Ignored;
+
+    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+        snes.mmu.wram_port.set_high(value);
+    }
+
+    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+        (snes.mmu.wram_port.address() >> 16) as u8
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
