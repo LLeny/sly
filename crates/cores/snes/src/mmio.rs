@@ -65,8 +65,15 @@ pub enum AddressSpace {
     Wram(usize),
     Sram(usize),
     Rom(usize),
+    Cart(CartRegion, usize),
     Io(u16),
     Unmapped,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CartRegion {
+    Rom,
+    Ram,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -83,6 +90,8 @@ fn space_key(space: &AddressSpace) -> Option<(MemKind, u32)> {
         AddressSpace::Wram(index) => Some((MemKind::Wram, *index as u32)),
         AddressSpace::Sram(index) => Some((MemKind::Sram, *index as u32)),
         AddressSpace::Rom(index) => Some((MemKind::Rom, *index as u32)),
+        AddressSpace::Cart(CartRegion::Rom, index) => Some((MemKind::Rom, *index as u32)),
+        AddressSpace::Cart(CartRegion::Ram, index) => Some((MemKind::Sram, *index as u32)),
         AddressSpace::Io(reg) => Some((MemKind::Io, *reg as u32)),
         AddressSpace::Unmapped => None,
     }
@@ -132,6 +141,20 @@ impl<M: MemoryMap> Mmio<M> {
     /// Translate a CPU address to an address space (WRAM, ROM, I/O or unmapped).
     pub(crate) fn map(&self, addr: Address) -> AddressSpace {
         self.map.map(&self.cartridge, addr)
+    }
+
+    pub(crate) fn cart_read(&self, region: CartRegion, index: usize) -> u8 {
+        match region {
+            CartRegion::Rom => self.cartridge.rom[index],
+            CartRegion::Ram => self.cartridge.sram[index],
+        }
+    }
+
+    pub(crate) fn cart_write(&mut self, region: CartRegion, index: usize, value: u8) {
+        match region {
+            CartRegion::Ram => self.cartridge.sram[index] = value,
+            CartRegion::Rom => tracing::warn!(index, "Write to cartridge ROM"),
+        }
     }
 
     /// Waitstate clocks an access to `addr` adds beyond the fast cycle.
@@ -192,6 +215,7 @@ impl<M: MemoryMap> Snes<M> {
             AddressSpace::Wram(index) => self.mmu.wram[index],
             AddressSpace::Sram(index) => self.mmu.cartridge.sram[index],
             AddressSpace::Rom(index) => self.mmu.cartridge.rom[index],
+            AddressSpace::Cart(region, index) => self.mmu.cart_read(region, index),
             AddressSpace::Io(reg) => self.read_io(reg),
             AddressSpace::Unmapped => {
                 tracing::error!(addr = format!("{addr:?}"), "Read from unmapped address");
@@ -209,6 +233,7 @@ impl<M: MemoryMap> Snes<M> {
             AddressSpace::Wram(index) => self.mmu.wram[index],
             AddressSpace::Sram(index) => self.mmu.cartridge.sram[index],
             AddressSpace::Rom(index) => self.mmu.cartridge.rom[index],
+            AddressSpace::Cart(region, index) => self.mmu.cart_read(region, index),
             AddressSpace::Io(reg) => self.peek_io(reg),
             AddressSpace::Unmapped => OPEN_BUS,
         }
@@ -231,6 +256,7 @@ impl<M: MemoryMap> Snes<M> {
         match space {
             AddressSpace::Wram(index) => self.mmu.wram[index] = value,
             AddressSpace::Sram(index) => self.mmu.cartridge.sram[index] = value,
+            AddressSpace::Cart(region, index) => self.mmu.cart_write(region, index, value),
             AddressSpace::Rom(_) => {
                 tracing::warn!(
                     addr = format!("{addr:?}"),

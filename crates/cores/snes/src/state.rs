@@ -49,11 +49,19 @@ impl<M: MemoryMap> Snes<M> {
     }
 
     pub fn save_ram(&self) -> Option<&[u8]> {
+        if !self.mmu.cartridge.has_battery() {
+            return None;
+        }
+
         let sram = &self.mmu.cartridge.sram;
         (!sram.is_empty()).then_some(sram.as_slice())
     }
 
     pub fn load_save_ram(&mut self, bytes: &[u8]) -> bool {
+        if !self.mmu.cartridge.has_battery() {
+            return false;
+        }
+
         let sram = &mut self.mmu.cartridge.sram;
         if sram.is_empty() || sram.len() != bytes.len() {
             return false;

@@ -1,5 +1,5 @@
 use crate::Cartridge;
-use crate::cartridge::MapMode;
+use crate::cartridge::{Coprocessor, MapMode};
 use crate::mmio::{Address, AddressSpace, device};
 
 pub(crate) const WAITSTATES_FAST: u64 = 6;
@@ -36,10 +36,6 @@ impl MemoryMap for CartridgeMap {
         let bank = addr.bank();
         let offset = addr.address();
 
-        if let Some(space) = map_sram(cartridge, bank, offset) {
-            return space;
-        }
-
         match bank {
             // "The first 8 KiB of RAM is mirrored into many banks for convenient access,
             // and banks $7E-$7F provide continuous access to the entire 128 KiB in
@@ -53,12 +49,32 @@ impl MemoryMap for CartridgeMap {
             0x00..=0x3F | 0x80..=0xBF => match offset {
                 0x0000..=0x1FFF => AddressSpace::Wram(offset as usize), // 8 KiB WRAM
                 device::IO_BASE..=device::IO_END => AddressSpace::Io(offset), // PPU/APU/CPU/DMA MMIO
-                0x6000..=0x7FFF => AddressSpace::Unmapped,                    // TODO: Expansion?
-                0x8000..=0xFFFF => self::map_rom(cartridge, bank, offset),    // cartridge ROM
+                _ => self::cart_space(cartridge, bank, offset),
             },
-            // Rest should be ROM
-            _ => self::map_rom(cartridge, bank, offset),
+            _ => self::cart_space(cartridge, bank, offset),
         }
+    }
+}
+
+fn cart_space(cartridge: &Cartridge, bank: u8, offset: u16) -> AddressSpace {
+    if cartridge.coprocessor() == Coprocessor::SuperFx {
+        return crate::superfx::map::cart_space(cartridge, bank, offset);
+    }
+
+    if let Some(space) = self::map_sram(cartridge, bank, offset) {
+        return space;
+    }
+
+    match offset {
+        0x6000..=0x7FFF if matches!(bank, 0x00..=0x3F | 0x80..=0xBF) => AddressSpace::Unmapped,
+        _ => self::map_rom(cartridge, bank, offset),
+    }
+}
+
+pub(crate) fn rom_index(cartridge: &Cartridge, index: usize) -> usize {
+    match cartridge.rom_mask() {
+        Some(mask) => index & mask,
+        None => index % cartridge.rom.len(),
     }
 }
 
@@ -117,8 +133,5 @@ fn map_rom(cartridge: &Cartridge, bank: u8, offset: u16) -> AddressSpace {
         _ => (((bank & 0x7F) as usize) << 15) | (offset & 0x7FFF) as usize,
     };
 
-    AddressSpace::Rom(match cartridge.rom_mask() {
-        Some(mask) => rom_addr & mask,
-        None => rom_addr % cartridge.rom.len(),
-    })
+    AddressSpace::Rom(self::rom_index(cartridge, rom_addr))
 }

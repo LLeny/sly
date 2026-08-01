@@ -14,6 +14,7 @@ pub mod mmio;
 pub mod ppu;
 pub mod scheduler;
 pub mod state;
+pub mod superfx;
 
 pub use cartridge::Cartridge;
 pub use cpu::Cpu;

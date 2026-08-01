@@ -11,11 +11,11 @@ const HEADER_LENGTH: usize = 0x20;
 pub struct Cartridge {
     #[serde(skip)]
     pub rom: Vec<u8>,
-
-    pub sram: Vec<u8>,
+    pub sram: Vec<u8>, // Either save RAM or Game Pak RAM (Super FX, maybe more?)
     header_offset: usize,
     map_mode: Option<MapMode>,
     rom_mask: Option<usize>,
+    coprocessor: Coprocessor,
 }
 
 impl Cartridge {
@@ -29,17 +29,24 @@ impl Cartridge {
             header_offset,
             map_mode: None,
             rom_mask: None,
+            coprocessor: Coprocessor::None,
             sram: Vec::new(),
         };
+        cartridge.coprocessor = self::coprocessor_from_chipset(cartridge.chipset());
         cartridge.map_mode = cartridge.memory_map().ok().map(|map| map.map_mode());
         cartridge.rom_mask = cartridge
             .rom
             .len()
             .is_power_of_two()
             .then(|| cartridge.rom.len() - 1);
-        if cartridge.has_sram() {
-            cartridge.sram.resize(cartridge.sram_size(), 0);
-        }
+        cartridge.sram.resize(
+            match cartridge.coprocessor() {
+                Coprocessor::SuperFx => cartridge.expansion_ram_size(),
+                _ if cartridge.has_sram() => cartridge.sram_size(),
+                _ => 0,
+            },
+            0,
+        );
 
         Ok(cartridge)
     }
@@ -70,11 +77,51 @@ impl Cartridge {
         MemoryMap::try_from_raw(memory_map).map_err(|_| SnesError::InvalidMemoryMap)
     }
 
-    pub fn has_sram(&self) -> bool {
-        const EXTRA_HARDWARE_OFFSET: usize = 0x16;
+    pub fn has_battery(&self) -> bool {
+        matches!(self.chipset() & 0x0F, 0x02 | 0x05 | 0x06 | 0x09 | 0x0A)
+    }
 
-        let chipset = self.rom[self.header_offset + EXTRA_HARDWARE_OFFSET];
+    pub fn has_sram(&self) -> bool {
+        let chipset = self.chipset();
         matches!(chipset & 0x0F, 0x01 | 0x02 | 0x04 | 0x05 | 0x09 | 0x0A)
+    }
+
+    fn chipset(&self) -> u8 {
+        const EXTRA_HARDWARE_OFFSET: usize = 0x16;
+        self.rom[self.header_offset + EXTRA_HARDWARE_OFFSET]
+    }
+
+    pub fn coprocessor(&self) -> Coprocessor {
+        self.coprocessor
+    }
+
+    fn has_later_extended_header(&self) -> bool {
+        const DEV_ID_OFFSET: usize = 0x1A;
+        const MOVED_TO_EXTENDED: u8 = 0x33;
+
+        self.rom
+            .get(self.header_offset + DEV_ID_OFFSET)
+            .is_some_and(|id| *id == MOVED_TO_EXTENDED)
+    }
+
+    pub fn expansion_ram_size(&self) -> usize {
+        const FALLBACK: usize = 32 * 1024;
+
+        if !self.has_later_extended_header() {
+            return FALLBACK;
+        }
+
+        let code = self
+            .rom
+            .get(self.header_offset.wrapping_sub(3))
+            .copied()
+            .unwrap_or(0);
+
+        if code == 0 {
+            FALLBACK
+        } else {
+            1024usize.checked_shl(code.into()).unwrap_or(FALLBACK)
+        }
     }
 
     pub fn sram_size(&self) -> usize {
@@ -165,6 +212,34 @@ impl Cartridge {
         }
 
         score
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Coprocessor {
+    None,
+    Dsp,
+    SuperFx,
+    Obc1,
+    Sa1,
+    Sdd1,
+    Srtc,
+    Other(u8),
+}
+
+fn coprocessor_from_chipset(chipset: u8) -> Coprocessor {
+    if chipset & 0x0F < 0x03 {
+        return Coprocessor::None;
+    }
+
+    match chipset >> 4 {
+        0x0 => Coprocessor::Dsp,
+        0x1 => Coprocessor::SuperFx,
+        0x2 => Coprocessor::Obc1,
+        0x3 => Coprocessor::Sa1,
+        0x4 => Coprocessor::Sdd1,
+        0x5 => Coprocessor::Srtc,
+        other => Coprocessor::Other(other),
     }
 }
 
