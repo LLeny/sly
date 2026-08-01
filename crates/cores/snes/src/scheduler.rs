@@ -38,6 +38,7 @@ pub enum EventKind {
     Timer01Tick,
     Timer2Tick,
     DspTick,
+    GsuTick,
 }
 
 impl EventKind {
@@ -55,6 +56,7 @@ impl EventKind {
             EventKind::Timer01Tick => crate::apu::timer01_tick(snes, deadline),
             EventKind::Timer2Tick => crate::apu::timer2_tick(snes, deadline),
             EventKind::DspTick => crate::apu::dsp_tick(snes, deadline),
+            EventKind::GsuTick => crate::superfx::gsu_tick(snes, deadline),
         }
     }
 }

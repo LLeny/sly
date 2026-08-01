@@ -1,5 +1,5 @@
-use crate::Snes;
 use crate::mmio::{MemoryMap, OPEN_BUS};
+use crate::{Cartridge, Snes};
 
 pub const IO_BASE: u16 = 0x2000;
 pub const IO_SIZE: usize = 0x4000;
@@ -137,6 +137,12 @@ impl<M: MemoryMap> Default for DeviceTable<M> {
 }
 
 impl<M: MemoryMap> DeviceTable<M> {
+    pub fn for_cartridge(cartridge: &Cartridge) -> Self {
+        let mut table = Self::default();
+        table.install(&crate::mmio::coprocessor_devices(cartridge));
+        table
+    }
+
     pub fn install(&mut self, entries: &[RegEntry<M>]) {
         for entry in entries {
             assert!(

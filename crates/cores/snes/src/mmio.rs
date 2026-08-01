@@ -24,6 +24,13 @@ pub use device::{IO_BASE, IO_END};
 pub use map::{CartridgeMap, MemoryMap};
 pub use symbol::{MmioSymbol, address_of, is_symbol, symbol, symbols};
 
+pub(crate) fn coprocessor_devices<M: MemoryMap>(cartridge: &Cartridge) -> Vec<RegEntry<M>> {
+    match cartridge.coprocessor() {
+        crate::cartridge::Coprocessor::SuperFx => crate::superfx::io::registers(),
+        _ => Vec::new(),
+    }
+}
+
 pub(crate) fn builtin_devices<M: MemoryMap>() -> Vec<RegEntry<M>> {
     crate::ppu::io::registers()
         .into_iter()
@@ -106,7 +113,7 @@ impl Mmio {
 impl<M: MemoryMap> Mmio<M> {
     pub fn with_map(cartridge: Cartridge, map: M) -> Self {
         Self {
-            devices: DeviceTable::default(),
+            devices: DeviceTable::for_cartridge(&cartridge),
             cartridge,
             wram: vec![0; M::WRAM_SIZE].into_boxed_slice(),
             map,
@@ -164,6 +171,10 @@ impl<M: MemoryMap> Mmio<M> {
 }
 
 impl<M: MemoryMap> Snes<M> {
+    pub(crate) fn rebuild_devices(&mut self) {
+        self.mmu.devices = DeviceTable::for_cartridge(&self.mmu.cartridge);
+    }
+
     pub fn read16(&mut self, addr: Address) -> u16 {
         let lo = self.read8(addr) as u16;
         let hi = self.read8(addr.wrapping_add(1)) as u16;

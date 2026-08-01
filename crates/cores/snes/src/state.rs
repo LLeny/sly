@@ -39,6 +39,7 @@ impl<M: MemoryMap> Snes<M> {
             .map_err(|err| StateError::Corrupt(format!("decoding state: {err}")))?;
 
         restored.mmu.cartridge.rom = std::mem::take(&mut self.mmu.cartridge.rom);
+        restored.rebuild_devices();
         restored
             .ppu
             .restore_frame_buffer(envelope.thumbnail.map(|thumb| thumb.pixels));

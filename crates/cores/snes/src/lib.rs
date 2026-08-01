@@ -30,6 +30,7 @@ use crate::mmio::Address;
 use crate::mmio::dma::{self, Dma};
 use crate::ppu::Ppu;
 use crate::scheduler::{EventKind, Scheduler};
+use crate::superfx::SuperFx;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -44,6 +45,7 @@ pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub math: Math,
     pub joypads: Joypads,
     pub scheduler: Scheduler,
+    pub superfx: SuperFx,
 }
 
 impl Snes {
@@ -65,6 +67,7 @@ impl<M: MemoryMap> Snes<M> {
             math: Math::new(),
             joypads: Joypads::default(),
             scheduler: Scheduler::new(tv_system),
+            superfx: SuperFx::default(),
         };
         snes.reset();
         snes
@@ -82,6 +85,7 @@ impl<M: MemoryMap> Snes<M> {
         self.apu = Apu::new();
         self.ppu = Ppu::new();
         self.joypads.reset();
+        self.superfx = SuperFx::default();
 
         self.scheduler = Scheduler::new(tv_system);
         let spc_delay = self.scheduler.spc_master_clocks(1);

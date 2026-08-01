@@ -63,6 +63,7 @@ pub struct Irq {
     rdnmi: VblankFlagCpuVersion,
     nmi: EdgeLatch,
     timer_flag: bool,
+    cart_irq: bool, // Set when GSU is stopped
     pub(crate) h_timer: Timer,
     pub(crate) v_timer: Timer,
 }
@@ -102,8 +103,12 @@ impl Irq {
         self.timer_flag = true;
     }
 
+    pub fn set_cart_irq(&mut self, active: bool) {
+        self.cart_irq = active;
+    }
+
     pub fn irq_pending(&self) -> bool {
-        self.timer_flag
+        self.timer_flag || self.cart_irq
     }
 
     pub fn read_timeup(&mut self) -> u8 {

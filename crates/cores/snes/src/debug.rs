@@ -1136,6 +1136,7 @@ fn mmio_component(addr: u16) -> (u8, &'static str) {
         0x2140..=0x2143 => (1, "APU"),
         0x420B..=0x420C | 0x4300..=0x43FF => (2, "DMA"),
         0x4200..=0x42FF => (3, "CPU"),
+        0x3000..=0x34FF => (4, "GSU"),
         _ => (9, "Other"),
     }
 }
@@ -1799,7 +1800,11 @@ fn sprites(core: &Snes) -> Sprites {
 }
 
 fn mmio_view(core: &Snes) -> MmioView {
-    let mut symbols: Vec<_> = crate::mmio::symbols().collect();
+    let has_gsu = core.mmu.cartridge.coprocessor() == crate::cartridge::Coprocessor::SuperFx;
+
+    let mut symbols: Vec<_> = crate::mmio::symbols()
+        .filter(|s| has_gsu || self::mmio_component(s.addr).1 != "GSU")
+        .collect();
     symbols.sort_by_key(|s| (self::mmio_component(s.addr).0, s.addr));
 
     let mut groups: Vec<MmioGroup> = Vec::new();
