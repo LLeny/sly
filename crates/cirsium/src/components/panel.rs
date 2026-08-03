@@ -135,6 +135,10 @@ impl PanelChrome {
         self
     }
 
+    pub fn id(&self) -> &SharedString {
+        &self.id
+    }
+
     pub fn on_toggle(
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,

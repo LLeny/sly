@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, Div, Window, div, px};
+use gpui::{App, Div, SharedString, Window, div, px};
 
 use crate::components::{
     PanelChrome, label_text, meter_bar_scaled, mono_text, section_header, status_flag,
@@ -43,7 +43,14 @@ impl RenderOnce for StructuredPanel {
             }
         }
 
-        let mut body = div().flex().flex_col();
+        let scroll_id = SharedString::from(format!("{}.structured", self.chrome.id()));
+        let mut body = div()
+            .id(scroll_id)
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_y_scroll();
         for block in blocks {
             if block.len() == 1 && block[0].group == 0 {
                 body = body.child(section_column(t, block[0]));
@@ -66,6 +73,7 @@ impl RenderOnce for StructuredPanel {
 
         self.chrome
             .panel()
+            .scrollable(true)
             .meta_opt(view.meta.clone().map(Into::into))
             .child(body)
     }
