@@ -25,6 +25,7 @@ impl Debugger {
 
         let controls_view = ControlsView {
             running: self.execution.is_running(),
+            targets: self.step_targets.clone(),
         };
         let controls = ControlsWidget::new(controls_view)
             .collapsed(self.is_collapsed(ControlsWidget::ID))
@@ -32,6 +33,12 @@ impl Debugger {
             .on_run(cx.listener(|this, _, _, cx| this.set_running(true, cx)))
             .on_pause(cx.listener(|this, _, _, cx| this.set_running(false, cx)))
             .on_step(cx.listener(|this, _, _, cx| this.step(cx)))
+            .on_run_until({
+                let this = this.clone();
+                std::rc::Rc::new(move |id: SharedString, _: &mut Window, cx: &mut App| {
+                    this.update(cx, |debugger, cx| debugger.run_until(&id, cx));
+                })
+            })
             .on_reset(cx.listener(|this, _, _, cx| this.reset(cx)))
             .on_save_state(cx.listener(|this, _, _, cx| {
                 let slot = this.active_slot();
@@ -53,7 +60,15 @@ impl Debugger {
                 })
         });
 
+        let mmio_priority = self
+            .registry
+            .manifest()
+            .workspaces
+            .iter()
+            .find(|w| w.id.as_ref() == self.workspace.as_ref())
+            .and_then(|w| w.mmio_group.clone());
         let mmio = MmioWidget::new(self.mmio_view.clone())
+            .priority(mmio_priority.map(SharedString::from))
             .expanded(self.expanded_set(MmioWidget::ID))
             .collapsed(self.is_collapsed(MmioWidget::ID))
             .on_toggle(cx.listener(|this, _, _, cx| this.toggle(MmioWidget::ID, cx)))

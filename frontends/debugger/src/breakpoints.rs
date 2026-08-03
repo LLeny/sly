@@ -23,6 +23,7 @@ pub struct Breakpoints {
     marks: Vec<BreakpointMark>,
     draft_kind: BreakpointKind,
     next_id: usize,
+    cpu_titles: Vec<(CpuId, SharedString)>,
 }
 
 impl Default for Breakpoints {
@@ -33,11 +34,16 @@ impl Default for Breakpoints {
             marks: Vec::new(),
             draft_kind: BreakpointKind::Execute,
             next_id: 0,
+            cpu_titles: Vec::new(),
         }
     }
 }
 
 impl Breakpoints {
+    pub fn set_cpu_titles(&mut self, titles: Vec<(CpuId, SharedString)>) {
+        self.cpu_titles = titles;
+    }
+
     pub fn draft_kind(&self) -> BreakpointKind {
         self.draft_kind
     }
@@ -154,6 +160,12 @@ impl Breakpoints {
                     id: b.id,
                     label: b.label.clone(),
                     note: b.note.clone(),
+                    cpu: self
+                        .cpu_titles
+                        .iter()
+                        .find(|(id, _)| id == &b.cpu)
+                        .map(|(_, title)| title.clone())
+                        .unwrap_or_default(),
                     kind: b.kind,
                     enabled: b.enabled,
                 })

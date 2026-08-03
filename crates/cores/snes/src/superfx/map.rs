@@ -1,6 +1,6 @@
 use crate::Cartridge;
 use crate::mmio::map::rom_index;
-use crate::mmio::{AddressSpace, CartRegion};
+use crate::mmio::{Address, AddressSpace, CartRegion};
 
 const RAM_WINDOW_START: u16 = 0x6000;
 const RAM_WINDOW_END: u16 = 0x7FFF;
@@ -32,9 +32,18 @@ fn rom(cartridge: &Cartridge, index: usize) -> AddressSpace {
 }
 
 fn ram(cartridge: &Cartridge, index: usize) -> AddressSpace {
-    let len = cartridge.sram.len();
-    if len == 0 {
-        return AddressSpace::Unmapped;
+    match cartridge.sram_index(index) {
+        Some(index) => AddressSpace::Cart(CartRegion::Ram, index),
+        None => AddressSpace::Unmapped,
     }
-    AddressSpace::Cart(CartRegion::Ram, index % len)
+}
+
+pub(crate) fn gsu_space(cartridge: &Cartridge, addr: Address) -> AddressSpace {
+    let (bank, offset) = (addr.bank() as usize, addr.address() as usize);
+    match addr.bank() {
+        0x00..=0x3F => self::rom(cartridge, (bank << 15) | (offset & 0x7FFF)),
+        0x40..=0x5F => self::rom(cartridge, ((bank & 0x1F) << 16) | offset),
+        0x70 | 0x71 => self::ram(cartridge, ((bank & 1) << 16) | offset),
+        _ => AddressSpace::Unmapped,
+    }
 }

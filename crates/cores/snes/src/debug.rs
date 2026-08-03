@@ -8,9 +8,10 @@ use debugger_model::{
     DmaChannelDetail, DmaChannelView, DmaView, FlagView, FlowKind, Highlight, MemoryRegion,
     MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView, PpuGroup,
     PpuProperty, PpuView, RegisterView, RunOutcome, SOUND_WORKSPACE, SpriteEntry, Sprites,
-    StackFrame, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapOverlay,
-    TilemapOverlayBand, TilemapViewport, Tileset, TilesetLayer, TilesetTile, TokenKind,
-    VIDEO_WORKSPACE, VideoGenerations, hex, standard_manifest, strip_symbol_sigils, tokenize,
+    StackFrame, StepTarget, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry,
+    TilemapOverlay, TilemapOverlayBand, TilemapViewport, Tileset, TilesetLayer, TilesetTile,
+    TokenKind, VIDEO_WORKSPACE, VideoGenerations, hex, standard_manifest, strip_symbol_sigils,
+    tokenize,
 };
 use workspace_model::{
     ComponentManifest, DockLocation, PanelDescriptor, PanelGroupLayout, PanelKind, RefreshPolicy,
@@ -18,6 +19,7 @@ use workspace_model::{
 };
 
 mod dsp;
+mod superfx;
 
 use crate::apu::{Apu, spc700};
 use crate::callstack::CallFrame;
@@ -32,6 +34,8 @@ const PPU_SIZE: u32 = 0x0100;
 const CPU_BASE: u32 = 0x4200;
 const CPU_SIZE: u32 = 0x0200;
 const BUS_SIZE: u32 = 0x100_0000;
+
+const BG_LAYERS: usize = 4;
 
 const CPU_MAIN: &str = "cpu.65c816";
 const CPU_SPC: &str = "apu.spc700";
@@ -73,6 +77,10 @@ impl SnesDebug {
         }
     }
 
+    fn has_gsu(&self) -> bool {
+        self.core.mmu.cartridge.coprocessor() == crate::cartridge::Coprocessor::SuperFx
+    }
+
     fn region_byte(&self, region: &str, addr: u32) -> u8 {
         match region {
             "wram" => self.core.mmu.wram.get(addr as usize).copied().unwrap_or(0),
@@ -94,6 +102,8 @@ impl SnesDebug {
                 .unwrap_or(0),
             "bus" => self.core.peek8(Address::from_24bit(addr & 0x00FF_FFFF)),
             "spc" => self.core.apu.peek(addr as u16),
+            "gsu" => superfx::bus_peek(&self.core, (addr >> 16) as u8 & 0x7F, addr as u16),
+            "gsucache" => self.core.superfx.cache.data[addr as usize & 0x1FF],
             _ => self.core.peek8(Address::new(0x00, addr as u16)),
         }
     }
@@ -105,6 +115,7 @@ impl SnesDebug {
             "rom" => Some((MemKind::Rom, addr)),
             "bus" => self.core.classify(Address::from_24bit(addr & 0x00FF_FFFF)),
             "spc" => Some((MemKind::Spc, addr)),
+            "gsu" | "gsucache" => None,
             _ => Some((MemKind::Io, addr)),
         }
     }
@@ -113,6 +124,7 @@ impl SnesDebug {
         let pcs = [
             (CPU_MAIN, self.core.cpu.pc as u32),
             (CPU_SPC, self.core.apu.spc700.pc as u32),
+            (superfx::CPU_GSU, superfx::pc(&self.core.superfx) as u32),
         ];
 
         breakpoints
@@ -249,15 +261,20 @@ impl Core for SnesDebug {
 
 impl DebugCore for SnesDebug {
     fn cpus(&self) -> Vec<CpuDescriptor> {
-        vec![
+        let mut cpus = vec![
             CpuDescriptor::new(CPU_MAIN, "65C816", "bus"),
             CpuDescriptor::new(CPU_SPC, "SPC700", "spc"),
-        ]
+        ];
+        if self.has_gsu() {
+            cpus.push(superfx::descriptor());
+        }
+        cpus
     }
 
     fn pc(&self, cpu: &CpuId) -> u32 {
         match cpu.as_str() {
             CPU_SPC => self.core.apu.spc700.pc as u32,
+            superfx::CPU_GSU => superfx::pc(&self.core.superfx) as u32,
             _ => self.core.cpu.pc as u32,
         }
     }
@@ -265,12 +282,119 @@ impl DebugCore for SnesDebug {
     fn set_pc(&mut self, cpu: &CpuId, addr: u32) {
         match cpu.as_str() {
             CPU_SPC => self.core.apu.spc700.pc = addr as u16,
+            superfx::CPU_GSU => superfx::set_pc(&mut self.core, addr as u16),
             _ => self.core.cpu.pc = addr as u16,
         }
     }
 
     fn debug_step(&mut self) {
         self.last_access = self.step_captured();
+    }
+
+    fn step_targets(&self) -> Vec<StepTarget> {
+        let mut targets = vec![
+            StepTarget::new("scanline", "Line"),
+            StepTarget::new("nmi", "NMI"),
+            StepTarget::new("irq", "IRQ"),
+            StepTarget::new("spc", "SPC"),
+            StepTarget::new("dsp", "DSP"),
+        ];
+        if self.has_gsu() {
+            targets.push(StepTarget::new("gsu", "GSU"));
+        }
+        targets
+    }
+
+    fn run_until(&mut self, target: &str) -> RunOutcome {
+        const CAP: u64 = 2_000_000;
+
+        let Some(target) = Target::from_id(target) else {
+            return RunOutcome::Done;
+        };
+
+        enum Target {
+            Scanline,
+            Nmi,
+            Irq,
+            Spc,
+            Dsp,
+            Gsu,
+        }
+
+        impl Target {
+            fn from_id(id: &str) -> Option<Self> {
+                match id {
+                    "scanline" => Some(Self::Scanline),
+                    "nmi" => Some(Self::Nmi),
+                    "irq" => Some(Self::Irq),
+                    "spc" => Some(Self::Spc),
+                    "dsp" => Some(Self::Dsp),
+                    "gsu" => Some(Self::Gsu),
+                    _ => None,
+                }
+            }
+        }
+
+        fn spc_state(spc: &spc700::Spc700) -> [u32; 2] {
+            [
+                (spc.pc as u32) << 16 | (spc.a as u32) << 8 | spc.x as u32,
+                (spc.y as u32) << 16 | (spc.sp as u32) << 8 | spc.psw.raw() as u32,
+            ]
+        }
+
+        enum Watch {
+            Scanline(u64),
+            Nmi(u64),
+            Irq(u64),
+            Spc([u32; 2]),
+            Dsp(u64),
+            Gsu,
+        }
+
+        let snapshot = |core: &Snes| match target {
+            Target::Scanline => {
+                Watch::Scanline(core.scheduler.scanline_at(core.scheduler.cycles()))
+            }
+            Target::Nmi => Watch::Nmi(core.cpu.interrupts.nmi),
+            Target::Irq => Watch::Irq(core.cpu.interrupts.irq),
+            Target::Spc => Watch::Spc(spc_state(&core.apu.spc700)),
+            Target::Dsp => Watch::Dsp(core.apu.samples_generated()),
+            Target::Gsu => Watch::Gsu,
+        };
+
+        let fired = |core: &Snes, watch: &Watch| match watch {
+            Watch::Scanline(line) => core.scheduler.scanline_at(core.scheduler.cycles()) != *line,
+            Watch::Nmi(count) => core.cpu.interrupts.nmi != *count,
+            Watch::Irq(count) => core.cpu.interrupts.irq != *count,
+            Watch::Spc(state) => spc_state(&core.apu.spc700) != *state,
+            Watch::Dsp(count) => core.apu.samples_generated() != *count,
+            Watch::Gsu => core.superfx.sfr.go(),
+        };
+
+        if matches!(target, Target::Gsu) && crate::superfx::debug_step(&mut self.core) {
+            return RunOutcome::Breakpoint;
+        }
+
+        let start = self.core.scheduler.cycles();
+        let mode = self.track_mode();
+        let mut hit = false;
+
+        self.last_access = self.captured(mode, |debug| {
+            let watch = snapshot(&debug.core);
+            while debug.core.scheduler.cycles() < start + CAP {
+                debug.core.step();
+                if fired(&debug.core, &watch) {
+                    hit = true;
+                    break;
+                }
+            }
+        });
+
+        if hit {
+            RunOutcome::Breakpoint
+        } else {
+            RunOutcome::Done
+        }
     }
 
     fn debug_run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome {
@@ -319,6 +443,7 @@ impl DebugCore for SnesDebug {
     fn cpu_view(&self, cpu: &CpuId) -> CpuView {
         match cpu.as_str() {
             CPU_SPC => self::spc_cpu_view(&self.core.apu.spc700),
+            superfx::CPU_GSU => superfx::cpu_view(&self.core.superfx),
             _ => self::cpu_view(&self.core.cpu),
         }
     }
@@ -326,6 +451,7 @@ impl DebugCore for SnesDebug {
     fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> Vec<DisasmLine> {
         match cpu.as_str() {
             CPU_SPC => self::spc_disasm_view(&self.core.apu, base as u16, count),
+            superfx::CPU_GSU => superfx::disasm_view(&self.core, base as u16, count),
             _ => self::disasm_view(&self.core, base as u16, count),
         }
     }
@@ -337,6 +463,7 @@ impl DebugCore for SnesDebug {
         let mut addr = base as u16;
 
         match cpu.as_str() {
+            superfx::CPU_GSU => return Some(superfx::fingerprint(&self.core, base as u16, count)),
             CPU_SPC => {
                 for _ in 0..count * 3 {
                     hasher.write_u8(self.core.apu.peek(addr));
@@ -359,6 +486,9 @@ impl DebugCore for SnesDebug {
 
     fn disassemble_one(&self, cpu: &CpuId, addr: u32) -> Option<DisasmLine> {
         match cpu.as_str() {
+            superfx::CPU_GSU => superfx::disasm_view(&self.core, addr as u16, 1)
+                .into_iter()
+                .next(),
             CPU_SPC => self::spc_disasm_view(&self.core.apu, addr as u16, 1)
                 .into_iter()
                 .next(),
@@ -368,6 +498,7 @@ impl DebugCore for SnesDebug {
 
     fn call_stack(&self, cpu: &CpuId) -> CallStackView {
         match cpu.as_str() {
+            superfx::CPU_GSU => CallStackView::default(),
             CPU_SPC => self::call_stack_view(
                 &self.core.apu.call_stack,
                 self.core.apu.spc700.pc as u32,
@@ -425,24 +556,39 @@ impl DebugCore for SnesDebug {
     }
 
     fn tileset_layers(&self) -> Vec<TilesetLayer> {
-        (0..4)
+        let mut layers: Vec<TilesetLayer> = (0..4)
             .map(|i| TilesetLayer {
                 name: bg_layer_name(&self.core, i).into(),
                 enabled: self.core.ppu.bg_mode.bpp(i).is_some() || mode7_bg_layer(&self.core, i),
             })
-            .collect()
+            .collect();
+        if self.has_gsu() {
+            layers.push(TilesetLayer {
+                name: "GSU".into(),
+                enabled: true,
+            });
+        }
+        layers
     }
 
     fn tileset(&self, layer: usize, color: usize) -> Option<Tileset> {
+        if layer >= BG_LAYERS {
+            return None;
+        }
         self::tileset(&self.core, layer, color)
     }
 
     fn tilemap(&self, layer: usize) -> Option<Tilemap> {
+        if layer >= BG_LAYERS {
+            return (self.has_gsu() && layer == BG_LAYERS)
+                .then(|| superfx::bitmap_tilemap(&self.core))
+                .flatten();
+        }
         self::tilemap(&self.core, layer)
     }
 
     fn tilemap_overlays(&self, layer: usize) -> Vec<TilemapOverlay> {
-        if mode7_bg_layer(&self.core, layer) {
+        if layer >= BG_LAYERS || mode7_bg_layer(&self.core, layer) {
             return Vec::new();
         }
         self::tilemap_window_overlays(&self.core, layer)
@@ -543,6 +689,7 @@ impl DebugCore for SnesDebug {
     fn table_view(&self, id: &str) -> TableView {
         match id {
             dsp::VOICES_ID => dsp::voices_view(&self.core.apu.dsp),
+            superfx::CACHE_ID => superfx::cache_view(&self.core),
             _ => TableView::default(),
         }
     }
@@ -552,6 +699,7 @@ impl DebugCore for SnesDebug {
         match id {
             dsp::REGISTERS_ID => dsp::registers_view(dsp),
             dsp::INSPECTOR_ID => dsp::inspector_view(dsp, selection),
+            superfx::STATE_ID => superfx::state_view(&self.core),
             _ => StructuredView::default(),
         }
     }
@@ -565,11 +713,10 @@ impl DebugCore for SnesDebug {
 
     fn manifest(&self) -> ComponentManifest {
         let mut manifest = standard_manifest(&self.cpus());
-        manifest.workspaces.push(WorkspaceDescriptor::new(
-            VIDEO_WORKSPACE,
-            "PPU",
-            WorkspaceIcon::Video,
-        ));
+        manifest.workspaces.push(
+            WorkspaceDescriptor::new(VIDEO_WORKSPACE, "PPU", WorkspaceIcon::Video)
+                .mmio_group("PPU"),
+        );
 
         manifest.insert_after(
             PanelKind::Memory,
@@ -652,11 +799,10 @@ impl DebugCore for SnesDebug {
         // The sprites panel takes the memory viewer's place in the PPU workspace.
         manifest.restrict(PanelKind::Memory, CPU_WORKSPACE);
 
-        manifest.workspaces.push(WorkspaceDescriptor::new(
-            SOUND_WORKSPACE,
-            "APU",
-            WorkspaceIcon::Sound,
-        ));
+        manifest.workspaces.push(
+            WorkspaceDescriptor::new(SOUND_WORKSPACE, "APU", WorkspaceIcon::Sound)
+                .mmio_group("APU"),
+        );
 
         manifest.insert_before(
             PanelKind::Memory,
@@ -763,6 +909,10 @@ impl DebugCore for SnesDebug {
             PanelGroupLayout::EqualColumns,
         );
 
+        if self.has_gsu() {
+            self::superfx_manifest(&mut manifest);
+        }
+
         manifest
     }
 
@@ -780,15 +930,19 @@ impl DebugCore for SnesDebug {
             MemoryRegion::new("spc", "SPC RAM", 0, 0x1_0000),
         ];
         if !self.core.mmu.cartridge.sram.is_empty() {
+            let name = if self.has_gsu() {
+                "Game Pak RAM"
+            } else {
+                "Cartridge SRAM"
+            };
             regions.insert(
                 1,
-                MemoryRegion::new(
-                    "sram",
-                    "Cartridge SRAM",
-                    0,
-                    self.core.mmu.cartridge.sram.len() as u32,
-                ),
+                MemoryRegion::new("sram", name, 0, self.core.mmu.cartridge.sram.len() as u32),
             );
+        }
+        if self.has_gsu() {
+            regions.push(MemoryRegion::new("gsu", "GSU Bus", 0, 0x80_0000));
+            regions.push(MemoryRegion::new("gsucache", "GSU Cache", 0, 0x200));
         }
         regions
     }
@@ -821,6 +975,8 @@ impl DebugCore for SnesDebug {
             "rom" => format!("{addr:06X}"),
             "bus" => format!("{:02X}:{:04X}", (addr >> 16) & 0xFF, addr & 0xFFFF),
             "spc" => format!("{:04X}", addr & 0xFFFF),
+            "gsu" => format!("{:02X}:{:04X}", (addr >> 16) & 0x7F, addr & 0xFFFF),
+            "gsucache" => format!("{:03X}", addr & 0x1FF),
             _ => format!("00:{:04X}", addr & 0xFFFF),
         }
     }
@@ -860,6 +1016,66 @@ impl DebugCore for SnesDebug {
         };
         Some((region.into(), offset))
     }
+}
+
+fn superfx_manifest(manifest: &mut ComponentManifest) {
+    use superfx::{CACHE_ID, CPU_GSU, STATE_ID, WORKSPACE};
+
+    manifest.workspaces.push(
+        WorkspaceDescriptor::new(WORKSPACE, "Super FX", WorkspaceIcon::Chip).mmio_group("GSU"),
+    );
+
+    manifest.remove(&format!("{CPU_GSU}.callstack"));
+
+    let disasm_id = format!("{CPU_GSU}.disasm");
+
+    for id in [CPU_GSU, disasm_id.as_str()] {
+        if let Some(panel) = manifest.panels.iter_mut().find(|p| &*p.id == id) {
+            panel.workspaces.retain(|w| &**w != CPU_WORKSPACE);
+        }
+    }
+
+    manifest.insert_before(
+        PanelKind::Mmio,
+        PanelDescriptor::new(
+            STATE_ID,
+            "GSU State",
+            PanelKind::Structured,
+            DockLocation::Right,
+            RefreshPolicy::OnPause,
+        )
+        .tag(WORKSPACE),
+    );
+    manifest.insert_after(
+        PanelKind::Memory,
+        PanelDescriptor::new(
+            CACHE_ID,
+            "Code Cache",
+            PanelKind::Table,
+            DockLocation::Center,
+            RefreshPolicy::OnPause,
+        )
+        .tag(WORKSPACE),
+    );
+
+    for id in [
+        CPU_GSU,
+        disasm_id.as_str(),
+        "breakpoints",
+        "memory",
+        "tilemap",
+        "log",
+    ] {
+        manifest.tag(id, WORKSPACE);
+    }
+
+    manifest.compose_in(
+        WORKSPACE,
+        disasm_id,
+        CACHE_ID,
+        PanelGroupLayout::CompanionRail,
+    );
+    manifest.compose_in(WORKSPACE, "memory", "mmio", PanelGroupLayout::CompanionRail);
 }
 
 fn caption(label: &str, snes: &Snes) -> String {
@@ -1065,6 +1281,22 @@ fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
     self::format_bytes(len, |offset| {
         snes.peek8(Address::new(bank, addr.wrapping_add(offset)))
     })
+}
+
+fn field(label: &str, value: String) -> debugger_model::Row {
+    debugger_model::Row::Field(debugger_model::Field {
+        label: label.into(),
+        value: value.into(),
+        accent: false,
+    })
+}
+
+fn section(title: &str, rows: Vec<debugger_model::Row>) -> debugger_model::Section {
+    debugger_model::Section {
+        title: Some(title.into()),
+        rows,
+        ..debugger_model::Section::default()
+    }
 }
 
 fn format_bytes(len: u8, mut byte_at: impl FnMut(u16) -> u8) -> String {
@@ -1341,8 +1573,17 @@ fn ppu_view(core: &Snes) -> PpuView {
         PpuProperty::new("BG mode", mode).accented(),
         PpuProperty::new("BG3 priority", bg3_priority),
     ];
+
     if ranges.len() > 1 {
-        properties.push(PpuProperty::new("Raster", ranges.join(", ")));
+        const SHOWN: usize = 6;
+        let extra = ranges.len().saturating_sub(SHOWN);
+        for (i, range) in ranges.iter().take(SHOWN).enumerate() {
+            let label = if i == 0 { "Raster" } else { "" };
+            properties.push(PpuProperty::new(label, range.clone()));
+        }
+        if extra > 0 {
+            properties.push(PpuProperty::new("", format!("+ {extra} more")));
+        }
     }
 
     let groups = core

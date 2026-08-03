@@ -121,6 +121,21 @@ pub enum RunOutcome {
     Breakpoint,
 }
 
+#[derive(Clone)]
+pub struct StepTarget {
+    pub id: Arc<str>,
+    pub label: Arc<str>,
+}
+
+impl StepTarget {
+    pub fn new(id: impl Into<Arc<str>>, label: impl Into<Arc<str>>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+        }
+    }
+}
+
 pub trait DebugCore: Core {
     fn cpus(&self) -> Vec<CpuDescriptor>;
     fn pc(&self, cpu: &CpuId) -> u32;
@@ -146,6 +161,14 @@ pub trait DebugCore: Core {
 
     fn debug_step(&mut self);
     fn debug_run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome;
+
+    fn step_targets(&self) -> Vec<StepTarget> {
+        Vec::new()
+    }
+
+    fn run_until(&mut self, _target: &str) -> RunOutcome {
+        RunOutcome::Done
+    }
 
     fn cartridge(&self) -> &CartridgeView;
 

@@ -32,6 +32,7 @@ pub struct BreakpointEntry {
     pub id: usize,
     pub label: SharedString,
     pub note: SharedString,
+    pub cpu: SharedString,
     pub kind: BreakpointKind,
     pub enabled: bool,
 }
@@ -213,6 +214,7 @@ fn breakpoint_row(
         id,
         label,
         note,
+        cpu,
         kind,
         enabled,
     } = entry;
@@ -262,7 +264,11 @@ fn breakpoint_row(
         row = row.child(div().text_xs().text_color(theme.text_muted).child(note));
     }
 
-    row = row.child(div().flex_1()).child(tag);
+    row = row.child(div().flex_1());
+    if !cpu.is_empty() {
+        row = row.child(badge(cpu, theme.text_muted).rounded_sm());
+    }
+    row = row.child(tag);
 
     if let Some(handler) = on_remove {
         let remove = div()

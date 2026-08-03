@@ -28,6 +28,7 @@ pub mod icon {
     pub const MAP: &str = "icons/lucide/map.svg";
     pub const GHOST: &str = "icons/lucide/ghost.svg";
     pub const AUDIO: &str = "icons/lucide/audio-lines.svg";
+    pub const ZAP: &str = "icons/lucide/zap.svg";
     pub const DOWNLOAD: &str = "icons/lucide/download.svg";
     pub const LINK: &str = "icons/lucide/link-2.svg";
 

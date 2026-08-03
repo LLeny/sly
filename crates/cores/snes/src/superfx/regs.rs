@@ -69,6 +69,82 @@ register_mmio! {
     }
 }
 
+#[chapa::bitfield(u8, order = lsb0)]
+#[derive(Default)]
+pub struct Por {
+    #[bits(0)]
+    pub transparent: bool,
+
+    #[bits(1)]
+    pub dither: bool,
+
+    #[bits(2)]
+    pub high_nibble: bool,
+
+    #[bits(3)]
+    pub freeze_high: bool,
+
+    #[bits(4)]
+    pub obj_mode: bool,
+}
+
+crate::macros::impl_bitfield_serde!(Por);
+
+#[derive(Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+pub struct Colr(pub u8);
+
+impl Colr {
+    pub fn merge(self, por: &Por, value: u8) -> Self {
+        if por.high_nibble() {
+            Self((self.0 & 0xF0) | (value >> 4))
+        } else if por.freeze_high() {
+            Self((self.0 & 0xF0) | (value & 0x0F))
+        } else {
+            Self(value)
+        }
+    }
+
+    pub fn dithered(self, por: &Por, bpp: u32, x: u8, y: u8) -> u8 {
+        if por.dither() && bpp != 8 {
+            let color = if (x ^ y) & 0x01 != 0 {
+                self.0 >> 4
+            } else {
+                self.0
+            };
+            color & 0x0F
+        } else {
+            self.0
+        }
+    }
+
+    pub fn is_transparent(self, por: &Por, bpp: u32) -> bool {
+        let color = if por.freeze_high() {
+            self.0 & 0x0F
+        } else {
+            self.0
+        };
+        match bpp {
+            2 => color & 0x03 == 0,
+            4 => color & 0x0F == 0,
+            _ => color == 0,
+        }
+    }
+}
+
+impl Scmr {
+    pub fn height(&self) -> u8 {
+        self.height_low() as u8 | (self.height_high() as u8) << 1
+    }
+
+    pub fn bpp(&self) -> u32 {
+        match self.color_depth() {
+            0 => 2,
+            1 | 2 => 4,
+            _ => 8,
+        }
+    }
+}
+
 register_mmio! {
     /// CFGR
     pub struct Cfgr @ 0x3037 {

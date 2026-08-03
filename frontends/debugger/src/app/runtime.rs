@@ -210,16 +210,30 @@ impl Debugger {
 
     pub(super) fn step(&mut self, cx: &mut Context<Self>) {
         self.target.debug_step();
+        self.finish_manual_step("paused", cx);
+    }
 
+    fn finish_manual_step(&mut self, state: &str, cx: &mut Context<Self>) {
         self.invalidate_video_keys();
 
         self.refresh_panes(CpuRefresh::Highlight, false, cx);
-        self.set_state("paused");
+        self.set_state(state);
         self.execution = ExecutionState::Paused;
         self.run_task = None;
         self.follow_memory();
 
         cx.notify();
+    }
+
+    pub(super) fn run_until(&mut self, target: &str, cx: &mut Context<Self>) {
+        let outcome = self.target.run_until(target);
+        self.finish_manual_step(
+            match outcome {
+                RunOutcome::Breakpoint => "paused",
+                RunOutcome::Done => "no event",
+            },
+            cx,
+        );
     }
 
     pub(super) fn reset(&mut self, cx: &mut Context<Self>) {

@@ -39,6 +39,17 @@ pub struct Cpu {
     #[cfg(feature = "debug")]
     #[serde(skip)]
     pub call_stack: Vec<CallFrame>,
+
+    #[cfg(feature = "debug")]
+    #[serde(skip)]
+    pub interrupts: InterruptCounters,
+}
+
+#[cfg(feature = "debug")]
+#[derive(Default, Clone, Copy)]
+pub struct InterruptCounters {
+    pub nmi: u64,
+    pub irq: u64,
 }
 
 impl Cpu {
@@ -58,6 +69,9 @@ impl Cpu {
 
             #[cfg(feature = "debug")]
             call_stack: Vec::new(),
+
+            #[cfg(feature = "debug")]
+            interrupts: InterruptCounters::default(),
         }
     }
 
@@ -218,6 +232,13 @@ fn idle<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
 }
 
 fn service_interrupt<M: MemoryMap>(snes: &mut Snes<M>, native: u16, emulation: u16) -> u64 {
+    #[cfg(feature = "debug")]
+    if native == 0xFFEA {
+        snes.cpu.interrupts.nmi += 1;
+    } else {
+        snes.cpu.interrupts.irq += 1;
+    }
+
     snes.cpu.execution = ExecutionState::Running;
     self::service_vectored(snes, native, emulation);
     let cycles = timing::interrupt_cycles(&snes.cpu);

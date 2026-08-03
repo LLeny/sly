@@ -1,13 +1,20 @@
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, Stateful, Window, div, px, svg};
+use gpui::{App, ClickEvent, Div, SharedString, Stateful, Window, div, px, svg};
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel};
+use crate::components::{ClickHandler, Panel, RowCallback, label_text};
 use crate::theme::Theme;
+
+#[derive(Clone)]
+pub struct StepTargetView {
+    pub id: SharedString,
+    pub label: SharedString,
+}
 
 #[derive(Clone, Default)]
 pub struct ControlsView {
     pub running: bool,
+    pub targets: Vec<StepTargetView>,
 }
 
 #[derive(IntoElement)]
@@ -21,6 +28,7 @@ pub struct ControlsWidget {
     on_reset: Option<ClickHandler>,
     on_save_state: Option<ClickHandler>,
     on_load_state: Option<ClickHandler>,
+    on_run_until: Option<RowCallback>,
 }
 
 impl ControlsWidget {
@@ -37,6 +45,7 @@ impl ControlsWidget {
             on_reset: None,
             on_save_state: None,
             on_load_state: None,
+            on_run_until: None,
         }
     }
 
@@ -100,6 +109,11 @@ impl ControlsWidget {
         self.on_load_state = Some(Box::new(handler));
         self
     }
+
+    pub fn on_run_until(mut self, handler: RowCallback) -> Self {
+        self.on_run_until = Some(handler);
+        self
+    }
 }
 
 impl RenderOnce for ControlsWidget {
@@ -155,7 +169,19 @@ impl RenderOnce for ControlsWidget {
                 self.on_load_state,
             ));
 
-        let body = div().flex().flex_col().gap_2().child(buttons);
+        let mut body = div().flex().flex_col().gap_2().child(buttons);
+        if !self.view.targets.is_empty() {
+            let mut chips = div()
+                .flex()
+                .items_center()
+                .flex_wrap()
+                .gap_1()
+                .child(label_text(t, "UNTIL"));
+            for target in &self.view.targets {
+                chips = chips.child(self::until_chip(t, target, self.on_run_until.clone()));
+            }
+            body = body.child(chips);
+        }
 
         Panel::new(Self::ID, "Controls")
             .glyph(icon::CONTROLS)
@@ -163,6 +189,34 @@ impl RenderOnce for ControlsWidget {
             .on_toggle_opt(self.on_toggle)
             .child(body)
     }
+}
+
+fn until_chip(
+    theme: &Theme,
+    target: &StepTargetView,
+    handler: Option<RowCallback>,
+) -> Stateful<Div> {
+    let accent_soft = theme.accent_soft;
+    let accent = theme.accent;
+    let mut chip = div()
+        .id(SharedString::from(format!("until-{}", target.id)))
+        .px_1p5()
+        .py_0p5()
+        .rounded_md()
+        .border_1()
+        .border_color(theme.border_subtle)
+        .bg(theme.bg_panel_alt)
+        .text_xs()
+        .text_color(theme.text_secondary)
+        .hover(move |s| s.bg(accent_soft).border_color(accent))
+        .cursor_pointer()
+        .child(target.label.clone());
+
+    if let Some(handler) = handler {
+        let id = target.id.clone();
+        chip = chip.on_click(move |_, window, cx| handler(id.clone(), window, cx));
+    }
+    chip
 }
 
 fn ctrl_button(

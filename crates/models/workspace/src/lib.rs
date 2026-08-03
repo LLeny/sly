@@ -52,6 +52,7 @@ pub enum WorkspaceIcon {
     Cpu,
     Video,
     Sound,
+    Chip,
 }
 
 #[derive(Clone, Debug)]
@@ -59,6 +60,7 @@ pub struct WorkspaceDescriptor {
     pub id: Arc<str>,
     pub title: Arc<str>,
     pub icon: WorkspaceIcon,
+    pub mmio_group: Option<Arc<str>>,
 }
 
 impl WorkspaceDescriptor {
@@ -67,7 +69,13 @@ impl WorkspaceDescriptor {
             id: id.into(),
             title: title.into(),
             icon,
+            mmio_group: None,
         }
+    }
+
+    pub fn mmio_group(mut self, group: impl Into<Arc<str>>) -> Self {
+        self.mmio_group = Some(group.into());
+        self
     }
 }
 
@@ -305,6 +313,12 @@ impl ComponentManifest {
             );
             panel.workspaces.push(workspace.into());
         }
+    }
+
+    pub fn remove(&mut self, id: &str) {
+        self.panels.retain(|p| &*p.id != id);
+        self.compositions
+            .retain(|c| &*c.host != id && &*c.companion != id);
     }
 
     pub fn insert_before(&mut self, anchor: PanelKind, panel: PanelDescriptor) {

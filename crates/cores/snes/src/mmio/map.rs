@@ -80,11 +80,6 @@ pub(crate) fn rom_index(cartridge: &Cartridge, index: usize) -> usize {
 
 /// Translate the standard SRAM windows.
 fn map_sram(cartridge: &Cartridge, bank: u8, offset: u16) -> Option<AddressSpace> {
-    let size = cartridge.sram.len();
-    if size == 0 {
-        return None;
-    }
-
     let raw_index = match cartridge.map_mode()? {
         MapMode::LoRom if matches!(bank, 0x70..=0x7D | 0xF0..=0xFF) && offset <= 0x7FFF => {
             (((bank & 0x0F) as usize) << 15) | offset as usize
@@ -97,7 +92,7 @@ fn map_sram(cartridge: &Cartridge, bank: u8, offset: u16) -> Option<AddressSpace
         _ => return None,
     };
 
-    Some(AddressSpace::Sram(raw_index % size))
+    Some(AddressSpace::Sram(cartridge.sram_index(raw_index)?))
 }
 
 /// Waitstates within the system banks $00-$3F and $80-$BF.

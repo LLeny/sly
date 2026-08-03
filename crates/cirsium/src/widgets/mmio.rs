@@ -106,6 +106,7 @@ pub struct MmioWidget {
     view: Arc<MmioView>,
     expanded: HashSet<SharedString>,
     collapsed: bool,
+    priority: Option<SharedString>,
     on_toggle: Option<ClickHandler>,
     on_toggle_register: Option<RowCallback>,
 }
@@ -118,6 +119,7 @@ impl MmioWidget {
             view,
             expanded: HashSet::new(),
             collapsed: false,
+            priority: None,
             on_toggle: None,
             on_toggle_register: None,
         }
@@ -130,6 +132,11 @@ impl MmioWidget {
 
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
+        self
+    }
+
+    pub fn priority(mut self, group: Option<SharedString>) -> Self {
+        self.priority = group;
         self
     }
 
@@ -175,7 +182,14 @@ impl RenderOnce for MmioWidget {
                     .child("No registers"),
             );
         } else {
-            for group in &self.view.groups {
+            let mut groups: Vec<_> = self.view.groups.iter().collect();
+            if let Some(priority) = &self.priority
+                && groups.iter().any(|g| g.name == *priority)
+            {
+                groups.sort_by_key(|g| g.name != *priority);
+            }
+
+            for group in groups {
                 list = list.child(self::group_header(t, group.name.clone()));
                 for reg in &group.registers {
                     let is_expanded = self.expanded.contains(&reg.id);

@@ -60,11 +60,19 @@ impl IoRegister for Gsu {
             Target::GprLow(_) => snes.superfx.latch = value,
             Target::GprHigh(n) => {
                 snes.superfx.r[n] = snes.superfx.latch as u16 | ((value as u16) << 8);
-                if n == 15 {
+                if n == 14 {
+                    snes.superfx.trigger_rom_prefetch();
+                    if !snes.superfx.sfr.go() {
+                        crate::superfx::interpreter::drain_buffers(snes);
+                    }
+                } else if n == 15 {
                     crate::superfx::start(snes);
                 }
             }
-            Target::Cache(index) => snes.superfx.cache.write(index, value),
+            Target::Cache(index) => {
+                let fx = &mut snes.superfx;
+                fx.cache.write(fx.cbr, index, value);
+            }
             Target::Status(status) => match status {
                 SFR_LOW => {
                     let sfr = &mut snes.superfx.sfr;
@@ -77,17 +85,21 @@ impl IoRegister for Gsu {
                     if bits.go() {
                         crate::superfx::start(snes);
                     } else {
-                        snes.superfx.sfr.set_go(false);
-                        snes.superfx.cbr = 0;
-                        snes.superfx.cache.invalidate();
+                        snes.superfx.force_stop();
                     }
                 }
                 BRAMR => snes.superfx.bramr = value & 1,
-                PBR => snes.superfx.pbr = value,
+                PBR => {
+                    snes.superfx.pbr = value & 0x7F;
+                    snes.superfx.cache.invalidate();
+                }
                 Cfgr::ADDRESS => snes.superfx.cfgr = Cfgr::from_raw(value),
                 SCBR => snes.superfx.scbr = value,
                 Clsr::ADDRESS => snes.superfx.clsr = Clsr::from_raw(value),
-                Scmr::ADDRESS => snes.superfx.scmr = Scmr::from_raw(value),
+                Scmr::ADDRESS => {
+                    snes.superfx.scmr = Scmr::from_raw(value);
+                    crate::superfx::bus_grants_updated(snes);
+                }
                 _ => {}
             },
         }
@@ -102,7 +114,7 @@ fn peek_target<M: MemoryMap>(snes: &Snes<M>, target: &Target) -> u8 {
     match target {
         Target::GprLow(n) => snes.superfx.r[*n] as u8,
         Target::GprHigh(n) => (snes.superfx.r[*n] >> 8) as u8,
-        Target::Cache(index) => snes.superfx.cache.data[*index],
+        Target::Cache(index) => snes.superfx.cache.read(snes.superfx.cbr, *index),
         Target::Status(status) => match *status {
             SFR_LOW => snes.superfx.sfr.raw() as u8,
             SFR_HIGH => (snes.superfx.sfr.raw() >> 8) as u8,

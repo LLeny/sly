@@ -31,7 +31,7 @@ pub use breakpoints::{
 pub use callstack::{CallStackView, CallStackWidget, StackFrameView};
 pub use cartridge::{CartridgeField, CartridgeView, CartridgeWidget};
 pub use channel_scopes::{AudioScopesView, ChannelScopesWidget};
-pub use controls::{ControlsView, ControlsWidget};
+pub use controls::{ControlsView, ControlsWidget, StepTargetView};
 pub use cpu::{CpuView, CpuWidget, FlagView, RegisterView};
 pub use disassembly::{
     DisasmLine, DisasmToken, DisassemblyLayoutCache, DisassemblyView, DisassemblyWidget, TokenKind,

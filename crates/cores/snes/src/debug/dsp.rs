@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use debugger_model::{
-    AudioChannel, AudioScopesView, Cell, ColWidth, Column, Field, FlagView, Row, Section,
-    StructuredView, TableRow, TableView, Tone, hex,
+    AudioChannel, AudioScopesView, Cell, ColWidth, Column, FlagView, Row, Section, StructuredView,
+    TableRow, TableView, Tone, hex,
 };
 
+use super::{field, section};
 use crate::apu::dsp::registers::{
     R_ECHO_DELAY, R_ECHO_ENABLE, R_ECHO_FEEDBACK, R_ECHO_START_ADDRESS, R_ECHO_VOLUME_LEFT,
     R_ECHO_VOLUME_RIGHT, R_FIR_FIRST, R_FLAGS, R_KEY_OFF, R_KEY_ON, R_MASTER_VOLUME_LEFT,
@@ -69,22 +70,6 @@ fn fmt_hz(hz: u32) -> String {
         format!("{:.1}k", hz as f32 / 1000.0)
     } else {
         format!("{hz}")
-    }
-}
-
-fn field(label: &str, value: String) -> Row {
-    Row::Field(Field {
-        label: label.into(),
-        value: value.into(),
-        accent: false,
-    })
-}
-
-fn section(title: &str, rows: Vec<Row>) -> Section {
-    Section {
-        title: Some(title.into()),
-        rows,
-        ..Section::default()
     }
 }
 

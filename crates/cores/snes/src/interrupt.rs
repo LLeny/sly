@@ -136,6 +136,30 @@ impl Irq {
     }
 }
 
+pub(crate) fn hv_targets_updated<M: MemoryMap>(snes: &mut Snes<M>) {
+    let condition = snes.irq.hv_timer_condition();
+    if condition & 1 == 0 {
+        return;
+    }
+
+    let now = snes.scheduler.cycles();
+    let line_start = now - now % crate::scheduler::MASTER_CLOCKS_PER_SCANLINE;
+    let scanline = snes.scheduler.scanline_at(now);
+    let htime = snes.irq.h_timer.target as u64;
+    let vtime = snes.irq.v_timer.target as u64;
+
+    if condition == 3 && scanline != vtime {
+        return;
+    }
+
+    if let Some(deadline) = h_timer_irq_deadline(line_start, htime)
+        && deadline > now
+    {
+        snes.scheduler
+            .schedule_event(deadline, crate::scheduler::EventKind::HvTimerFire);
+    }
+}
+
 pub(crate) fn hv_timer_line<M: MemoryMap>(snes: &mut Snes<M>, deadline: u64) {
     let condition = snes.irq.hv_timer_condition();
     if condition == 0 {

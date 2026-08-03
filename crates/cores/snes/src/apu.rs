@@ -41,6 +41,9 @@ pub struct Apu<M: ApuMap = HardwareMap> {
     pub dsp: Dsp,     // $F3 reads/writes the selected DSP register
     #[serde(skip)]
     audio_out: Vec<i16>, // interleaved stereo samples produced by the DSP
+    #[cfg(feature = "debug")]
+    #[serde(skip)]
+    samples_generated: u64,
     cpu_to_apu: [u8; 4], // written by main CPU $2140-$2143, read by SPC $F4-$F7
     apu_to_cpu: [u8; 4], // written by SPC $F4-$F7, read by main CPU $2140-$2143
     timer_settings: [u8; 3], // $FA-$FC on write
@@ -72,6 +75,11 @@ impl Apu<HardwareMap> {
 }
 
 impl<M: ApuMap> Apu<M> {
+    #[cfg(feature = "debug")]
+    pub(crate) fn samples_generated(&self) -> u64 {
+        self.samples_generated
+    }
+
     pub fn with_map(map: M) -> Self {
         let reset_vector = u16::from_le_bytes([IPL_ROM[0x3E], IPL_ROM[0x3F]]);
 
@@ -82,6 +90,8 @@ impl<M: ApuMap> Apu<M> {
             dsp_addr: 0,
             dsp: Dsp::new(),
             audio_out: Vec::new(),
+            #[cfg(feature = "debug")]
+            samples_generated: 0,
             cpu_to_apu: [0; 4],
             apu_to_cpu: [0; 4],
             timer_settings: [0; 3],
@@ -117,6 +127,10 @@ impl<M: ApuMap> Apu<M> {
 
     pub fn dsp_tick(&mut self) {
         let (left, right) = self.dsp.tick(&mut self.ram);
+        #[cfg(feature = "debug")]
+        {
+            self.samples_generated += 1;
+        }
         if self.audio_out.len() < AUDIO_BUFFER_CAP {
             self.audio_out.push(left);
             self.audio_out.push(right);

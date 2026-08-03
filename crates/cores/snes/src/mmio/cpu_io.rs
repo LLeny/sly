@@ -60,6 +60,7 @@ impl IoRegister for HTimeLow {
 
     fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
         snes.irq.h_timer.set_target_low(value);
+        crate::interrupt::hv_targets_updated(snes);
     }
 
     fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
@@ -75,6 +76,7 @@ impl IoRegister for HTimeHigh {
 
     fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
         snes.irq.h_timer.set_target_high(value);
+        crate::interrupt::hv_targets_updated(snes);
     }
 
     fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
@@ -90,6 +92,7 @@ impl IoRegister for VTimeLow {
 
     fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
         snes.irq.v_timer.set_target_low(value);
+        crate::interrupt::hv_targets_updated(snes);
     }
 
     fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
@@ -105,6 +108,7 @@ impl IoRegister for VTimeHigh {
 
     fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
         snes.irq.v_timer.set_target_high(value);
+        crate::interrupt::hv_targets_updated(snes);
     }
 
     fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {

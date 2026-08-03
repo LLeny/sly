@@ -14,3 +14,6 @@
 [submodule "submodules/65816"]
 	path = submodules/65816
 	url = https://github.com/SingleStepTests/65816
+[submodule "submodules/SNES"]
+	path = submodules/SNES
+	url = https://github.com/PeterLemon/SNES

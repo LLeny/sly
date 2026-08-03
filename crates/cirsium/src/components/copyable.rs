@@ -126,12 +126,23 @@ impl RenderOnce for Copyable {
 
         styled
             .on_click(self::copy_handler(flashed, self.payload))
-            .map(|d| {
-                if is_flashed {
-                    d.child(self::copied_indicator(t))
-                } else {
-                    d.children(self.child)
-                }
+            .relative()
+            .child(
+                div()
+                    .when(is_flashed, |d| d.opacity(0.))
+                    .w_full()
+                    .children(self.child),
+            )
+            .when(is_flashed, |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(self::copied_indicator(t)),
+                )
             })
     }
 }

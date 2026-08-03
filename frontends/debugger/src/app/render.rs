@@ -38,6 +38,7 @@ fn workspace_icon(icon: WorkspaceIcon) -> &'static str {
     match icon {
         WorkspaceIcon::Cpu => icon::CPU,
         WorkspaceIcon::Video => icon::MONITOR,
+        WorkspaceIcon::Chip => icon::ZAP,
         WorkspaceIcon::Sound => icon::AUDIO,
     }
 }

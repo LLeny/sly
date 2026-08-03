@@ -15,6 +15,7 @@ pub struct Cartridge {
     header_offset: usize,
     map_mode: Option<MapMode>,
     rom_mask: Option<usize>,
+    sram_mask: Option<usize>,
     coprocessor: Coprocessor,
 }
 
@@ -29,6 +30,7 @@ impl Cartridge {
             header_offset,
             map_mode: None,
             rom_mask: None,
+            sram_mask: None,
             coprocessor: Coprocessor::None,
             sram: Vec::new(),
         };
@@ -47,6 +49,11 @@ impl Cartridge {
             },
             0,
         );
+        cartridge.sram_mask = cartridge
+            .sram
+            .len()
+            .is_power_of_two()
+            .then(|| cartridge.sram.len() - 1);
 
         Ok(cartridge)
     }
@@ -57,6 +64,28 @@ impl Cartridge {
 
     pub fn rom_mask(&self) -> Option<usize> {
         self.rom_mask
+    }
+
+    pub(crate) fn sram_index(&self, index: usize) -> Option<usize> {
+        if let Some(mask) = self.sram_mask {
+            return Some(index & mask);
+        }
+
+        let len = self.sram.len();
+        (len != 0).then(|| index % len)
+    }
+
+    pub(crate) fn sram_read(&self, index: usize) -> u8 {
+        match self.sram_index(index) {
+            Some(index) => self.sram[index],
+            None => 0,
+        }
+    }
+
+    pub(crate) fn sram_write(&mut self, index: usize, value: u8) {
+        if let Some(index) = self.sram_index(index) {
+            self.sram[index] = value;
+        }
     }
 
     pub fn rom_crc32(&self) -> u32 {
@@ -78,17 +107,16 @@ impl Cartridge {
     }
 
     pub fn has_battery(&self) -> bool {
-        matches!(self.chipset() & 0x0F, 0x02 | 0x05 | 0x06 | 0x09 | 0x0A)
+        self.chipset().has_battery()
     }
 
     pub fn has_sram(&self) -> bool {
-        let chipset = self.chipset();
-        matches!(chipset & 0x0F, 0x01 | 0x02 | 0x04 | 0x05 | 0x09 | 0x0A)
+        self.chipset().has_sram()
     }
 
-    fn chipset(&self) -> u8 {
+    fn chipset(&self) -> Chipset {
         const EXTRA_HARDWARE_OFFSET: usize = 0x16;
-        self.rom[self.header_offset + EXTRA_HARDWARE_OFFSET]
+        Chipset::from_raw(self.rom[self.header_offset + EXTRA_HARDWARE_OFFSET])
     }
 
     pub fn coprocessor(&self) -> Coprocessor {
@@ -227,12 +255,32 @@ pub enum Coprocessor {
     Other(u8),
 }
 
-fn coprocessor_from_chipset(chipset: u8) -> Coprocessor {
-    if chipset & 0x0F < 0x03 {
+#[chapa::bitfield(u8, order = lsb0)]
+#[derive(Debug)]
+pub struct Chipset {
+    #[bits(0..=3)]
+    pub kind: u8,
+
+    #[bits(4..=7)]
+    pub coprocessor: u8,
+}
+
+impl Chipset {
+    pub fn has_battery(&self) -> bool {
+        matches!(self.kind(), 0x02 | 0x05 | 0x06 | 0x09 | 0x0A)
+    }
+
+    pub fn has_sram(&self) -> bool {
+        matches!(self.kind(), 0x01 | 0x02 | 0x04 | 0x05 | 0x09 | 0x0A)
+    }
+}
+
+fn coprocessor_from_chipset(chipset: Chipset) -> Coprocessor {
+    if chipset.kind() < 0x03 {
         return Coprocessor::None;
     }
 
-    match chipset >> 4 {
+    match chipset.coprocessor() {
         0x0 => Coprocessor::Dsp,
         0x1 => Coprocessor::SuperFx,
         0x2 => Coprocessor::Obc1,

@@ -134,6 +134,7 @@ pub(crate) struct Debugger {
     sprites_key: Option<u64>,
     expanded: HashMap<&'static str, HashSet<SharedString>>,
     registry: cirsium::PanelRegistry,
+    step_targets: Vec<cirsium::widgets::StepTargetView>,
     panel_frames: PanelFrames,
     status: StatusView,
     panes: Vec<ProcessorPane>,
@@ -226,6 +227,23 @@ impl Debugger {
         cx.subscribe(&log_filter_input, Self::on_log_filter_event)
             .detach();
 
+        let mut breakpoints = Breakpoints::default();
+        breakpoints.set_cpu_titles(
+            target
+                .cpus()
+                .into_iter()
+                .map(|c| (c.id, SharedString::from(c.title)))
+                .collect(),
+        );
+
+        let step_targets: Vec<cirsium::widgets::StepTargetView> = target
+            .step_targets()
+            .into_iter()
+            .map(|t| cirsium::widgets::StepTargetView {
+                id: SharedString::from(t.id),
+                label: SharedString::from(t.label),
+            })
+            .collect();
         let manifest = target.manifest();
         let workspace = manifest
             .workspaces
@@ -276,10 +294,11 @@ impl Debugger {
             sprites_key: None,
             expanded: HashMap::new(),
             registry,
+            step_targets,
             panel_frames,
             status,
             memory: Memory::new(target.as_ref()),
-            breakpoints: Breakpoints::default(),
+            breakpoints,
             logs: Logs::new(log_buffer),
             show_log: false,
             jump_input,

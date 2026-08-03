@@ -13,6 +13,6 @@ pub use model::{
 };
 pub use target::{
     BreakpointKind, BreakpointMark, CPU_WORKSPACE, CpuDescriptor, CpuId, DebugCore, RunOutcome,
-    SOUND_WORKSPACE, VIDEO_WORKSPACE, mark_at, standard_manifest,
+    SOUND_WORKSPACE, StepTarget, VIDEO_WORKSPACE, mark_at, standard_manifest,
 };
 pub use tokenize::{SyntaxSpec, strip_symbol_sigils, tokenize};
