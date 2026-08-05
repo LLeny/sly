@@ -1,0 +1,42 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 21,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "QT_QML_GENERATE_QMLLS_INI": "ON",
+                "CMAKE_CXX_FLAGS_DEBUG_INIT": "-DQT_QML_DEBUG -DQT_DECLARATIVE_DEBUG",
+                "CMAKE_CXX_FLAGS_RELWITHDEBINFO_INIT": "-DQT_QML_DEBUG -DQT_DECLARATIVE_DEBUG"
+            }
+        },
+        {
+            "name": "debug",
+            "hidden": true,
+            "description": "Debug build; links the debug sly-cxx staticlib. Inherit this from a CMakeUserPresets.json that supplies the local Qt toolchain file.",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SLY_CARGO_PROFILE": "debug"
+            }
+        },
+        {
+            "name": "release",
+            "hidden": true,
+            "description": "Release build; links the release sly-cxx staticlib. Inherit this from a CMakeUserPresets.json that supplies the local Qt toolchain file.",
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SLY_CARGO_PROFILE": "release"
+            }
+        }
+    ]
+}
