@@ -571,8 +571,10 @@ impl Ppu {
             }
         }
 
-        self.frame_buffer[scanline * SCREEN_WIDTH_USIZE..][..SCREEN_WIDTH_USIZE]
-            .copy_from_slice(&row);
+        let line = &mut self.frame_buffer[scanline * SCREEN_WIDTH_USIZE..][..SCREEN_WIDTH_USIZE];
+        for (dst, &(r, g, b)) in line.iter_mut().zip(row.iter()) {
+            *dst = [r, g, b, 0xff];
+        }
     }
 
     fn apply_brightness((r, g, b): (u8, u8, u8), brightness: u8) -> (u8, u8, u8) {

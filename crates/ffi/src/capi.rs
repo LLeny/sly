@@ -64,7 +64,7 @@ pub struct SlyAudioSpec {
     pub channels: u8,
 }
 
-/// `pixels` is tightly packed RGB8, `pixels_len == width * height * 3`, and is
+/// `pixels` is tightly packed RGBA8, `pixels_len == width * height * 4`, and is
 /// valid only until the next call that mutates or destroys this core.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -271,7 +271,7 @@ pub unsafe extern "C" fn sly_core_drain_audio(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sly_core_frame(core: *const SlyCore, out_frame: *mut SlyFrame) -> bool {
     let frame = unsafe { core.as_ref() }
-        .and_then(|core| core.rt.frame_rgb8())
+        .and_then(|core| core.rt.frame_rgba8())
         .map(|(width, height, pixels)| SlyFrame {
             width,
             height,

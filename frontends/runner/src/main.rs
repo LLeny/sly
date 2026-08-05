@@ -335,7 +335,7 @@ fn main() {
     let mut canvas = window.into_canvas();
     let texture_creator = canvas.texture_creator();
     let mut texture = texture_creator
-        .create_texture_streaming(PixelFormat::RGB24, frame_width, frame_height)
+        .create_texture_streaming(PixelFormat::RGBA32, frame_width, frame_height)
         .expect("Failed to create texture");
     texture.set_scale_mode(ScaleMode::Nearest);
 
@@ -349,8 +349,9 @@ fn main() {
     };
     let mut audio_buffer: Vec<i16> = Vec::new();
 
-    let mut buffer = vec![0u8; frame_width as usize * frame_height as usize * 3];
-    let mut record_buffer = if recorder.is_some() || video_recorder.is_some() {
+    let recording = recorder.is_some() || video_recorder.is_some();
+    let mut buffer = Vec::new();
+    let mut record_buffer = if recording {
         vec![0u8; record_width as usize * record_height as usize * 3]
     } else {
         Vec::new()
@@ -418,13 +419,10 @@ fn main() {
         }
 
         let frame = snes.software_frame().expect("SNES video disappeared");
-        for (dst, &(r, g, b)) in buffer.chunks_exact_mut(3).zip(frame.pixels) {
-            dst[0] = r;
-            dst[1] = g;
-            dst[2] = b;
-        }
 
-        if !record_buffer.is_empty() {
+        if recording {
+            frame.write_rgb8(&mut buffer);
+
             upscale(
                 &buffer,
                 &mut record_buffer,
@@ -441,7 +439,7 @@ fn main() {
         }
 
         texture
-            .update(None, &buffer, frame_width as usize * 3)
+            .update(None, frame.bytes(), frame_width as usize * 4)
             .expect("Failed to update texture");
         canvas.clear();
         canvas

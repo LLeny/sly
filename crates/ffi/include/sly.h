@@ -56,7 +56,7 @@ typedef struct SlyAudioSpec {
   uint8_t channels;
 } SlyAudioSpec;
 
-// `pixels` is tightly packed RGB8, `pixels_len == width * height * 3`, and is
+// `pixels` is tightly packed RGBA8, `pixels_len == width * height * 4`, and is
 // valid only until the next call that mutates or destroys this core.
 typedef struct SlyFrame {
   uint32_t width;

@@ -138,18 +138,13 @@ impl RenderOnce for SavestatesWidget {
     }
 }
 
-pub fn thumbnail_image(width: u32, height: u32, rgb: &[u8]) -> Option<SlotThumbnail> {
-    if width == 0 || height == 0 || rgb.len() != width as usize * height as usize * 3 {
+pub fn thumbnail_image(width: u32, height: u32, rgba_src: &[u8]) -> Option<SlotThumbnail> {
+    if width == 0 || height == 0 || rgba_src.len() != width as usize * height as usize * 4 {
         return None;
     }
 
-    let mut rgba = image::RgbaImage::new(width, height);
-    for (pixel, chunk) in rgba.pixels_mut().zip(rgb.as_chunks::<3>().0) {
-        *pixel = image::Rgba([chunk[2], chunk[1], chunk[0], 0xFF]);
-    }
-
     Some(SlotThumbnail {
-        image: Arc::new(RenderImage::new(vec![image::Frame::new(rgba)])),
+        image: crate::widgets::grid::build_image(rgba_src.as_chunks::<4>().0, width, height),
         width,
         height,
     })

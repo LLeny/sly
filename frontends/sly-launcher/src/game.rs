@@ -161,10 +161,8 @@ pub fn present_game_frame(
     };
 
     let data = image.data.get_or_insert_default();
-    data.resize(pixels.len() * 4, 255);
-    for (dst, &(r, g, b)) in data.as_chunks_mut::<4>().0.iter_mut().zip(pixels) {
-        dst.copy_from_slice(&[r, g, b, 255]);
-    }
+    data.clear();
+    data.extend_from_slice(pixels.as_flattened());
 }
 
 #[allow(clippy::too_many_arguments)]

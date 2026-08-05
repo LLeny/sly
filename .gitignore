@@ -4,3 +4,5 @@
 /frontends/debugger-web/dist
 /screenshotdb
 /roms
+/.vscode/
+/builds/

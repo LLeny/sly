@@ -55,15 +55,28 @@ pub(super) fn build_atlas<'a>(
     Arc::new(RenderImage::new(vec![image::Frame::new(atlas)]))
 }
 
-pub(super) fn build_image(pixels: &[(u8, u8, u8)], width: u32, height: u32) -> Arc<RenderImage> {
+pub(in crate::widgets) fn build_image(
+    pixels: &[[u8; 4]],
+    width: u32,
+    height: u32,
+) -> Arc<RenderImage> {
     let mut image = image::RgbaImage::new(width, height);
-    let mut row = vec![0u8; (width * 4) as usize];
-    self::blit(&mut image, &mut row, 0, 0, pixels, width, height);
+    self::bgra_into(pixels, &mut image);
     Arc::new(RenderImage::new(vec![image::Frame::new(image)]))
 }
 
-pub(in crate::widgets) fn bgra((r, g, b): (u8, u8, u8)) -> [u8; 4] {
-    [b, g, r, 0xFF]
+pub(in crate::widgets) fn bgra_into(pixels: &[[u8; 4]], out: &mut [u8]) {
+    for (dst, &src) in out.as_chunks_mut::<4>().0.iter_mut().zip(pixels) {
+        *dst = self::bgra(src);
+    }
+}
+
+pub(in crate::widgets) fn bgra([r, g, b, a]: [u8; 4]) -> [u8; 4] {
+    [b, g, r, a]
+}
+
+pub(in crate::widgets) fn bgra_rgb((r, g, b): (u8, u8, u8)) -> [u8; 4] {
+    self::bgra([r, g, b, 0xFF])
 }
 
 fn blit(
@@ -83,7 +96,7 @@ fn blit(
 
     for sy in 0..height {
         for sx in 0..width {
-            let px = self::bgra(pixels[sy * width + sx]);
+            let px = self::bgra_rgb(pixels[sy * width + sx]);
             row[sx * 4..sx * 4 + 4].copy_from_slice(&px);
         }
 

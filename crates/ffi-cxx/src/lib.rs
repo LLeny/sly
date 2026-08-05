@@ -69,13 +69,13 @@ mod ffi {
         fn drain_audio(self: &mut SlyCore) -> &[i16];
 
         fn frame_info(self: &SlyCore) -> FrameInfo;
-        /// Tightly packed RGB8 borrowed from the core's framebuffer, empty if
+        /// Tightly packed RGBA8 borrowed from the core's framebuffer, empty if
         /// no frame is available. Upload before the next non-const call, or
-        /// use `copy_frame_rgb` to cross threads.
-        fn frame_rgb(self: &SlyCore) -> &[u8];
-        /// `out` must be exactly `width * height * 3` bytes. The copy is safe
+        /// use `copy_frame_rgba` to cross threads.
+        fn frame_rgba(self: &SlyCore) -> &[u8];
+        /// `out` must be exactly `width * height * 4` bytes. The copy is safe
         /// to hand to another thread.
-        fn copy_frame_rgb(self: &SlyCore, out: &mut [u8]) -> bool;
+        fn copy_frame_rgba(self: &SlyCore, out: &mut [u8]) -> bool;
 
         fn save_state(self: &SlyCore) -> Result<Vec<u8>>;
         fn load_state(self: &mut SlyCore, bytes: &[u8]) -> Result<()>;
@@ -142,7 +142,7 @@ impl SlyCore {
     }
 
     fn frame_info(&self) -> ffi::FrameInfo {
-        match self.rt.frame_rgb8() {
+        match self.rt.frame_rgba8() {
             Some((width, height, _)) => ffi::FrameInfo { width, height },
             None => ffi::FrameInfo {
                 width: 0,
@@ -151,12 +151,12 @@ impl SlyCore {
         }
     }
 
-    fn frame_rgb(&self) -> &[u8] {
-        self.rt.frame_rgb8().map_or(&[], |(_, _, pixels)| pixels)
+    fn frame_rgba(&self) -> &[u8] {
+        self.rt.frame_rgba8().map_or(&[], |(_, _, pixels)| pixels)
     }
 
-    fn copy_frame_rgb(&self, out: &mut [u8]) -> bool {
-        let Some((_, _, bytes)) = self.rt.frame_rgb8() else {
+    fn copy_frame_rgba(&self, out: &mut [u8]) -> bool {
+        let Some((_, _, bytes)) = self.rt.frame_rgba8() else {
             return false;
         };
         if out.len() != bytes.len() {

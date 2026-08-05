@@ -3,8 +3,6 @@ use snes::{Cartridge, Snes, SnesError};
 
 pub use core_model::Button;
 
-const _: () = assert!(size_of::<(u8, u8, u8)>() == 3 && align_of::<(u8, u8, u8)>() == 1);
-
 /// Captured at load time, before the `Cartridge` is consumed by the core.
 pub struct CoreMeta {
     pub title: String,
@@ -61,11 +59,6 @@ macro_rules! assert_button_order {
             }
         };
     };
-}
-
-fn rgb8_bytes(pixels: &[(u8, u8, u8)]) -> &[u8] {
-    // SAFETY: the const assert above pins the tuple to 3 bytes, alignment 1.
-    unsafe { std::slice::from_raw_parts(pixels.as_ptr().cast(), pixels.len() * 3) }
 }
 
 /// Not thread-safe: use a handle from one thread at a time. The handle itself
@@ -161,13 +154,13 @@ impl Runtime {
         self.core.drain_audio(&mut self.audio_scratch);
     }
 
-    /// `(width, height, pixels)` with `pixels` tightly packed RGB8. Invalidated
-    /// by the next mutating call.
-    pub fn frame_rgb8(&self) -> Option<(u32, u32, &[u8])> {
+    /// `(width, height, pixels)` with `pixels` tightly packed RGBA8.
+    /// Invalidated by the next mutating call.
+    pub fn frame_rgba8(&self) -> Option<(u32, u32, &[u8])> {
         let frame = self.core.software_frame()?;
         frame
             .is_valid()
-            .then(|| (frame.width, frame.height, rgb8_bytes(frame.pixels)))
+            .then(|| (frame.width, frame.height, frame.bytes()))
     }
 
     pub fn frame_interval_ns(&self) -> Option<u64> {

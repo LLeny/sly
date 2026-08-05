@@ -4,7 +4,7 @@ use crate::System;
 
 const MAGIC: [u8; 4] = *b"SLYS";
 
-pub const ENVELOPE_VERSION: u16 = 4;
+pub const ENVELOPE_VERSION: u16 = 5;
 pub const HEADER_LENGTH: usize = 24;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -34,7 +34,7 @@ pub struct Thumbnail<'a> {
 
 impl Thumbnail<'_> {
     pub fn byte_length(width: u32, height: u32) -> usize {
-        width as usize * height as usize * 3
+        width as usize * height as usize * 4
     }
 }
 

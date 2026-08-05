@@ -9,7 +9,7 @@ impl<M: MemoryMap> Snes<M> {
         let payload = postcard::to_allocvec(self)
             .map_err(|err| StateError::Corrupt(format!("encoding state: {err}")))?;
 
-        let frame = self.ppu.frame_buffer_rgb();
+        let frame = self.ppu.frame_buffer_rgba();
         let cartridge = &self.mmu.cartridge;
 
         Ok(Envelope {
@@ -19,7 +19,7 @@ impl<M: MemoryMap> Snes<M> {
             thumbnail: Some(Thumbnail {
                 width: ppu::SCREEN_WIDTH,
                 height: ppu::SCREEN_HEIGHT,
-                pixels: &frame,
+                pixels: frame,
             }),
             payload: &payload,
         }

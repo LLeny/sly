@@ -47,9 +47,7 @@ impl FramebufferView {
 
 pub fn stage_bgra(fb: &core_model::SoftwareFrame<'_>, out: &mut Vec<u8>) {
     out.resize(fb.pixels.len() * 4, 0);
-    for (dst, &px) in out.chunks_exact_mut(4).zip(fb.pixels) {
-        dst.copy_from_slice(&crate::widgets::grid::bgra(px));
-    }
+    crate::widgets::grid::bgra_into(fb.pixels, out);
 }
 
 #[derive(IntoElement)]

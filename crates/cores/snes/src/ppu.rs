@@ -65,7 +65,7 @@ pub struct Ppu {
     pub(crate) pseudo_hires: bool,
     pub(crate) extbg: bool,
     #[serde(skip)]
-    pub(crate) frame_buffer: Vec<(u8, u8, u8)>,
+    pub(crate) frame_buffer: Vec<[u8; 4]>,
     pub(crate) counter_latch: bool,
     latched_h_counter: u16,
     latched_v_counter: u16,
@@ -99,7 +99,7 @@ impl Ppu {
             brightness: 0,
             pseudo_hires: false,
             extbg: false,
-            frame_buffer: vec![(0, 0, 0); SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize],
+            frame_buffer: vec![[0, 0, 0, 0xff]; SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize],
             counter_latch: false,
             latched_h_counter: 0,
             latched_v_counter: 0,
@@ -308,29 +308,27 @@ impl Ppu {
         color.saturating_sub(base) / size
     }
 
-    pub fn frame_buffer(&self) -> &[(u8, u8, u8)] {
+    pub fn frame_buffer(&self) -> &[[u8; 4]] {
         &self.frame_buffer
     }
 
-    pub(crate) fn frame_buffer_rgb(&self) -> Vec<u8> {
-        let mut rgb = Vec::with_capacity(self.frame_buffer.len() * 3);
-        for &(r, g, b) in &self.frame_buffer {
-            rgb.extend_from_slice(&[r, g, b]);
-        }
-        rgb
+    pub(crate) fn frame_buffer_rgba(&self) -> &[u8] {
+        self.frame_buffer.as_flattened()
     }
 
-    pub(crate) fn restore_frame_buffer(&mut self, rgb: Option<&[u8]>) {
+    pub(crate) fn restore_frame_buffer(&mut self, rgba: Option<&[u8]>) {
         self.frame_buffer.clear();
-        self.frame_buffer
-            .resize(SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize, (0, 0, 0));
+        self.frame_buffer.resize(
+            SCREEN_WIDTH as usize * SCREEN_HEIGHT as usize,
+            [0, 0, 0, 0xff],
+        );
 
-        let Some(rgb) = rgb else {
+        let Some(rgba) = rgba else {
             return;
         };
 
-        for (pixel, chunk) in self.frame_buffer.iter_mut().zip(rgb.as_chunks::<3>().0) {
-            *pixel = (chunk[0], chunk[1], chunk[2]);
+        for (pixel, chunk) in self.frame_buffer.iter_mut().zip(rgba.as_chunks::<4>().0) {
+            *pixel = *chunk;
         }
     }
 }

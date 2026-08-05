@@ -81,7 +81,7 @@ impl ScreenshotCore for SnesScreenshotter {
     fn frame(&self) -> Frame {
         let frame = self.snes.software_frame().expect("SNES must expose video");
         let mut pixels = Vec::with_capacity(frame.pixels.len() * 3);
-        for &(r, g, b) in frame.pixels {
+        for &[r, g, b, _] in frame.pixels {
             pixels.extend_from_slice(&[r, g, b]);
         }
 

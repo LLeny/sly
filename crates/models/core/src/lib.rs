@@ -161,14 +161,26 @@ pub struct SessionInfo {
 pub struct SoftwareFrame<'a> {
     pub width: u32,
     pub height: u32,
-    pub pixels: &'a [(u8, u8, u8)],
+    pub pixels: &'a [[u8; 4]],
 }
 
-impl SoftwareFrame<'_> {
+impl<'a> SoftwareFrame<'a> {
     pub fn is_valid(&self) -> bool {
         self.width > 0
             && self.height > 0
             && self.pixels.len() == self.width as usize * self.height as usize
+    }
+
+    pub fn bytes(self) -> &'a [u8] {
+        self.pixels.as_flattened()
+    }
+
+    pub fn write_rgb8(self, out: &mut Vec<u8>) {
+        out.clear();
+        out.reserve(self.pixels.len() * 3);
+        for &[r, g, b, _] in self.pixels {
+            out.extend_from_slice(&[r, g, b]);
+        }
     }
 }
 
