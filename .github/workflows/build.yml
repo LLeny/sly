@@ -101,3 +101,23 @@ jobs:
           key: launcher-native
       - name: Build launcher (native)
         run: cargo build -p sly-launcher
+
+  bindings:
+    name: Build C / C++ bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init --depth 1 submodules/chipi-spec
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bindings
+      - name: Build bindings
+        run: cargo build -p sly-ffi -p sly-cxx
+      - name: Check committed C header compiles
+        run: |
+          gcc -fsyntax-only -std=c11 -x c crates/ffi/include/sly.h
+          g++ -fsyntax-only -std=c++17 -x c++ crates/ffi/include/sly.h
+      - name: Check committed C header is current
+        run: git diff --exit-code -- crates/ffi/include/sly.h

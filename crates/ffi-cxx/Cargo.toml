@@ -1,0 +1,16 @@
+[package]
+name = "sly-cxx"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "sly_cxx"
+crate-type = ["lib", "staticlib"]
+
+[dependencies]
+core-model = { path = "../models/core" }
+sly-ffi = { path = "../ffi" }
+cxx = "1.0.198"
+
+[build-dependencies]
+cxx-build = "1.0.198"
