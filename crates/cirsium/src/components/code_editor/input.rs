@@ -48,7 +48,7 @@ impl EntityInputHandler for CodeEditor {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
 
-        self.text.replace_range(range.clone(), new_text);
+        self.replace_text_with_history(range.clone(), new_text);
 
         let cursor = range.start + new_text.len();
         self.selected_range = cursor..cursor;
@@ -76,7 +76,7 @@ impl EntityInputHandler for CodeEditor {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
 
-        self.text.replace_range(range.clone(), new_text);
+        self.replace_text_with_history(range.clone(), new_text);
 
         self.marked_range =
             (!new_text.is_empty()).then(|| range.start..range.start + new_text.len());

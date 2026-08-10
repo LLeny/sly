@@ -77,11 +77,13 @@ impl Debugger {
                         .error(self.script.error())
                         .hooks(self.script.hook_count())
                         .dirty(dirty)
+                        .file_name(self.script_file_name.clone())
                         .on_run(cx.listener(|this, _, _, cx| this.script_run(cx)))
                         .on_stop(cx.listener(|this, _, _, cx| this.script_stop(cx)))
                         .on_revert(cx.listener(|this, _, _, cx| this.script_revert(cx)))
                         .on_open(cx.listener(|this, _, _, cx| this.script_open_from_disk(cx)))
-                        .on_save(cx.listener(|this, _, _, cx| this.script_save_to_disk(cx)))
+                        .on_save(cx.listener(|this, _, _, cx| this.script_save(cx)))
+                        .on_save_as(cx.listener(|this, _, _, cx| this.script_save_as(cx)))
                         .into_any_element()
                 }
                 PanelKind::ScriptConsole => {

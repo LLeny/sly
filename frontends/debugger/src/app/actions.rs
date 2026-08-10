@@ -368,6 +368,8 @@ impl Debugger {
     ) {
         match event {
             cirsium::components::CodeEditorEvent::Run => self.script_run(cx),
+            cirsium::components::CodeEditorEvent::Save => self.script_save(cx),
+            cirsium::components::CodeEditorEvent::SaveAs => self.script_save_as(cx),
             cirsium::components::CodeEditorEvent::Changed => cx.notify(),
         }
     }
@@ -435,22 +437,141 @@ impl Debugger {
             editor.set_text(source, cx);
             editor.set_error_line(None, cx);
         });
+        self.script_file_name = name.clone().into();
+        #[cfg(target_family = "wasm")]
+        {
+            self.script_external = true;
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.script_path = None;
+        }
         self.script.note(format!("loaded {name}"));
         cx.notify();
     }
 
-    pub(super) fn script_save_to_disk(&mut self, cx: &mut Context<Self>) {
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn load_script_file(
+        &mut self,
+        path: std::path::PathBuf,
+        source: String,
+        cx: &mut Context<Self>,
+    ) {
+        let name = crate::file_name_of(&path);
+        self.load_script_source(name, source, cx);
+        self.script_path = Some(path);
+    }
+
+    pub(super) fn script_save(&mut self, cx: &mut Context<Self>) {
         let source = self.script_editor.read(cx).text().to_string();
-        self.script.note("saved script to disk");
-        crate::save::save_bin("script.lua".to_string(), source.into_bytes(), cx);
+
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(path) = self.script_path.clone() {
+            self.write_script_file(path, source, cx);
+            return;
+        }
+
+        #[cfg(target_family = "wasm")]
+        if self.script_external {
+            crate::save::save_bin(self.script_file_name.to_string(), source.into_bytes(), cx);
+            self.script.note(format!("saved {}", self.script_file_name));
+            cx.notify();
+            return;
+        }
+
+        match self.session.write_script(&source) {
+            Ok(()) => {
+                self.script_file_name = storage::SCRIPT_FILE.into();
+                #[cfg(target_family = "wasm")]
+                {
+                    self.script_external = false;
+                }
+                self.script.note("saved script.lua for this game");
+            }
+            Err(err) => {
+                tracing::warn!("could not persist script: {err}");
+                self.script.note(format!("save failed: {err}"));
+            }
+        }
         cx.notify();
+    }
+
+    pub(super) fn script_save_as(&mut self, cx: &mut Context<Self>) {
+        let source = self.script_editor.read(cx).text().to_string();
+        let suggested_name = if self.script_file_name.ends_with(".lua") {
+            self.script_file_name.to_string()
+        } else {
+            storage::SCRIPT_FILE.to_string()
+        };
+
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let directory = self
+                .script_path
+                .as_deref()
+                .and_then(std::path::Path::parent)
+                .map(std::path::Path::to_path_buf)
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| std::path::PathBuf::from("."));
+            let prompt = cx.prompt_for_new_path(&directory, Some(&suggested_name));
+            cx.spawn(async move |this, cx| {
+                let path = match prompt.await {
+                    Ok(Ok(Some(path))) => path,
+                    Ok(Err(err)) => {
+                        tracing::error!("save dialog failed: {err}");
+                        return;
+                    }
+                    _ => return,
+                };
+                let _ = this.update(cx, |this, cx| this.write_script_file(path, source, cx));
+            })
+            .detach();
+        }
+
+        #[cfg(target_family = "wasm")]
+        {
+            crate::save::save_bin(suggested_name.clone(), source.into_bytes(), cx);
+            self.script_file_name = suggested_name.into();
+            self.script_external = true;
+            self.script.note(format!("saved {}", self.script_file_name));
+            cx.notify();
+        }
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn write_script_file(
+        &mut self,
+        path: std::path::PathBuf,
+        source: String,
+        cx: &mut Context<Self>,
+    ) {
+        crate::save::write_file(
+            path,
+            source.into_bytes(),
+            cx,
+            move |path, result, this, cx| {
+                let name = crate::file_name_of(&path);
+                match result {
+                    Ok(()) => {
+                        this.script_file_name = name.clone().into();
+                        this.script_path = Some(path);
+                        this.script.note(format!("saved {name}"));
+                    }
+                    Err(err) => {
+                        tracing::error!("failed to write {}: {err}", path.display());
+                        this.script.note(format!("save failed: {err}"));
+                    }
+                }
+                cx.notify();
+            },
+        );
     }
 
     pub(super) fn script_open_from_disk(&mut self, cx: &mut Context<Self>) {
         crate::save::browse_for_file(cx, |path, this, cx| {
             #[cfg(not(target_family = "wasm"))]
             match std::fs::read_to_string(path) {
-                Ok(source) => this.load_script_source(crate::file_name_of(path), source, cx),
+                Ok(source) => this.load_script_file(path.to_path_buf(), source, cx),
                 Err(err) => tracing::error!("reading {}: {err}", path.display()),
             }
             #[cfg(target_family = "wasm")]
@@ -468,6 +589,15 @@ impl Debugger {
             Ok(Some(source)) if !source.trim().is_empty() => {
                 self.script_editor
                     .update(cx, |editor, cx| editor.set_text(source, cx));
+                self.script_file_name = storage::SCRIPT_FILE.into();
+                #[cfg(target_family = "wasm")]
+                {
+                    self.script_external = false;
+                }
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    self.script_path = None;
+                }
                 self.script.note("restored the script saved for this game");
             }
             Ok(_) => {}

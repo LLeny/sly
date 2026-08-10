@@ -85,8 +85,7 @@ pub fn divided_mono<S: Into<SharedString>>(
     )
 }
 
-/// A small square icon button that sits beside a text input.
-pub fn field_button(
+fn field_button_base(
     theme: &Theme,
     id: &'static str,
     icon_path: &'static str,
@@ -100,7 +99,6 @@ pub fn field_button(
         .items_center()
         .justify_center()
         .h(px(super::CONTROL_HEIGHT))
-        .w(px(26.))
         .bg(theme.bg_panel_alt)
         .border_1()
         .border_color(theme.border_subtle)
@@ -113,6 +111,35 @@ pub fn field_button(
                 .path(icon_path)
                 .size(px(12.))
                 .text_color(theme.text_secondary),
+        )
+}
+
+/// A small square icon button that sits beside a text input.
+pub fn field_button(
+    theme: &Theme,
+    id: &'static str,
+    icon_path: &'static str,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    field_button_base(theme, id, icon_path, on_click).w(px(26.))
+}
+
+/// A compact icon-and-label button for dense panel toolbars.
+pub fn field_text_button(
+    theme: &Theme,
+    id: &'static str,
+    icon_path: &'static str,
+    label: &'static str,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    field_button_base(theme, id, icon_path, on_click)
+        .gap_1()
+        .px_2()
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme.text_secondary)
+                .child(label),
         )
 }
 

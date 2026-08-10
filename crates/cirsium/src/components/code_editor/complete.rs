@@ -215,7 +215,7 @@ impl super::CodeEditor {
         };
 
         let insert = item.insert.to_string();
-        self.text.replace_range(open.query.clone(), &insert);
+        self.replace_text_with_history(open.query.clone(), &insert);
 
         let caret = open.query.start + insert.len();
         self.selected_range = caret..caret;

@@ -34,6 +34,26 @@ pub(crate) fn browse_for_file<V: 'static>(
 }
 
 #[cfg(not(target_family = "wasm"))]
+pub(crate) fn write_file<V: 'static>(
+    path: std::path::PathBuf,
+    bytes: Vec<u8>,
+    cx: &mut Context<V>,
+    then: impl FnOnce(std::path::PathBuf, std::io::Result<()>, &mut V, &mut Context<V>) + 'static,
+) {
+    let background = cx.background_executor().clone();
+    cx.spawn(async move |this: gpui::WeakEntity<V>, cx| {
+        let (path, result) = background
+            .spawn(async move {
+                let result = std::fs::write(&path, bytes);
+                (path, result)
+            })
+            .await;
+        let _ = this.update(cx, |this, cx| then(path, result, this, cx));
+    })
+    .detach();
+}
+
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn save_bin(name: String, bytes: Vec<u8>, cx: &mut gpui::App) {
     let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let rx = cx.prompt_for_new_path(&dir, Some(&name));

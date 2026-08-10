@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ops::Range;
 
 use debugger_model::{LuaToken, tokenize_lua};
@@ -21,6 +22,7 @@ pub use complete::Completion;
 
 const CONTEXT: &str = "CodeEditor";
 const INDENT: &str = "  ";
+const HISTORY_LIMIT: usize = 256;
 
 actions!(
     code_editor,
@@ -46,6 +48,10 @@ actions!(
         Paste,
         Cut,
         Copy,
+        Undo,
+        Redo,
+        Save,
+        SaveAs,
         Run,
     ]
 );
@@ -70,6 +76,15 @@ pub fn register_code_editor_keys(cx: &mut App) {
         KeyBinding::new("ctrl-x", Cut, Some(CONTEXT)),
         KeyBinding::new("cmd-v", Paste, Some(CONTEXT)),
         KeyBinding::new("ctrl-v", Paste, Some(CONTEXT)),
+        KeyBinding::new("cmd-z", Undo, Some(CONTEXT)),
+        KeyBinding::new("ctrl-z", Undo, Some(CONTEXT)),
+        KeyBinding::new("cmd-shift-z", Redo, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-z", Redo, Some(CONTEXT)),
+        KeyBinding::new("ctrl-y", Redo, Some(CONTEXT)),
+        KeyBinding::new("cmd-s", Save, Some(CONTEXT)),
+        KeyBinding::new("ctrl-s", Save, Some(CONTEXT)),
+        KeyBinding::new("cmd-shift-s", SaveAs, Some(CONTEXT)),
+        KeyBinding::new("ctrl-shift-s", SaveAs, Some(CONTEXT)),
         KeyBinding::new("home", MoveHome, Some(CONTEXT)),
         KeyBinding::new("end", MoveEnd, Some(CONTEXT)),
         KeyBinding::new("shift-home", SelectHome, Some(CONTEXT)),
@@ -84,7 +99,56 @@ pub fn register_code_editor_keys(cx: &mut App) {
 
 pub enum CodeEditorEvent {
     Changed,
+    Save,
+    SaveAs,
     Run,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EditState {
+    text: String,
+    selected_range: Range<usize>,
+    selection_reversed: bool,
+}
+
+#[derive(Default)]
+struct EditHistory {
+    undo: VecDeque<EditState>,
+    redo: VecDeque<EditState>,
+}
+
+impl EditHistory {
+    fn clear(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
+
+    fn record(&mut self, state: EditState) {
+        Self::push(&mut self.undo, state);
+        self.redo.clear();
+    }
+
+    fn undo(&mut self, current: EditState) -> Option<EditState> {
+        let previous = self.undo.pop_back()?;
+        Self::push(&mut self.redo, current);
+        Some(previous)
+    }
+
+    fn redo(&mut self, current: EditState) -> Option<EditState> {
+        let next = self.redo.pop_back()?;
+        Self::push(&mut self.undo, current);
+        Some(next)
+    }
+
+    fn push(stack: &mut VecDeque<EditState>, state: EditState) {
+        if stack.back() == Some(&state) {
+            return;
+        }
+        if stack.len() == HISTORY_LIMIT {
+            stack.pop_front();
+        }
+        stack.push_back(state);
+    }
 }
 
 pub struct CodeEditor {
@@ -104,6 +168,7 @@ pub struct CodeEditor {
     suggestions: Option<Suggestions>,
     hover: Option<(Point<Pixels>, Completion)>,
     layout: element::Layout,
+    history: EditHistory,
 }
 
 impl CodeEditor {
@@ -125,6 +190,7 @@ impl CodeEditor {
             suggestions: None,
             hover: None,
             layout: element::Layout::default(),
+            history: EditHistory::default(),
             text,
         };
         editor.reparse();
@@ -141,6 +207,7 @@ impl CodeEditor {
         self.selection_reversed = false;
         self.marked_range = None;
         self.suggestions = None;
+        self.history.clear();
         self.reparse();
         cx.emit(CodeEditorEvent::Changed);
         cx.notify();
@@ -175,6 +242,37 @@ impl CodeEditor {
                 .filter(|(_, byte)| *byte == b'\n')
                 .map(|(ix, _)| ix + 1),
         );
+    }
+
+    fn edit_state(&self) -> EditState {
+        EditState {
+            text: self.text.clone(),
+            selected_range: self.selected_range.clone(),
+            selection_reversed: self.selection_reversed,
+        }
+    }
+
+    fn record_edit(&mut self) {
+        self.history.record(self.edit_state());
+    }
+
+    fn replace_text_with_history(&mut self, range: Range<usize>, new_text: &str) {
+        if self.text[range.clone()] != *new_text {
+            self.record_edit();
+        }
+        self.text.replace_range(range, new_text);
+    }
+
+    fn restore_edit(&mut self, state: EditState, cx: &mut Context<Self>) {
+        self.text = state.text;
+        self.selected_range = state.selected_range;
+        self.selection_reversed = state.selection_reversed;
+        self.marked_range = None;
+        self.reveal_cursor = true;
+        self.close_suggestions();
+        self.reparse();
+        cx.emit(CodeEditorEvent::Changed);
+        cx.notify();
     }
 
     fn line_at(&self, offset: usize) -> usize {
@@ -405,6 +503,28 @@ impl CodeEditor {
         }
     }
 
+    fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+        let current = self.edit_state();
+        if let Some(previous) = self.history.undo(current) {
+            self.restore_edit(previous, cx);
+        }
+    }
+
+    fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+        let current = self.edit_state();
+        if let Some(next) = self.history.redo(current) {
+            self.restore_edit(next, cx);
+        }
+    }
+
+    fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(CodeEditorEvent::Save);
+    }
+
+    fn save_as(&mut self, _: &SaveAs, _: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(CodeEditorEvent::SaveAs);
+    }
+
     fn run(&mut self, _: &Run, _: &mut Window, cx: &mut Context<Self>) {
         cx.emit(CodeEditorEvent::Run);
     }
@@ -563,6 +683,10 @@ impl Render for CodeEditor {
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::paste))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
+            .on_action(cx.listener(Self::save))
+            .on_action(cx.listener(Self::save_as))
             .on_action(cx.listener(Self::run))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))

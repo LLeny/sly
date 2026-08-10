@@ -150,6 +150,11 @@ pub(crate) struct Debugger {
     script: Script,
     hook_marks: Vec<BreakpointMark>,
     script_editor: Entity<cirsium::components::CodeEditor>,
+    script_file_name: SharedString,
+    #[cfg(target_family = "wasm")]
+    script_external: bool,
+    #[cfg(not(target_family = "wasm"))]
+    script_path: Option<std::path::PathBuf>,
     builtin_filter_input: Entity<TextInput>,
     builtin_filter: SharedString,
     collapsed: HashSet<SharedString>,
@@ -329,6 +334,11 @@ impl Debugger {
             script: Script::new(target.as_ref()),
             hook_marks: Vec::new(),
             script_editor,
+            script_file_name: storage::SCRIPT_FILE.into(),
+            #[cfg(target_family = "wasm")]
+            script_external: false,
+            #[cfg(not(target_family = "wasm"))]
+            script_path: None,
             builtin_filter_input,
             builtin_filter: SharedString::default(),
             target,

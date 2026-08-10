@@ -8,7 +8,9 @@ use gpui::{
 };
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, PanelChrome, badge, empty_state, field_button};
+use crate::components::{
+    ClickHandler, PanelChrome, badge, empty_state, field_button, field_text_button,
+};
 use crate::theme::Theme;
 
 const ROW_HEIGHT: f32 = 17.;
@@ -32,10 +34,12 @@ pub struct ScriptEditorWidget {
     error: Option<SharedString>,
     hooks: usize,
     dirty: bool,
+    file_name: SharedString,
     on_run: Option<ClickHandler>,
     on_stop: Option<ClickHandler>,
     on_revert: Option<ClickHandler>,
     on_save: Option<ClickHandler>,
+    on_save_as: Option<ClickHandler>,
     on_open: Option<ClickHandler>,
 }
 
@@ -49,10 +53,12 @@ impl ScriptEditorWidget {
             error: None,
             hooks: 0,
             dirty: false,
+            file_name: "script.lua".into(),
             on_run: None,
             on_stop: None,
             on_revert: None,
             on_save: None,
+            on_save_as: None,
             on_open: None,
         }
     }
@@ -84,6 +90,11 @@ impl ScriptEditorWidget {
 
     pub fn dirty(mut self, dirty: bool) -> Self {
         self.dirty = dirty;
+        self
+    }
+
+    pub fn file_name(mut self, file_name: impl Into<SharedString>) -> Self {
+        self.file_name = file_name.into();
         self
     }
 
@@ -119,6 +130,14 @@ impl ScriptEditorWidget {
         self
     }
 
+    pub fn on_save_as(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_save_as = Some(Box::new(handler));
+        self
+    }
+
     pub fn on_open(
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -147,10 +166,28 @@ impl RenderOnce for ScriptEditorWidget {
             toolbar = toolbar.child(field_button(t, "script-open", icon::OPEN, open));
         }
         if let Some(save) = self.on_save {
-            toolbar = toolbar.child(field_button(t, "script-save", icon::SAVE, save));
+            toolbar = toolbar.child(field_text_button(
+                t,
+                "script-save",
+                icon::SAVE,
+                "Save",
+                save,
+            ));
+        }
+        if let Some(save_as) = self.on_save_as {
+            toolbar = toolbar.child(field_text_button(
+                t,
+                "script-save-as",
+                icon::DOWNLOAD,
+                "Save As",
+                save_as,
+            ));
         }
 
-        toolbar = toolbar
+        let header_badges = div()
+            .flex()
+            .items_center()
+            .gap_1()
             .child(badge(self.status.label(), status_color(self.status, t)))
             .when(self.hooks > 0, |bar| {
                 bar.child(badge(format!("{} hooks", self.hooks), t.info))
@@ -176,15 +213,35 @@ impl RenderOnce for ScriptEditorWidget {
                 .children(message),
         );
 
+        let editor = div()
+            .relative()
+            .flex()
+            .flex_1()
+            .min_h(px(0.))
+            .children(self.editor)
+            .child(
+                badge(self.file_name, t.accent)
+                    .absolute()
+                    .top(px(6.))
+                    .right(px(6.))
+                    .max_w(px(240.))
+                    .truncate(),
+            );
+
         let body = div()
             .flex()
             .flex_col()
             .flex_1()
             .min_h(px(0.))
             .child(toolbar)
-            .children(self.editor);
+            .child(editor);
 
-        self.chrome.panel().glyph(icon::CODE).grow(true).child(body)
+        self.chrome
+            .panel()
+            .glyph(icon::CODE)
+            .header_action(header_badges)
+            .grow(true)
+            .child(body)
     }
 }
 

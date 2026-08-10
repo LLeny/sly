@@ -115,7 +115,31 @@ impl Root {
     }
 
     #[cfg(not(target_family = "wasm"))]
-    fn load_rom_from_path(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+    fn load_file_from_path(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let is_lua = path
+            .extension()
+            .is_some_and(|ext| ext.to_string_lossy().eq_ignore_ascii_case("lua"));
+        if is_lua {
+            match std::fs::read_to_string(path) {
+                Ok(source) => match self.debugger.clone() {
+                    Some(debugger) => {
+                        debugger.update(cx, |debugger, cx| {
+                            debugger.load_script_file(path.to_path_buf(), source, cx)
+                        });
+                        self.error = None;
+                    }
+                    None => {
+                        self.error = Some("Load a ROM before loading a script".into());
+                    }
+                },
+                Err(err) => {
+                    self.error = Some(format!("Couldn't read {}: {err}", path.display()).into());
+                }
+            }
+            cx.notify();
+            return;
+        }
+
         match std::fs::read(path) {
             Ok(bytes) => self.load_dropped(crate::file_name_of(path), bytes, cx),
             Err(err) => {
@@ -130,13 +154,13 @@ impl Root {
         let Some(path) = paths.paths().first() else {
             return;
         };
-        self.load_rom_from_path(path, cx);
+        self.load_file_from_path(path, cx);
     }
 
     fn browse_for_rom(&mut self, cx: &mut Context<Self>) {
         crate::save::browse_for_file(cx, |path, this, cx| {
             #[cfg(not(target_family = "wasm"))]
-            this.load_rom_from_path(path, cx);
+            this.load_file_from_path(path, cx);
             #[cfg(target_family = "wasm")]
             let _ = (path, this, cx);
         });
