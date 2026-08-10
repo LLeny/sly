@@ -207,7 +207,7 @@ impl Debugger {
             .into_iter()
             .map(|desc| {
                 let mut pane = ProcessorPane {
-                    disasm: Disasm::new(desc.id.clone()),
+                    disasm: Disasm::new(desc.id.clone(), desc.pc_mask()),
                     id: desc.id,
                     title: desc.title.into(),
                     space: desc.space,
@@ -224,10 +224,10 @@ impl Debugger {
             "a DebugCore must expose at least one processor"
         );
 
-        let jump_input = cx.new(|cx| TextInput::new(cx, "go to...").hex_only(true).max_len(6));
+        let jump_input = cx.new(|cx| TextInput::new(cx, "go to...").hex_only(true).max_len(8));
         cx.subscribe(&jump_input, Self::on_jump_event).detach();
 
-        let bp_input = cx.new(|cx| TextInput::new(cx, "address...").hex_only(true).max_len(6));
+        let bp_input = cx.new(|cx| TextInput::new(cx, "address...").hex_only(true).max_len(8));
         cx.subscribe(&bp_input, Self::on_bp_event).detach();
 
         let log_filter_input = cx.new(|cx| TextInput::new(cx, "filter messages..."));

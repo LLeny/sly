@@ -24,6 +24,7 @@ pub struct Hook {
     pub end: u32,
     pub cpu: CpuId,
     pub region: Arc<str>,
+    pub pc_mask: u32,
     pub func: StashedFunction,
 }
 
@@ -39,6 +40,7 @@ impl Hook {
             kind,
             cpu: self.cpu.clone(),
             region: self.region.clone(),
+            pc_mask: self.pc_mask,
         })
     }
 
@@ -60,14 +62,17 @@ pub struct CpuInfo {
     pub id: CpuId,
     pub title: Arc<str>,
     pub space: Arc<str>,
+    pub pc_mask: u32,
 }
 
 impl From<CpuDescriptor> for CpuInfo {
     fn from(desc: CpuDescriptor) -> Self {
+        let pc_mask = desc.pc_mask();
         Self {
             id: desc.id,
             title: desc.title,
             space: desc.space,
+            pc_mask,
         }
     }
 }
@@ -124,6 +129,7 @@ impl HostState {
         end: u32,
         cpu: CpuId,
         region: Arc<str>,
+        pc_mask: u32,
         func: StashedFunction,
     ) -> u64 {
         self.next_hook += 1;
@@ -135,6 +141,7 @@ impl HostState {
             end,
             cpu,
             region,
+            pc_mask,
             func,
         });
         id

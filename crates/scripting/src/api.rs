@@ -669,7 +669,10 @@ fn add_access_hook<'gc>(
 
     let id = {
         let mut state = host.state();
-        let Some(cpu_id) = state.cpu(cpu.as_deref()).map(|cpu| cpu.id.clone()) else {
+        let Some((cpu_id, pc_mask)) = state
+            .cpu(cpu.as_deref())
+            .map(|cpu| (cpu.id.clone(), cpu.pc_mask))
+        else {
             return Err(self::fail(
                 ctx,
                 format!("unknown cpu `{}`", cpu.unwrap_or_default()),
@@ -687,6 +690,7 @@ fn add_access_hook<'gc>(
             start.max(end) as u32,
             cpu_id,
             region,
+            pc_mask,
             ctx.stash(function),
         )
     };
@@ -737,7 +741,7 @@ fn on_event<'gc>(
         let mut state = host.state();
         let Some(cpu) = state
             .cpu(None)
-            .map(|cpu| (cpu.id.clone(), cpu.space.clone()))
+            .map(|cpu| (cpu.id.clone(), cpu.space.clone(), cpu.pc_mask))
         else {
             return Err(self::fail(ctx, "core exposes no processors"));
         };
@@ -747,6 +751,7 @@ fn on_event<'gc>(
             0,
             cpu.0,
             cpu.1,
+            cpu.2,
             ctx.stash(function),
         )
     };
@@ -882,11 +887,19 @@ fn on_frame<'gc>(
         let mut state = host.state();
         let Some(cpu) = state
             .cpu(None)
-            .map(|cpu| (cpu.id.clone(), cpu.space.clone()))
+            .map(|cpu| (cpu.id.clone(), cpu.space.clone(), cpu.pc_mask))
         else {
             return Err(self::fail(ctx, "core exposes no processors"));
         };
-        state.add_hook(Trigger::Frame, 0, 0, cpu.0, cpu.1, ctx.stash(function))
+        state.add_hook(
+            Trigger::Frame,
+            0,
+            0,
+            cpu.0,
+            cpu.1,
+            cpu.2,
+            ctx.stash(function),
+        )
     };
 
     stack.replace(ctx, id as i64);

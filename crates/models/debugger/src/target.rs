@@ -46,6 +46,7 @@ pub struct CpuDescriptor {
     pub id: CpuId,
     pub title: Arc<str>,
     pub space: Arc<str>,
+    pc_bits: u8,
 }
 
 impl CpuDescriptor {
@@ -53,11 +54,27 @@ impl CpuDescriptor {
         id: impl Into<CpuId>,
         title: impl Into<Arc<str>>,
         space: impl Into<Arc<str>>,
+        pc_bits: u8,
     ) -> Self {
+        assert!((1..=32).contains(&pc_bits), "PC width must be 1..=32 bits");
+
         Self {
             id: id.into(),
             title: title.into(),
             space: space.into(),
+            pc_bits,
+        }
+    }
+
+    pub fn pc_bits(&self) -> u8 {
+        self.pc_bits
+    }
+
+    pub fn pc_mask(&self) -> u32 {
+        if self.pc_bits == 32 {
+            u32::MAX
+        } else {
+            (1_u32 << self.pc_bits) - 1
         }
     }
 }
@@ -109,6 +126,7 @@ pub struct BreakpointMark {
     pub kind: BreakpointKind,
     pub cpu: CpuId,
     pub region: Arc<str>,
+    pub pc_mask: u32,
 }
 
 impl BreakpointMark {
@@ -120,7 +138,8 @@ impl BreakpointMark {
         match kind {
             BreakpointKind::Execute => {
                 self.cpu == *cpu
-                    && (self.start & 0xFFFF..=self.end & 0xFFFF).contains(&(addr & 0xFFFF))
+                    && (self.start & self.pc_mask..=self.end & self.pc_mask)
+                        .contains(&(addr & self.pc_mask))
             }
             BreakpointKind::Read | BreakpointKind::Write => (self.start..=self.end).contains(&addr),
         }

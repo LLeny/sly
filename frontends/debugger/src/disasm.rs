@@ -49,6 +49,7 @@ pub struct Disasm {
     pub menu: Option<Menu>,
     pub layout_cache: Rc<RefCell<DisassemblyLayoutCache>>,
     cpu: CpuId,
+    pc_mask: u32,
     follow_pc: bool,
     show_bytes: bool,
     view_mode: ViewMode,
@@ -67,13 +68,14 @@ pub struct Disasm {
 }
 
 impl Disasm {
-    pub fn new(cpu: CpuId) -> Self {
+    pub fn new(cpu: CpuId, pc_mask: u32) -> Self {
         Self {
             view: Arc::default(),
             scroll: UniformListScrollHandle::new(),
             menu: None,
             layout_cache: Rc::default(),
             cpu,
+            pc_mask,
             follow_pc: true,
             show_bytes: false,
             view_mode: ViewMode::Linear,
@@ -209,7 +211,7 @@ impl Disasm {
                 .iter()
                 .enumerate()
                 .filter_map(|(ix, line)| {
-                    mark_at(&self.breakpoints, line.addr, 0xFFFF).map(|kind| (ix, kind))
+                    mark_at(&self.breakpoints, line.addr, self.pc_mask).map(|kind| (ix, kind))
                 })
                 .collect(),
         );

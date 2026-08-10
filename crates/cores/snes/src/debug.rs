@@ -173,8 +173,8 @@ impl Core for SnesDebug {
 impl DebugCore for SnesDebug {
     fn cpus(&self) -> Vec<CpuDescriptor> {
         let mut cpus = vec![
-            CpuDescriptor::new(CPU_MAIN, "65C816", "bus"),
-            CpuDescriptor::new(CPU_SPC, "SPC700", "spc"),
+            CpuDescriptor::new(CPU_MAIN, "65C816", "bus", 16),
+            CpuDescriptor::new(CPU_SPC, "SPC700", "spc", 16),
         ];
         if self.has_gsu() {
             cpus.push(superfx::descriptor());

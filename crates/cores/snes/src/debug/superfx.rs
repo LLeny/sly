@@ -25,7 +25,7 @@ pub const GSU_SYNTAX: SyntaxSpec = SyntaxSpec {
 };
 
 pub fn descriptor() -> CpuDescriptor {
-    CpuDescriptor::new(CPU_GSU, "GSU", "gsu")
+    CpuDescriptor::new(CPU_GSU, "GSU", "gsu", 16)
 }
 
 pub fn bus_peek(snes: &Snes, bank: u8, addr: u16) -> u8 {

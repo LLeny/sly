@@ -230,8 +230,16 @@ impl Debugger {
         let cpu = self.panes[0].id.clone();
         let region: Arc<str> = self.memory.region_id().into();
         let note = self.target.annotate(start).into();
-        self.breakpoints
-            .add_labeled(start, end, kind, cpu, region, label, note);
+        self.breakpoints.add_labeled(
+            start,
+            end,
+            kind,
+            cpu,
+            region,
+            label,
+            note,
+            self.target.as_ref(),
+        );
         self.sync_bp_markers();
         cx.notify();
     }
