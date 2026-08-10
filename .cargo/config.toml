@@ -3,6 +3,7 @@ rustflags = [
   "-C", "link-args=-z stack-size=33554432",
   "-C", "overflow-checks=false",
   "-C", "target-feature=+bulk-memory,+multivalue,+mutable-globals,+sign-ext,+simd128,+nontrapping-fptoint",
+  "--cfg", "getrandom_backend=\"wasm_js\"",
 ]
 
 [env]

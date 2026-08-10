@@ -1,0 +1,14 @@
+[package]
+name = "scripting"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+core-model = { path = "../models/core" }
+debugger-model = { path = "../models/debugger" }
+anyhow = "1.0.100"
+piccolo = "0.3.3"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { version = "0.2.16", features = ["js"] }
+getrandom_03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"] }

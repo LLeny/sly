@@ -10,13 +10,14 @@ mod logging;
 mod memory;
 mod root;
 mod save;
+mod script;
 mod stats;
 #[cfg(target_family = "wasm")]
 mod web_dnd;
 
 use std::sync::Arc;
 
-use cirsium::components::register_text_input_keys;
+use cirsium::components::{register_code_editor_keys, register_text_input_keys};
 use cirsium::{Assets, Theme, ThemeMode, set_theme};
 use gpui::prelude::*;
 use gpui::{App, Bounds, WindowBounds, WindowOptions, px, size};
@@ -101,6 +102,7 @@ fn run(initial: Option<(Box<dyn DebugCore>, cover::ArtQuery, storage::GameId)>, 
 
         cx.set_quit_mode(gpui::QuitMode::LastWindowClosed);
         register_text_input_keys(cx);
+        register_code_editor_keys(cx);
 
         #[cfg(not(target_family = "wasm"))]
         cx.set_http_client(Arc::new(cover::ArtAuthClient(Arc::new(

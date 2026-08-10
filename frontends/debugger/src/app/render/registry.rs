@@ -24,6 +24,9 @@ impl Debugger {
                         | PanelKind::Structured
                         | PanelKind::ChannelScopes
                         | PanelKind::AudioScope
+                        | PanelKind::ScriptEditor
+                        | PanelKind::ScriptConsole
+                        | PanelKind::ScriptBuiltins
                 )
             {
                 continue;
@@ -64,6 +67,41 @@ impl Debugger {
                 PanelKind::AudioScope => {
                     AudioScopeWidget::new(chrome, self.scope_view.clone()).into_any_element()
                 }
+                PanelKind::ScriptEditor => {
+                    let dirty = self.script.is_dirty(self.script_editor.read(cx).text());
+
+                    ScriptEditorWidget::new(chrome)
+                        .editor(self.script_editor.clone())
+                        .status(self.script.status())
+                        .status_line(self.script.status_line())
+                        .error(self.script.error())
+                        .hooks(self.script.hook_count())
+                        .dirty(dirty)
+                        .on_run(cx.listener(|this, _, _, cx| this.script_run(cx)))
+                        .on_stop(cx.listener(|this, _, _, cx| this.script_stop(cx)))
+                        .on_revert(cx.listener(|this, _, _, cx| this.script_revert(cx)))
+                        .on_open(cx.listener(|this, _, _, cx| this.script_open_from_disk(cx)))
+                        .on_save(cx.listener(|this, _, _, cx| this.script_save_to_disk(cx)))
+                        .into_any_element()
+                }
+                PanelKind::ScriptConsole => {
+                    ScriptConsoleWidget::new(chrome, self.script.console(), self.script.scroll())
+                        .on_clear(cx.listener(|this, _, _, cx| this.script_clear_console(cx)))
+                        .into_any_element()
+                }
+                PanelKind::ScriptBuiltins => ScriptBuiltinsWidget::new(chrome)
+                    .filter(
+                        self.builtin_filter_input.clone(),
+                        self.builtin_filter.clone(),
+                    )
+                    .on_insert({
+                        let this = this.clone();
+                        move |snippet, window, cx| {
+                            let snippet = snippet.to_string();
+                            this.update(cx, |d, cx| d.script_insert(snippet, window, cx));
+                        }
+                    })
+                    .into_any_element(),
                 _ => unreachable!(),
             };
             panels.insert(id.to_string(), element);

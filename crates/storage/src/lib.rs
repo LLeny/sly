@@ -20,6 +20,7 @@ pub type PlatformStore = IdbStore;
 
 pub const STATE_EXTENSION: &str = "sav";
 pub const SAVE_RAM_FILE: &str = "sram.bin";
+pub const SCRIPT_FILE: &str = "script.lua";
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -103,6 +104,7 @@ impl Slot {
 pub enum Entry {
     State(Slot),
     SaveRam,
+    Script,
 }
 
 #[derive(Debug, Clone)]
@@ -117,15 +119,17 @@ pub fn entry_path(game: &GameId, entry: Entry) -> String {
     match entry {
         Entry::SaveRam => format!("{system}/saves/{sha1}/{SAVE_RAM_FILE}"),
         Entry::State(slot) => format!("{system}/states/{sha1}/{}", slot.file_name()),
+        Entry::Script => format!("{system}/scripts/{sha1}/{SCRIPT_FILE}"),
     }
 }
 
-pub fn game_prefixes(game: &GameId) -> [String; 2] {
+pub fn game_prefixes(game: &GameId) -> [String; 3] {
     let system = game.system.slug();
     let sha1 = &game.sha1;
     [
         format!("{system}/saves/{sha1}"),
         format!("{system}/states/{sha1}"),
+        format!("{system}/scripts/{sha1}"),
     ]
 }
 
@@ -196,6 +200,18 @@ impl<S: SaveStore> Session<S> {
 
         core.load_state(&bytes)?;
         Ok(true)
+    }
+
+    pub fn read_script(&self) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .store
+            .read(&self.game, Entry::Script)?
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
+    }
+
+    pub fn write_script(&self, source: &str) -> Result<(), StoreError> {
+        self.store
+            .write(&self.game, Entry::Script, source.as_bytes())
     }
 
     pub fn restore_save_ram<C: Core + ?Sized>(&self, core: &mut C) -> Result<bool, SessionError> {

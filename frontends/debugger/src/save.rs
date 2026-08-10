@@ -1,3 +1,38 @@
+use gpui::Context;
+
+pub(crate) fn browse_for_file<V: 'static>(
+    cx: &mut Context<V>,
+    then: impl FnOnce(&std::path::Path, &mut V, &mut Context<V>) + 'static,
+) {
+    #[cfg(target_family = "wasm")]
+    {
+        let _ = (cx, then);
+        crate::web_dnd::open_file_picker();
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: None,
+        });
+
+        cx.spawn(async move |this: gpui::WeakEntity<V>, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+
+            let _ = this.update(cx, |this, cx| then(&path, this, cx));
+        })
+        .detach();
+    }
+}
+
 #[cfg(not(target_family = "wasm"))]
 pub(crate) fn save_bin(name: String, bytes: Vec<u8>, cx: &mut gpui::App) {
     let dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));

@@ -38,6 +38,23 @@ impl Root {
         bytes: Vec<u8>,
         cx: &mut Context<Self>,
     ) {
+        if file_name.to_ascii_lowercase().ends_with(".lua") {
+            match self.debugger.clone() {
+                Some(debugger) => {
+                    let source = String::from_utf8_lossy(&bytes).into_owned();
+                    debugger.update(cx, |debugger, cx| {
+                        debugger.load_script_source(file_name, source, cx)
+                    });
+                    self.error = None;
+                }
+                None => {
+                    self.error = Some("Load a ROM before loading a script".into());
+                }
+            }
+            cx.notify();
+            return;
+        }
+
         if core_model::state::is_savestate(&bytes) {
             match self.debugger.clone() {
                 Some(debugger) => {
@@ -117,31 +134,12 @@ impl Root {
     }
 
     fn browse_for_rom(&mut self, cx: &mut Context<Self>) {
-        #[cfg(target_family = "wasm")]
-        {
-            let _ = cx;
-            crate::web_dnd::open_file_picker();
-        }
-
-        #[cfg(not(target_family = "wasm"))]
-        {
-            let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
-                files: true,
-                directories: false,
-                multiple: false,
-                prompt: None,
-            });
-            cx.spawn(async move |this, cx| {
-                let Ok(Ok(Some(paths))) = paths.await else {
-                    return;
-                };
-                let Some(path) = paths.into_iter().next() else {
-                    return;
-                };
-                let _ = this.update(cx, |this, cx| this.load_rom_from_path(&path, cx));
-            })
-            .detach();
-        }
+        crate::save::browse_for_file(cx, |path, this, cx| {
+            #[cfg(not(target_family = "wasm"))]
+            this.load_rom_from_path(path, cx);
+            #[cfg(target_family = "wasm")]
+            let _ = (path, this, cx);
+        });
     }
 
     fn landing(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {

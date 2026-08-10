@@ -44,6 +44,9 @@ pub enum PanelKind {
     Table,
     ChannelScopes,
     AudioScope,
+    ScriptEditor,
+    ScriptConsole,
+    ScriptBuiltins,
     Log,
 }
 
@@ -53,6 +56,7 @@ pub enum WorkspaceIcon {
     Video,
     Sound,
     Chip,
+    Script,
 }
 
 #[derive(Clone, Debug)]
@@ -312,6 +316,13 @@ impl ComponentManifest {
                 panel.id,
             );
             panel.workspaces.push(workspace.into());
+        }
+    }
+
+    pub fn workspace_last(&mut self, id: &str) {
+        if let Some(ix) = self.workspaces.iter().position(|w| &*w.id == id) {
+            let workspace = self.workspaces.remove(ix);
+            self.workspaces.push(workspace);
         }
     }
 
