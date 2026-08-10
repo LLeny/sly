@@ -342,6 +342,131 @@ impl Debugger {
         cx.notify();
     }
 
+    pub(super) fn on_builtin_filter_event(
+        &mut self,
+        input: Entity<TextInput>,
+        _event: &TextInputEvent,
+        cx: &mut Context<Self>,
+    ) {
+        self.builtin_filter = input.read(cx).content().to_string().into();
+        cx.notify();
+    }
+
+    pub(super) fn on_script_editor_event(
+        &mut self,
+        _editor: Entity<cirsium::components::CodeEditor>,
+        event: &cirsium::components::CodeEditorEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            cirsium::components::CodeEditorEvent::Run => self.script_run(cx),
+            cirsium::components::CodeEditorEvent::Changed => cx.notify(),
+        }
+    }
+
+    pub(super) fn script_run(&mut self, cx: &mut Context<Self>) {
+        let source = self.script_editor.read(cx).text().to_string();
+        self.script.run(&source, self.target.as_mut());
+
+        let line = self.script.error_line();
+        self.script_editor
+            .update(cx, |editor, cx| editor.set_error_line(line, cx));
+
+        if let Err(err) = self.session.write_script(&source) {
+            tracing::warn!("could not persist script: {err}");
+        }
+
+        if let Some(paused) = self.script.take_pause_request() {
+            self.set_running(!paused, cx);
+        }
+
+        cx.notify();
+    }
+
+    pub(super) fn script_stop(&mut self, cx: &mut Context<Self>) {
+        self.script.stop();
+        self.script_editor
+            .update(cx, |editor, cx| editor.set_error_line(None, cx));
+        cx.notify();
+    }
+
+    pub(super) fn script_revert(&mut self, cx: &mut Context<Self>) {
+        self.script.stop();
+        let template = crate::script::default_script(self.session.game().system);
+        self.script_editor.update(cx, |editor, cx| {
+            editor.set_text(template, cx);
+            editor.set_error_line(None, cx);
+        });
+        self.script.note("editor reset to the starter script");
+        cx.notify();
+    }
+
+    pub(super) fn script_clear_console(&mut self, cx: &mut Context<Self>) {
+        self.script.clear_console();
+        cx.notify();
+    }
+
+    pub(super) fn script_insert(
+        &mut self,
+        snippet: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.script_editor
+            .update(cx, |editor, cx| editor.insert(&snippet, window, cx));
+        cx.notify();
+    }
+
+    pub(crate) fn load_script_source(
+        &mut self,
+        name: String,
+        source: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.script_editor.update(cx, |editor, cx| {
+            editor.set_text(source, cx);
+            editor.set_error_line(None, cx);
+        });
+        self.script.note(format!("loaded {name}"));
+        cx.notify();
+    }
+
+    pub(super) fn script_save_to_disk(&mut self, cx: &mut Context<Self>) {
+        let source = self.script_editor.read(cx).text().to_string();
+        self.script.note("saved script to disk");
+        crate::save::save_bin("script.lua".to_string(), source.into_bytes(), cx);
+        cx.notify();
+    }
+
+    pub(super) fn script_open_from_disk(&mut self, cx: &mut Context<Self>) {
+        crate::save::browse_for_file(cx, |path, this, cx| {
+            #[cfg(not(target_family = "wasm"))]
+            match std::fs::read_to_string(path) {
+                Ok(source) => this.load_script_source(crate::file_name_of(path), source, cx),
+                Err(err) => tracing::error!("reading {}: {err}", path.display()),
+            }
+            #[cfg(target_family = "wasm")]
+            let _ = (path, this, cx);
+        });
+    }
+
+    pub(super) fn restore_script(&mut self, cx: &mut Context<Self>) {
+        let template = crate::script::default_script(self.session.game().system);
+        if self.script_editor.read(cx).text() != template {
+            return;
+        }
+
+        match self.session.read_script() {
+            Ok(Some(source)) if !source.trim().is_empty() => {
+                self.script_editor
+                    .update(cx, |editor, cx| editor.set_text(source, cx));
+                self.script.note("restored the script saved for this game");
+            }
+            Ok(_) => {}
+            Err(err) => tracing::warn!("could not read stored script: {err}"),
+        }
+    }
+
     pub(super) fn log_open_target(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         self.logs.open_target_combo(position);
         cx.notify();
@@ -494,6 +619,7 @@ impl Debugger {
     pub(crate) fn saves_loaded(&mut self, cx: &mut Context<Self>) {
         self.restore_save_ram();
         self.refresh_savestates();
+        self.restore_script(cx);
         self.saves_ready = true;
         cx.notify();
     }

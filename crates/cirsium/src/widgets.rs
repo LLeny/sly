@@ -17,6 +17,7 @@ pub mod palette;
 pub mod ppu;
 pub mod savestates;
 pub(crate) mod scope;
+pub mod script;
 pub mod sprites;
 pub mod structured;
 pub mod table;
@@ -49,6 +50,10 @@ pub use palette::{PaletteColor, PaletteView, PaletteWidget};
 pub use ppu::{PpuGroup, PpuProperty, PpuView, PpuWidget};
 pub use savestates::{
     SavestateSlot, SavestatesView, SavestatesWidget, SlotAction, SlotThumbnail, thumbnail_image,
+};
+pub use script::{
+    ConsoleEntry, ScriptBuiltinsWidget, ScriptConsoleView, ScriptConsoleWidget, ScriptEditorWidget,
+    console_color,
 };
 pub use sprites::{SpritesView, SpritesWidget};
 pub use structured::{StructuredPanel, StructuredView};

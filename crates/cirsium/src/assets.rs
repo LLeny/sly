@@ -33,6 +33,7 @@ pub mod icon {
     pub const LINK: &str = "icons/lucide/link-2.svg";
 
     pub const SAVE: &str = "icons/lucide/save.svg";
+    pub const OPEN: &str = "icons/lucide/folder-open.svg";
     pub const RESTORE: &str = "icons/lucide/history.svg";
     pub const BOOKMARK: &str = "icons/lucide/bookmark.svg";
 

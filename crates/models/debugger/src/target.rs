@@ -11,6 +11,10 @@ use crate::model::{
     MemoryRegion, MmioView, PaletteView, PpuView, Sprites, StructuredView, TableView, Tilemap,
     TilemapOverlay, TilemapViewport, Tileset, TilesetLayer, VideoGenerations,
 };
+use crate::script::{
+    EventDescriptor, EventHit, HookHit, SCRIPT_BUILTINS_PANEL, SCRIPT_CONSOLE_PANEL,
+    SCRIPT_EDITOR_PANEL, SCRIPT_WORKSPACE,
+};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CpuId(Arc<str>);
@@ -58,7 +62,7 @@ impl CpuDescriptor {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BreakpointKind {
     Execute,
     Read,
@@ -107,6 +111,26 @@ pub struct BreakpointMark {
     pub region: Arc<str>,
 }
 
+impl BreakpointMark {
+    pub fn covers(&self, kind: BreakpointKind, cpu: &CpuId, addr: u32) -> bool {
+        if self.kind != kind {
+            return false;
+        }
+
+        match kind {
+            BreakpointKind::Execute => {
+                self.cpu == *cpu
+                    && (self.start & 0xFFFF..=self.end & 0xFFFF).contains(&(addr & 0xFFFF))
+            }
+            BreakpointKind::Read | BreakpointKind::Write => (self.start..=self.end).contains(&addr),
+        }
+    }
+
+    pub fn covers_hit(&self, hit: &HookHit) -> bool {
+        self.region == hit.region && self.covers(hit.kind, &hit.cpu, hit.addr)
+    }
+}
+
 pub fn mark_at(marks: &[BreakpointMark], addr: u32, mask: u32) -> Option<BreakpointKind> {
     let addr = addr & mask;
     marks
@@ -115,7 +139,7 @@ pub fn mark_at(marks: &[BreakpointMark], addr: u32, mask: u32) -> Option<Breakpo
         .map(|m| m.kind)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RunOutcome {
     Done,
     Breakpoint,
@@ -228,9 +252,32 @@ pub trait DebugCore: Core {
         AudioScopesView::default()
     }
 
+    fn take_hits(&mut self) -> Vec<HookHit> {
+        Vec::new()
+    }
+
+    fn events(&self) -> Vec<EventDescriptor> {
+        Vec::new()
+    }
+
+    fn watch_events(&mut self, _ids: &[Arc<str>]) {}
+
+    fn take_events(&mut self) -> Vec<EventHit> {
+        Vec::new()
+    }
+
     fn caption(&self, label: &str) -> String;
     fn memory_regions(&self) -> Vec<MemoryRegion>;
     fn read_memory(&self, region: &str, addr: u32, len: usize) -> Vec<u8>;
+
+    fn write_memory(&mut self, _region: &str, _addr: u32, _bytes: &[u8]) -> usize {
+        0
+    }
+
+    fn write_register(&mut self, _cpu: &CpuId, _name: &str, _value: u32) -> bool {
+        false
+    }
+
     fn format_address(&self, region: &str, addr: u32) -> String;
     fn memory_highlights(&self, region: &str, addr: u32, len: usize) -> Vec<Highlight>;
     fn latest_access(&self) -> Option<(Arc<str>, u32)>;
@@ -331,13 +378,43 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
         PanelDescriptor::new("log", "Log", PanelKind::Log, Bottom, Continuous).tag(CPU_WORKSPACE),
     );
 
+    panels.push(
+        PanelDescriptor::new(
+            SCRIPT_EDITOR_PANEL,
+            "Script",
+            PanelKind::ScriptEditor,
+            Center,
+            OnPause,
+        )
+        .tag(SCRIPT_WORKSPACE),
+    );
+    panels.push(
+        PanelDescriptor::new(
+            SCRIPT_BUILTINS_PANEL,
+            "Builtins",
+            PanelKind::ScriptBuiltins,
+            Right,
+            OnPause,
+        )
+        .tag(SCRIPT_WORKSPACE),
+    );
+    panels.push(
+        PanelDescriptor::new(
+            SCRIPT_CONSOLE_PANEL,
+            "Console",
+            PanelKind::ScriptConsole,
+            Bottom,
+            Continuous,
+        )
+        .tag(SCRIPT_WORKSPACE),
+    );
+
     let mut manifest = ComponentManifest {
         system: Arc::from(""),
-        workspaces: vec![WorkspaceDescriptor::new(
-            CPU_WORKSPACE,
-            "CPU",
-            WorkspaceIcon::Cpu,
-        )],
+        workspaces: vec![
+            WorkspaceDescriptor::new(CPU_WORKSPACE, "CPU", WorkspaceIcon::Cpu),
+            WorkspaceDescriptor::new(SCRIPT_WORKSPACE, "Lua", WorkspaceIcon::Script),
+        ],
         panels,
         compositions: Vec::new(),
     };

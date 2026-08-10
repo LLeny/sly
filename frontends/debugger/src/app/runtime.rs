@@ -102,9 +102,74 @@ impl Debugger {
             .any(|p| matches!(p.kind, PanelKind::AudioScope) && !self.is_collapsed(p.id.as_ref()))
     }
 
+    fn run_frame_hooked(&mut self) -> RunOutcome {
+        if !self.script.is_active() {
+            self.target.watch_events(&[]);
+            return self.target.debug_run_frame(self.breakpoints.marks());
+        }
+
+        let mut marks = std::mem::take(&mut self.hook_marks);
+        marks.clear();
+        marks.extend_from_slice(self.breakpoints.marks());
+        marks.extend_from_slice(self.script.marks());
+
+        let outcome = self.run_hook_stops(&mut marks);
+        self.hook_marks = marks;
+        outcome
+    }
+
+    fn run_hook_stops(&mut self, marks: &mut Vec<BreakpointMark>) -> RunOutcome {
+        const MAX_HOOK_STOPS: usize = 4096;
+
+        for _ in 0..MAX_HOOK_STOPS {
+            self.target.watch_events(self.script.event_watches());
+            let outcome = self.target.debug_run_frame(marks);
+
+            let hits = self.target.take_hits();
+            let events = self.target.take_events();
+
+            let mut user_break = false;
+            let mut script_stop = !events.is_empty();
+            for hit in &hits {
+                let marks = self.breakpoints.marks();
+                if marks.iter().any(|mark| mark.covers_hit(hit)) {
+                    user_break = true;
+                } else {
+                    script_stop = true;
+                }
+            }
+
+            self.script.dispatch(self.target.as_mut(), &hits);
+            self.script.dispatch_events(self.target.as_mut(), &events);
+
+            marks.clear();
+            marks.extend_from_slice(self.breakpoints.marks());
+            marks.extend_from_slice(self.script.marks());
+
+            if self.script.take_pause_request() == Some(true) {
+                return RunOutcome::Breakpoint;
+            }
+
+            if outcome == RunOutcome::Done {
+                return RunOutcome::Done;
+            }
+
+            if user_break || !script_stop {
+                return RunOutcome::Breakpoint;
+            }
+        }
+
+        self.script
+            .note("hook budget for this frame exhausted, pausing");
+        RunOutcome::Breakpoint
+    }
+
     pub(super) fn emulate_frame(&mut self, scope_visible: bool) -> RunOutcome {
         let emu_start = Instant::now();
-        let outcome = self.target.debug_run_frame(self.breakpoints.marks());
+        let outcome = self.run_frame_hooked();
+        if outcome == RunOutcome::Done {
+            self.script.on_frame(self.target.as_mut());
+        }
         self.stats.record_frame(emu_start.elapsed());
         self.emu_clock += self.run_frame_interval();
 
@@ -169,6 +234,10 @@ impl Debugger {
             if outcome != RunOutcome::Done {
                 break;
             }
+        }
+
+        if self.script.take_pause_request() == Some(true) {
+            outcome = RunOutcome::Breakpoint;
         }
 
         if let Some(segments) = self.stats.record_tick(wake_late, self.audio.buffered()) {

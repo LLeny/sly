@@ -40,6 +40,7 @@ fn workspace_icon(icon: WorkspaceIcon) -> &'static str {
         WorkspaceIcon::Video => icon::MONITOR,
         WorkspaceIcon::Chip => icon::ZAP,
         WorkspaceIcon::Sound => icon::AUDIO,
+        WorkspaceIcon::Script => icon::CODE,
     }
 }
 

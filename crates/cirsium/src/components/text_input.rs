@@ -9,6 +9,7 @@ use gpui::{
 
 use self::element::TextElement;
 use super::CONTROL_HEIGHT;
+use crate::components::text_offsets;
 use crate::theme::Theme;
 
 mod element;
@@ -282,60 +283,24 @@ impl TextInput {
         cx.notify()
     }
 
-    fn previous_boundary(&self, offset: usize) -> usize {
-        self.content[..offset]
-            .char_indices()
-            .next_back()
-            .map(|(idx, _)| idx)
-            .unwrap_or(0)
-    }
-
-    fn next_boundary(&self, offset: usize) -> usize {
-        self.content[offset..]
-            .char_indices()
-            .nth(1)
-            .map(|(idx, _)| offset + idx)
-            .unwrap_or(self.content.len())
-    }
-
-    fn offset_from_utf16(&self, offset: usize) -> usize {
-        let mut utf8_offset = 0;
-        let mut utf16_count = 0;
-
-        for ch in self.content.chars() {
-            if utf16_count >= offset {
-                break;
-            }
-
-            utf16_count += ch.len_utf16();
-            utf8_offset += ch.len_utf8();
-        }
-
-        utf8_offset
-    }
-
     fn offset_to_utf16(&self, offset: usize) -> usize {
-        let mut utf16_offset = 0;
-        let mut utf8_count = 0;
-
-        for ch in self.content.chars() {
-            if utf8_count >= offset {
-                break;
-            }
-
-            utf8_count += ch.len_utf8();
-            utf16_offset += ch.len_utf16();
-        }
-
-        utf16_offset
+        text_offsets::offset_to_utf16(&self.content, offset)
     }
 
     fn range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.offset_to_utf16(range.start)..self.offset_to_utf16(range.end)
+        text_offsets::range_to_utf16(&self.content, range)
     }
 
-    fn range_from_utf16(&self, range_utf16: &Range<usize>) -> Range<usize> {
-        self.offset_from_utf16(range_utf16.start)..self.offset_from_utf16(range_utf16.end)
+    fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
+        text_offsets::range_from_utf16(&self.content, range)
+    }
+
+    fn previous_boundary(&self, offset: usize) -> usize {
+        text_offsets::previous_boundary(&self.content, offset)
+    }
+
+    fn next_boundary(&self, offset: usize) -> usize {
+        text_offsets::next_boundary(&self.content, offset)
     }
 
     fn sanitize(&self, head: &str, tail: &str, new_text: &str) -> String {

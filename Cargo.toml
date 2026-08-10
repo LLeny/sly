@@ -12,6 +12,7 @@ members = [
     "crates/models/workspace",
     "crates/playground",
     "crates/screenshotter",
+    "crates/scripting",
     "crates/storage",
     "crates/testrunner",
 

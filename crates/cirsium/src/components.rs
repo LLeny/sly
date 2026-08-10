@@ -1,3 +1,4 @@
+mod code_editor;
 mod combobox;
 mod copyable;
 mod menu;
@@ -7,8 +8,10 @@ mod rows;
 mod segmented;
 mod status_bar;
 mod text_input;
+mod text_offsets;
 mod window;
 
+pub use code_editor::{CodeEditor, CodeEditorEvent, Completion, register_code_editor_keys};
 pub use combobox::{ComboOption, combobox_button, combobox_menu};
 pub use copyable::Copyable;
 pub use menu::{MenuItem, context_menu, popover};

@@ -14,15 +14,16 @@ use cirsium::widgets::{
     CallStackView, CallStackWidget, CartridgeView, CartridgeWidget, ChannelScopesWidget,
     ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView, DmaWidget,
     FramebufferView, FramebufferWidget, GridPanel, LogWidget, MemoryWidget, MmioView, MmioWidget,
-    PaletteView, PaletteWidget, PpuView, PpuWidget, RowProvider, SavestatesWidget, SpritesView,
-    SpritesWidget, StructuredPanel, StructuredView, TablePanel, TableView, TilemapView,
-    TilemapWidget, TilesetLayer, TilesetView, TilesetWidget, ViewMode,
+    PaletteView, PaletteWidget, PpuView, PpuWidget, RowProvider, SavestatesWidget,
+    ScriptBuiltinsWidget, ScriptConsoleWidget, ScriptEditorWidget, SpritesView, SpritesWidget,
+    StructuredPanel, StructuredView, TablePanel, TableView, TilemapView, TilemapWidget,
+    TilesetLayer, TilesetView, TilesetWidget, ViewMode,
 };
 use cirsium::{
     ACCENT_PRESETS, ChangeTracker, GUEST_COLORS, Highlight, Theme, ThemeMode, accent_at, set_theme,
 };
 use core_model::{Button, ExecutionState};
-use debugger_model::{CpuId, CpuView, DebugCore, RunOutcome, VideoGenerations};
+use debugger_model::{BreakpointMark, CpuId, CpuView, DebugCore, RunOutcome, VideoGenerations};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, FocusHandle, KeyDownEvent,
@@ -36,6 +37,7 @@ use crate::breakpoints::Breakpoints;
 use crate::disasm::Disasm;
 use crate::logging::{LogBuffer, Logs};
 use crate::memory::{self, Memory};
+use crate::script::Script;
 
 mod actions;
 mod input;
@@ -145,6 +147,11 @@ pub(crate) struct Debugger {
     jump_input: Entity<TextInput>,
     bp_input: Entity<TextInput>,
     log_filter_input: Entity<TextInput>,
+    script: Script,
+    hook_marks: Vec<BreakpointMark>,
+    script_editor: Entity<cirsium::components::CodeEditor>,
+    builtin_filter_input: Entity<TextInput>,
+    builtin_filter: SharedString,
     collapsed: HashSet<SharedString>,
     settings: Option<Point<Pixels>>,
     live_refresh: bool,
@@ -227,6 +234,21 @@ impl Debugger {
         cx.subscribe(&log_filter_input, Self::on_log_filter_event)
             .detach();
 
+        let script_editor = cx.new(|cx| {
+            let mut editor = cirsium::components::CodeEditor::new(
+                cx,
+                crate::script::default_script(game.system),
+            );
+            editor.set_completions(crate::script::api_completions());
+            editor
+        });
+        cx.subscribe(&script_editor, Self::on_script_editor_event)
+            .detach();
+
+        let builtin_filter_input = cx.new(|cx| TextInput::new(cx, "filter builtins..."));
+        cx.subscribe(&builtin_filter_input, Self::on_builtin_filter_event)
+            .detach();
+
         let mut breakpoints = Breakpoints::default();
         breakpoints.set_cpu_titles(
             target
@@ -304,6 +326,11 @@ impl Debugger {
             jump_input,
             bp_input,
             log_filter_input,
+            script: Script::new(target.as_ref()),
+            hook_marks: Vec::new(),
+            script_editor,
+            builtin_filter_input,
+            builtin_filter: SharedString::default(),
             target,
             session: storage::Session::new(storage::PlatformStore::default(), game),
             saves_ready: false,
