@@ -8,8 +8,8 @@ name = "sly"
 crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
-core-model = { path = "../models/core" }
-snes = { path = "../cores/snes" }
+core-model = { path = "../../crates/models/core" }
+snes = { path = "../../crates/cores/snes" }
 
 [build-dependencies]
 cbindgen = { version = "0.29.4", default-features = false }

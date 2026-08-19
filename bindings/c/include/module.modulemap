@@ -1,0 +1,4 @@
+module SlyFFI {
+    header "sly.h"
+    export *
+}

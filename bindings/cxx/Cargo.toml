@@ -8,8 +8,8 @@ name = "sly_cxx"
 crate-type = ["lib", "staticlib"]
 
 [dependencies]
-core-model = { path = "../models/core" }
-sly-ffi = { path = "../ffi" }
+core-model = { path = "../../crates/models/core" }
+sly-ffi = { path = "../c" }
 cxx = "1.0.198"
 
 [build-dependencies]

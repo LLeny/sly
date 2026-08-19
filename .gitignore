@@ -6,3 +6,10 @@
 /roms
 /.vscode/
 /builds/
+/bindings/swift/build/
+
+.DS_Store
+
+**/xcuserdata/
+*.xcuserstate
+DerivedData/
