@@ -5,6 +5,8 @@ struct PlayerView: View {
     let player: Player
     let onExit: () -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
+
     @AppStorage(AppSettings.imageFilteringKey)
     private var imageFiltering = AppSettings.defaultImageFiltering
 
@@ -22,7 +24,7 @@ struct PlayerView: View {
                 VStack(spacing: 0) {
                     VStack(spacing: 0) {
                         HStack {
-                            Button(action: onExit) {
+                            Button(action: leaveGame) {
                                 Label("Back", systemImage: "chevron.left")
                             }
 
@@ -76,6 +78,10 @@ struct PlayerView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase != .active else { return }
+                perform { try player.persistSaveRAM() }
+            }
         } else {
             ContentUnavailableView(
                 "Unable to Play",
@@ -114,16 +120,26 @@ struct PlayerView: View {
     ) -> some View {
         Button {
             isMenuPresented = false
-            do {
-                try action()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+            perform(action)
         } label: {
             Label(title, systemImage: systemImage)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
                 .contentShape(.rect)
+        }
+    }
+
+    private func leaveGame() {
+        perform { try player.persistSaveRAM() }
+        onExit()
+    }
+
+    private func perform(_ action: () throws -> Void) {
+        do {
+            try action()
+        } catch {
+            errorMessage = error.localizedDescription
+            print("Unable to complete player action:", error)
         }
     }
 }
