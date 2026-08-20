@@ -4,11 +4,13 @@ import SwiftUI
 import SlyKit
 
 struct MetalPlayerView: UIViewRepresentable {
+    private static let bufferedFrameCount = 3
+
     let player: Player
     let framesPerSecond: Int
 
     func makeCoordinator() -> Renderer {
-        Renderer(player: player)
+        Renderer(player: player, framesPerSecond: framesPerSecond)
     }
 
     func makeUIView(context: Context) -> MTKView {
@@ -16,6 +18,8 @@ struct MetalPlayerView: UIViewRepresentable {
         view.delegate = context.coordinator
         view.colorPixelFormat = .bgra8Unorm
         view.framebufferOnly = false
+        (view.layer as? CAMetalLayer)?.maximumDrawableCount =
+            Self.bufferedFrameCount
         view.preferredFramesPerSecond = framesPerSecond
         view.enableSetNeedsDisplay = false
         view.isPaused = false
@@ -23,26 +27,33 @@ struct MetalPlayerView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: MTKView, context: Context) {
-        context.coordinator.player = player
+        context.coordinator.update(
+            player: player,
+            framesPerSecond: framesPerSecond
+        )
         view.preferredFramesPerSecond = framesPerSecond
     }
 
     static func dismantleUIView(_ view: MTKView, coordinator: Renderer) {
         view.isPaused = true
         view.delegate = nil
+        coordinator.stop()
     }
 
     final class Renderer: NSObject, MTKViewDelegate {
-        var player: Player
+        private var player: Player
+        private var framesPerSecond: Int
 
         let device: MTLDevice
 
         private let commandQueue: MTLCommandQueue
         private let context: CIContext
+        private var audioOutput: AudioOutput?
         private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-        private var frameTexture: MTLTexture?
+        private var frameTextures: [(texture: MTLTexture, image: CIImage)] = []
+        private var nextFrameTexture = 0
 
-        init(player: Player) {
+        init(player: Player, framesPerSecond: Int) {
             guard let device = MTLCreateSystemDefaultDevice(),
                   let commandQueue = device.makeCommandQueue()
             else {
@@ -50,38 +61,33 @@ struct MetalPlayerView: UIViewRepresentable {
             }
 
             self.player = player
+            self.framesPerSecond = framesPerSecond
             self.device = device
             self.commandQueue = commandQueue
             context = CIContext(
                 mtlDevice: device,
                 options: [.cacheIntermediates: false]
             )
+            audioOutput = AudioOutput(
+                core: player.core,
+                framesPerSecond: framesPerSecond
+            )
         }
 
         func draw(in view: MTKView) {
-            guard let frame = player.runFrame(),
-                  upload(frame),
-                  let frameTexture,
-                  let textureImage = CIImage(
-                      mtlTexture: frameTexture,
-                      options: [.colorSpace: colorSpace]
-                  ),
-                  let drawable = view.currentDrawable,
-                  let commandBuffer = commandQueue.makeCommandBuffer()
+            guard let drawable = view.currentDrawable,
+                  let frame = player.runFrame()
             else {
                 return
             }
 
-            let image = textureImage.transformed(
-                by: CGAffineTransform(
-                    a: 1,
-                    b: 0,
-                    c: 0,
-                    d: -1,
-                    tx: 0,
-                    ty: textureImage.extent.height
-                )
-            )
+            audioOutput?.enqueue(from: player.core)
+
+            guard let image = upload(frame),
+                  let commandBuffer = commandQueue.makeCommandBuffer()
+            else {
+                return
+            }
 
             let bounds = CGRect(
                 origin: .zero,
@@ -122,16 +128,36 @@ struct MetalPlayerView: UIViewRepresentable {
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
-        private func upload(_ frame: Frame) -> Bool {
+        func update(player: Player, framesPerSecond: Int) {
+            if self.player === player &&
+                self.framesPerSecond == framesPerSecond {
+                return
+            }
+
+            audioOutput?.stop()
+            self.player = player
+            self.framesPerSecond = framesPerSecond
+            audioOutput = AudioOutput(
+                core: player.core,
+                framesPerSecond: framesPerSecond
+            )
+        }
+
+        func stop() {
+            audioOutput?.stop()
+            audioOutput = nil
+        }
+
+        private func upload(_ frame: Frame) -> CIImage? {
             guard frame.width > 0,
                   frame.height > 0,
                   frame.rgba.count == frame.width * frame.height * 4
             else {
-                return false
+                return nil
             }
 
-            if frameTexture?.width != frame.width ||
-                frameTexture?.height != frame.height {
+            if frameTextures.first?.texture.width != frame.width ||
+                frameTextures.first?.texture.height != frame.height {
                 let descriptor = MTLTextureDescriptor.texture2DDescriptor(
                     pixelFormat: .rgba8Unorm,
                     width: frame.width,
@@ -140,21 +166,55 @@ struct MetalPlayerView: UIViewRepresentable {
                 )
                 descriptor.storageMode = .shared
                 descriptor.usage = .shaderRead
-                frameTexture = device.makeTexture(descriptor: descriptor)
+                frameTextures = (0..<MetalPlayerView.bufferedFrameCount)
+                    .compactMap { _ in
+                        guard let texture = device.makeTexture(
+                            descriptor: descriptor
+                        ),
+                              let image = CIImage(
+                                  mtlTexture: texture,
+                                  options: [.colorSpace: colorSpace]
+                              )
+                        else {
+                            return nil
+                        }
+
+                        return (
+                            texture,
+                            image.transformed(
+                                by: CGAffineTransform(
+                                    a: 1,
+                                    b: 0,
+                                    c: 0,
+                                    d: -1,
+                                    tx: 0,
+                                    ty: CGFloat(frame.height)
+                                )
+                            )
+                        )
+                    }
+                nextFrameTexture = 0
             }
 
-            guard let frameTexture else { return false }
+            guard frameTextures.count == MetalPlayerView.bufferedFrameCount
+            else {
+                return nil
+            }
+
+            let frameTexture = frameTextures[nextFrameTexture]
+            nextFrameTexture =
+                (nextFrameTexture + 1) % MetalPlayerView.bufferedFrameCount
 
             frame.rgba.withUnsafeBytes { bytes in
                 guard let address = bytes.baseAddress else { return }
-                frameTexture.replace(
+                frameTexture.texture.replace(
                     region: MTLRegionMake2D(0, 0, frame.width, frame.height),
                     mipmapLevel: 0,
                     withBytes: address,
                     bytesPerRow: frame.width * 4
                 )
             }
-            return true
+            return frameTexture.image
         }
     }
 }
