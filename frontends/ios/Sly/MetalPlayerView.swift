@@ -60,6 +60,11 @@ struct MetalPlayerView: UIViewRepresentable {
         private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         private var frameTextures: [(texture: MTLTexture, image: CIImage)] = []
         private var nextFrameTexture = 0
+        private var cachedBackground: (
+            color: UIColor,
+            bounds: CGRect,
+            image: CIImage
+        )?
 
         init(
             player: Player,
@@ -123,7 +128,12 @@ struct MetalPlayerView: UIViewRepresentable {
                 tx: (bounds.width - image.extent.width * scale) / 2,
                 ty: (bounds.height - image.extent.height * scale) / 2
             )
-            let background = CIImage(color: .black).cropped(to: bounds)
+            let background = backgroundImage(
+                color: UIColor.systemBackground.resolvedColor(
+                    with: view.traitCollection
+                ),
+                bounds: bounds
+            )
             let scaledImage = switch imageFiltering {
             case .sharpPixels:
                 image.samplingNearest()
@@ -146,6 +156,22 @@ struct MetalPlayerView: UIViewRepresentable {
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+
+        private func backgroundImage(
+            color: UIColor,
+            bounds: CGRect
+        ) -> CIImage {
+            if let cached = cachedBackground,
+               cached.color == color,
+               cached.bounds == bounds {
+                return cached.image
+            }
+
+            let image = CIImage(color: CIColor(color: color))
+                .cropped(to: bounds)
+            cachedBackground = (color, bounds, image)
+            return image
+        }
 
         func update(
             player: Player,

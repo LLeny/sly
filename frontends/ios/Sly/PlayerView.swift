@@ -13,37 +13,58 @@ struct PlayerView: View {
 
     var body: some View {
         if let frameInterval = player.core.frameIntervalNanoseconds {
-            MetalPlayerView(
-                player: player,
-                framesPerSecond: Int(
-                    (1_000_000_000 / Double(frameInterval)).rounded()
-                ),
-                isPaused: isMenuPresented,
-                imageFiltering: imageFiltering
-            )
-            .overlay(alignment: .top) {
-                HStack {
-                    Button(action: onExit) {
-                        Label("Back", systemImage: "chevron.left")
-                    }
+            GeometryReader { geometry in
+                let controlsHeight = min(
+                    280,
+                    max(220, geometry.size.height * 0.33)
+                )
 
-                    Spacer()
+                VStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        HStack {
+                            Button(action: onExit) {
+                                Label("Back", systemImage: "chevron.left")
+                            }
 
-                    Button {
-                        isMenuPresented = true
-                    } label: {
-                        Label("Menu", systemImage: "line.3.horizontal")
+                            Spacer()
+
+                            Button {
+                                isMenuPresented = true
+                            } label: {
+                                Label("Menu", systemImage: "line.3.horizontal")
+                            }
+                            .popover(
+                                isPresented: $isMenuPresented,
+                                arrowEdge: .top
+                            ) {
+                                menu
+                                    .presentationCompactAdaptation(.popover)
+                            }
+                        }
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.capsule)
+                        .padding()
+
+                        MetalPlayerView(
+                            player: player,
+                            framesPerSecond: Int(
+                                (1_000_000_000 / Double(frameInterval)).rounded()
+                            ),
+                            isPaused: isMenuPresented,
+                            imageFiltering: imageFiltering
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .popover(isPresented: $isMenuPresented, arrowEdge: .top) {
-                        menu
-                            .presentationCompactAdaptation(.popover)
-                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
+
+                    GameControlsView(player: player)
+                        .frame(height: controlsHeight)
+                        .offset(y: geometry.safeAreaInsets.bottom / 2)
+                        .allowsHitTesting(!isMenuPresented)
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.capsule)
-                .padding()
             }
-            .background(.black)
+            .background(Color(uiColor: .systemBackground).ignoresSafeArea())
             .alert(
                 "Unable to Complete Action",
                 isPresented: Binding(
