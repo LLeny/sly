@@ -9,9 +9,14 @@ struct MetalPlayerView: UIViewRepresentable {
     let player: Player
     let framesPerSecond: Int
     let isPaused: Bool
+    let imageFiltering: ImageFiltering
 
     func makeCoordinator() -> Renderer {
-        Renderer(player: player, framesPerSecond: framesPerSecond)
+        Renderer(
+            player: player,
+            framesPerSecond: framesPerSecond,
+            imageFiltering: imageFiltering
+        )
     }
 
     func makeUIView(context: Context) -> MTKView {
@@ -29,7 +34,8 @@ struct MetalPlayerView: UIViewRepresentable {
         context.coordinator.update(
             player: player,
             framesPerSecond: framesPerSecond,
-            isPaused: isPaused
+            isPaused: isPaused,
+            imageFiltering: imageFiltering
         )
         view.isPaused = isPaused
         view.preferredFramesPerSecond = framesPerSecond
@@ -44,6 +50,7 @@ struct MetalPlayerView: UIViewRepresentable {
     final class Renderer: NSObject, MTKViewDelegate {
         private var player: Player
         private var framesPerSecond: Int
+        private var imageFiltering: ImageFiltering
 
         let device: MTLDevice
 
@@ -54,7 +61,11 @@ struct MetalPlayerView: UIViewRepresentable {
         private var frameTextures: [(texture: MTLTexture, image: CIImage)] = []
         private var nextFrameTexture = 0
 
-        init(player: Player, framesPerSecond: Int) {
+        init(
+            player: Player,
+            framesPerSecond: Int,
+            imageFiltering: ImageFiltering
+        ) {
             guard let device = MTLCreateSystemDefaultDevice(),
                   let commandQueue = device.makeCommandQueue()
             else {
@@ -63,6 +74,7 @@ struct MetalPlayerView: UIViewRepresentable {
 
             self.player = player
             self.framesPerSecond = framesPerSecond
+            self.imageFiltering = imageFiltering
             self.device = device
             self.commandQueue = commandQueue
             context = CIContext(
@@ -112,7 +124,13 @@ struct MetalPlayerView: UIViewRepresentable {
                 ty: (bounds.height - image.extent.height * scale) / 2
             )
             let background = CIImage(color: .black).cropped(to: bounds)
-            let output = image
+            let scaledImage = switch imageFiltering {
+            case .sharpPixels:
+                image.samplingNearest()
+            case .smooth:
+                image
+            }
+            let output = scaledImage
                 .transformed(by: transform)
                 .composited(over: background)
 
@@ -129,7 +147,12 @@ struct MetalPlayerView: UIViewRepresentable {
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
-        func update(player: Player, framesPerSecond: Int, isPaused: Bool) {
+        func update(
+            player: Player,
+            framesPerSecond: Int,
+            isPaused: Bool,
+            imageFiltering: ImageFiltering
+        ) {
             if self.player !== player ||
                 self.framesPerSecond != framesPerSecond {
                 audioOutput?.stop()
@@ -141,6 +164,7 @@ struct MetalPlayerView: UIViewRepresentable {
                 )
             }
 
+            self.imageFiltering = imageFiltering
             audioOutput?.setPaused(isPaused)
         }
 

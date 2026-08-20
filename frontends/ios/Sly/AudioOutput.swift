@@ -3,22 +3,39 @@ import SlyKit
 
 final class AudioOutput {
     private static let int16FullScale = Float(Int16.max) + 1
+    private static let startupBufferCount = 3
 
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private let format: AVAudioFormat
     private let channelCount: Int
     private let maximumSamplesPerFrame: Int
+    private var scheduledBufferCount = 0
+    private var hasStartedPlayback = false
+    private var isPaused = false
 
     init?(core: EmulatorCore, framesPerSecond: Int) {
-        guard let spec = core.audioSpec else { return nil }
+        guard let spec = core.audioSpec,
+              let frameIntervalNanoseconds = core.frameIntervalNanoseconds
+        else {
+            return nil
+        }
 
         channelCount = Int(spec.channels)
+        
+        let emulatedFrameDuration =
+            Double(frameIntervalNanoseconds) / 1_000_000_000
+        let playbackSampleRate =
+            Double(spec.sampleRate) * emulatedFrameDuration
+                * Double(framesPerSecond)
+        
         guard spec.sampleRate > 0,
               channelCount > 0,
               framesPerSecond > 0,
+              playbackSampleRate.isFinite,
+              playbackSampleRate > 0,
               let format = AVAudioFormat(
-                  standardFormatWithSampleRate: Double(spec.sampleRate),
+                  standardFormatWithSampleRate: playbackSampleRate,
                   channels: AVAudioChannelCount(channelCount)
               )
         else {
@@ -73,16 +90,18 @@ final class AudioOutput {
         }
 
         playerNode.scheduleBuffer(buffer)
-        if !playerNode.isPlaying {
-            playerNode.play()
+        if !hasStartedPlayback {
+            scheduledBufferCount += 1
         }
+        startPlaybackIfReady()
     }
 
     func setPaused(_ isPaused: Bool) {
+        self.isPaused = isPaused
         if isPaused {
             playerNode.pause()
-        } else if !playerNode.isPlaying {
-            playerNode.play()
+        } else {
+            startPlaybackIfReady()
         }
     }
 
@@ -93,5 +112,18 @@ final class AudioOutput {
             false,
             options: .notifyOthersOnDeactivation
         )
+    }
+
+    private func startPlaybackIfReady() {
+        guard !isPaused,
+              !playerNode.isPlaying,
+              hasStartedPlayback ||
+                  scheduledBufferCount >= Self.startupBufferCount
+        else {
+            return
+        }
+
+        playerNode.play()
+        hasStartedPlayback = true
     }
 }

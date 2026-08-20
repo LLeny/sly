@@ -5,6 +5,9 @@ struct PlayerView: View {
     let player: Player
     let onExit: () -> Void
 
+    @AppStorage(AppSettings.imageFilteringKey)
+    private var imageFiltering = AppSettings.defaultImageFiltering
+
     @State private var isMenuPresented = false
     @State private var errorMessage: String?
 
@@ -15,7 +18,8 @@ struct PlayerView: View {
                 framesPerSecond: Int(
                     (1_000_000_000 / Double(frameInterval)).rounded()
                 ),
-                isPaused: isMenuPresented
+                isPaused: isMenuPresented,
+                imageFiltering: imageFiltering
             )
             .overlay(alignment: .top) {
                 HStack {
