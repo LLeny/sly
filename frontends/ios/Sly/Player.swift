@@ -30,11 +30,11 @@ public final class Player {
         isPlaying = true
     }
     
-    func runToFrame() -> Frame? {
+    func runFrame() -> Frame? {
         guard isPlaying else {
             return nil
         }
-        
+
         core.runFrame()
         return core.frame()
     }

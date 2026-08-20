@@ -7,6 +7,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  NAGA_CLI_VERSION: "29.0.4"
 
 jobs:
   debugger-wasm:
@@ -99,6 +100,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: launcher-native
+      - name: Install Naga CLI
+        run: cargo install naga-cli --version "$NAGA_CLI_VERSION" --locked
+      - name: Check Naga CLI
+        run: naga --version
       - name: Build launcher (native)
         run: cargo build -p sly-launcher
 

@@ -36,7 +36,7 @@ async-task = { git = "https://github.com/smol-rs/async-task.git", rev = "b4486cd
 [profile.release]
 codegen-units = 1
 #lto = "fat"
-debug = true
+#debug = true
 
 [profile.dev]
 opt-level = 3
