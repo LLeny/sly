@@ -78,6 +78,14 @@ final class AudioOutput {
         }
     }
 
+    func setPaused(_ isPaused: Bool) {
+        if isPaused {
+            playerNode.pause()
+        } else if !playerNode.isPlaying {
+            playerNode.play()
+        }
+    }
+
     func stop() {
         playerNode.stop()
         engine.stop()

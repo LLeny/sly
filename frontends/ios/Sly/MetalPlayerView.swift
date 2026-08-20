@@ -8,6 +8,7 @@ struct MetalPlayerView: UIViewRepresentable {
 
     let player: Player
     let framesPerSecond: Int
+    let isPaused: Bool
 
     func makeCoordinator() -> Renderer {
         Renderer(player: player, framesPerSecond: framesPerSecond)
@@ -20,17 +21,17 @@ struct MetalPlayerView: UIViewRepresentable {
         view.framebufferOnly = false
         (view.layer as? CAMetalLayer)?.maximumDrawableCount =
             Self.bufferedFrameCount
-        view.preferredFramesPerSecond = framesPerSecond
         view.enableSetNeedsDisplay = false
-        view.isPaused = false
         return view
     }
 
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.update(
             player: player,
-            framesPerSecond: framesPerSecond
+            framesPerSecond: framesPerSecond,
+            isPaused: isPaused
         )
+        view.isPaused = isPaused
         view.preferredFramesPerSecond = framesPerSecond
     }
 
@@ -128,19 +129,19 @@ struct MetalPlayerView: UIViewRepresentable {
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
-        func update(player: Player, framesPerSecond: Int) {
-            if self.player === player &&
-                self.framesPerSecond == framesPerSecond {
-                return
+        func update(player: Player, framesPerSecond: Int, isPaused: Bool) {
+            if self.player !== player ||
+                self.framesPerSecond != framesPerSecond {
+                audioOutput?.stop()
+                self.player = player
+                self.framesPerSecond = framesPerSecond
+                audioOutput = AudioOutput(
+                    core: player.core,
+                    framesPerSecond: framesPerSecond
+                )
             }
 
-            audioOutput?.stop()
-            self.player = player
-            self.framesPerSecond = framesPerSecond
-            audioOutput = AudioOutput(
-                core: player.core,
-                framesPerSecond: framesPerSecond
-            )
+            audioOutput?.setPaused(isPaused)
         }
 
         func stop() {

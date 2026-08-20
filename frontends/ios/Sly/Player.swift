@@ -1,15 +1,11 @@
 import Foundation
-import Observation
 import SlyKit
 
-@Observable
 public final class Player {
     let currentSystem: System
     let currentRom: URL
     let core: EmulatorCore
-    
-    public private(set) var isPlaying = true
-    
+
     init(system: System, rom: URL) throws {
         let buffer = try Data(contentsOf: rom)
 
@@ -21,20 +17,29 @@ public final class Player {
     func reset() {
         core.reset()
     }
-    
-    func pause() {
-        isPlaying = false
+
+    func saveState() throws {
+        try AppFiles.saveState(
+            core.saveState(),
+            romCRC32: core.cartridge.romCRC32
+        )
     }
-    
-    func play() {
-        isPlaying = true
-    }
-    
-    func runFrame() -> Frame? {
-        guard isPlaying else {
-            return nil
+
+    func loadState() throws {
+        guard let state = try AppFiles.loadState(
+            romCRC32: core.cartridge.romCRC32
+        ) else {
+            return
         }
 
+        try core.loadState(state)
+    }
+
+    var hasState: Bool {
+        AppFiles.hasState(romCRC32: core.cartridge.romCRC32)
+    }
+
+    func runFrame() -> Frame? {
         core.runFrame()
         return core.frame()
     }

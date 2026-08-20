@@ -4,8 +4,8 @@ struct ContentView: View {
     @State private var player: Player?
     
     var body: some View {
-        if let player, player.isPlaying {
-            PlayerView(player: player)
+        if let player {
+            PlayerView(player: player) { self.player = nil }
         } else {
             BrowserView(player: $player)
         }
