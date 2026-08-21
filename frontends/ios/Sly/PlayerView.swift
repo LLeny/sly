@@ -19,8 +19,8 @@ struct PlayerView: View {
         if let frameInterval = player.core.frameIntervalNanoseconds {
             GeometryReader { geometry in
                 let controlsHeight = min(
-                    280,
-                    max(220, geometry.size.height * 0.33)
+                    340,
+                    max(276, geometry.size.height * 0.34 + 40)
                 )
 
                 VStack(spacing: 0) {
@@ -37,7 +37,6 @@ struct PlayerView: View {
 
                     GameControlsView(player: player)
                         .frame(height: controlsHeight)
-                        .offset(y: geometry.safeAreaInsets.bottom / 2)
                         .allowsHitTesting(!isMenuPresented)
                 }
             }

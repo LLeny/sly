@@ -1,5 +1,6 @@
 import SwiftUI
 import SlyKit
+import UIKit
 
 private struct ControlButtonConfiguration {
     let label: String
@@ -66,6 +67,39 @@ private extension CoreControlConfiguration {
     )
 }
 
+private enum ControlsLayout {
+    static let horizontalPadding: CGFloat = 16
+    static let topPadding: CGFloat = 8
+    static let bottomPadding: CGFloat = 58
+    static let rowSpacing: CGFloat = 14
+    static let padSpacing: CGFloat = 16
+    static let auxiliaryHeight: CGFloat = 36
+    static let padInset: CGFloat = 10
+    static let minimumPadSize: CGFloat = 104
+    static let maximumPadSize: CGFloat = 176
+
+    static var reservedWidth: CGFloat {
+        horizontalPadding * 2 + padSpacing
+    }
+
+    static var reservedHeight: CGFloat {
+        topPadding + auxiliaryHeight + rowSpacing + bottomPadding + padInset
+    }
+
+    static func padSize(in size: CGSize) -> CGFloat {
+        min(
+            maximumPadSize,
+            max(
+                minimumPadSize,
+                min(
+                    (size.width - reservedWidth) / 2,
+                    size.height - reservedHeight
+                )
+            )
+        )
+    }
+}
+
 struct GameControlsView: View {
     let player: Player
 
@@ -75,27 +109,13 @@ struct GameControlsView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let width = geometry.size.width
-            let padSize = min(
-                148,
-                max(
-                    88,
-                    min((width - 116) / 2, geometry.size.height - 70)
-                )
-            )
+            let padSize = ControlsLayout.padSize(in: geometry.size)
 
-            VStack(spacing: 24) {
-                HStack(spacing: 20) {
-                    shoulderButton(configuration.leftShoulder)
-                    shoulderButton(configuration.rightShoulder)
-                }
+            VStack(spacing: ControlsLayout.rowSpacing) {
+                auxiliaryControls
 
-                HStack(spacing: 8) {
+                HStack(spacing: ControlsLayout.padSpacing) {
                     DirectionPad(size: padSize, onButtonChanged: setButton)
-
-                    Spacer(minLength: 0)
-
-                    centerControls
 
                     Spacer(minLength: 0)
 
@@ -106,8 +126,28 @@ struct GameControlsView: View {
                     )
                 }
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, ControlsLayout.horizontalPadding)
+            .padding(.top, ControlsLayout.topPadding)
+            .padding(.bottom, ControlsLayout.bottomPadding)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: .infinity,
+                alignment: .bottom
+            )
+        }
+    }
+
+    private var auxiliaryControls: some View {
+        HStack(spacing: 12) {
+            shoulderButton(configuration.leftShoulder)
+
+            HStack(spacing: 8) {
+                ForEach(configuration.centerButtons, id: \.label) { control in
+                    centerButton(control)
+                }
+            }
+
+            shoulderButton(configuration.rightShoulder)
         }
     }
 
@@ -120,25 +160,61 @@ struct GameControlsView: View {
             shape: Capsule(),
             onButtonChanged: setButton
         )
-        .frame(height: 38)
+        .frame(maxWidth: .infinity)
+        .frame(height: ControlsLayout.auxiliaryHeight)
     }
 
-    private var centerControls: some View {
-        VStack(spacing: 8) {
-            ForEach(configuration.centerButtons, id: \.label) { control in
-                ControlButton(
-                    control: control,
-                    font: .system(size: 10, weight: .semibold),
-                    shape: Capsule(),
-                    onButtonChanged: setButton
-                )
-                .frame(width: 60, height: 24)
-            }
-        }
+    private func centerButton(
+        _ control: ControlButtonConfiguration
+    ) -> some View {
+        ControlButton(
+            control: control,
+            font: .system(size: 9, weight: .semibold),
+            shape: Capsule(),
+            onButtonChanged: setButton
+        )
+        .frame(width: 54, height: 30)
     }
 
     private func setButton(_ button: SlyKit.Button, pressed: Bool) {
         player.core.setButton(button, pressed: pressed)
+    }
+}
+
+private struct FaceButtonPlacement {
+    let control: ControlButtonConfiguration
+    let center: CGPoint
+}
+
+private struct FaceButtonLayout {
+    static let buttonSizeRatio: CGFloat = 0.38
+
+    let size: CGFloat
+    let configuration: FaceButtonConfiguration
+
+    var buttonSize: CGFloat {
+        size * Self.buttonSizeRatio
+    }
+
+    var placements: [FaceButtonPlacement] {
+        [
+            FaceButtonPlacement(
+                control: configuration.top,
+                center: CGPoint(x: size / 2, y: buttonSize / 2)
+            ),
+            FaceButtonPlacement(
+                control: configuration.trailing,
+                center: CGPoint(x: size - buttonSize / 2, y: size / 2)
+            ),
+            FaceButtonPlacement(
+                control: configuration.bottom,
+                center: CGPoint(x: size / 2, y: size - buttonSize / 2)
+            ),
+            FaceButtonPlacement(
+                control: configuration.leading,
+                center: CGPoint(x: buttonSize / 2, y: size / 2)
+            ),
+        ]
     }
 }
 
@@ -147,18 +223,23 @@ private struct FaceButtonPad: View {
     let configuration: FaceButtonConfiguration
     let onButtonChanged: (SlyKit.Button, Bool) -> Void
 
+    @State private var pressedButtons: Set<SlyKit.Button> = []
+
     var body: some View {
-        let buttonSize = size * 0.36
+        let layout = FaceButtonLayout(size: size, configuration: configuration)
 
         ZStack {
-            faceButton(configuration.top, size: buttonSize)
-                .position(x: size / 2, y: buttonSize / 2)
-            faceButton(configuration.trailing, size: buttonSize)
-                .position(x: size - buttonSize / 2, y: size / 2)
-            faceButton(configuration.bottom, size: buttonSize)
-                .position(x: size / 2, y: size - buttonSize / 2)
-            faceButton(configuration.leading, size: buttonSize)
-                .position(x: buttonSize / 2, y: size / 2)
+            ForEach(layout.placements, id: \.control.button) { placement in
+                faceButton(placement.control, size: layout.buttonSize)
+                    .position(placement.center)
+            }
+
+            FaceButtonTouchSurface(
+                layout: layout,
+                onButtonChanged: onButtonChanged,
+                onPressedButtonsChanged: { pressedButtons = $0 }
+            )
+            .accessibilityHidden(true)
         }
         .frame(width: size, height: size)
     }
@@ -167,13 +248,144 @@ private struct FaceButtonPad: View {
         _ control: ControlButtonConfiguration,
         size: CGFloat
     ) -> some View {
-        ControlButton(
+        ControlButtonLabel(
             control: control,
-            font: .system(size: 18, weight: .bold),
+            font: .system(size: 20, weight: .bold),
             shape: Circle(),
-            onButtonChanged: onButtonChanged
+            isPressed: pressedButtons.contains(control.button)
         )
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(control.label)
+        .accessibilityAddTraits(.isButton)
         .frame(width: size, height: size)
+    }
+}
+
+private struct FaceButtonTouchSurface: UIViewRepresentable {
+    let layout: FaceButtonLayout
+    let onButtonChanged: (SlyKit.Button, Bool) -> Void
+    let onPressedButtonsChanged: (Set<SlyKit.Button>) -> Void
+
+    func makeUIView(context: Context) -> FaceButtonTouchView {
+        let view = FaceButtonTouchView()
+        update(view)
+        return view
+    }
+
+    func updateUIView(_ view: FaceButtonTouchView, context: Context) {
+        update(view)
+    }
+
+    static func dismantleUIView(
+        _ view: FaceButtonTouchView,
+        coordinator: Void
+    ) {
+        view.releaseAllButtons()
+    }
+
+    private func update(_ view: FaceButtonTouchView) {
+        view.layout = layout
+        view.onButtonChanged = onButtonChanged
+        view.onPressedButtonsChanged = onPressedButtonsChanged
+    }
+}
+
+private final class FaceButtonTouchView: UIView {
+    var layout: FaceButtonLayout?
+    var onButtonChanged: ((SlyKit.Button, Bool) -> Void)?
+    var onPressedButtonsChanged: ((Set<SlyKit.Button>) -> Void)?
+
+    private var trackedTouches: [ObjectIdentifier: Set<SlyKit.Button>] = [:]
+    private var pressedButtons: Set<SlyKit.Button> = []
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isMultipleTouchEnabled = true
+        isExclusiveTouch = false
+        backgroundColor = .clear
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        update(touches)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        update(touches)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        remove(touches)
+    }
+
+    override func touchesCancelled(
+        _ touches: Set<UITouch>,
+        with event: UIEvent?
+    ) {
+        remove(touches)
+    }
+
+    func releaseAllButtons() {
+        trackedTouches.removeAll()
+        updatePressedButtons([])
+    }
+
+    private func update(_ touches: Set<UITouch>) {
+        for touch in touches {
+            trackedTouches[ObjectIdentifier(touch)] = buttons(for: touch)
+        }
+        updatePressedButtons(allTrackedButtons)
+    }
+
+    private func remove(_ touches: Set<UITouch>) {
+        for touch in touches {
+            trackedTouches.removeValue(forKey: ObjectIdentifier(touch))
+        }
+        updatePressedButtons(allTrackedButtons)
+    }
+
+    private var allTrackedButtons: Set<SlyKit.Button> {
+        trackedTouches.values.reduce(into: []) { buttons, touchButtons in
+            buttons.formUnion(touchButtons)
+        }
+    }
+
+    private func updatePressedButtons(_ next: Set<SlyKit.Button>) {
+        guard next != pressedButtons else { return }
+
+        emitButtonChanges(from: pressedButtons, to: next) { button, pressed in
+            onButtonChanged?(button, pressed)
+        }
+        pressedButtons = next
+        onPressedButtonsChanged?(next)
+    }
+
+    private func buttons(for touch: UITouch) -> Set<SlyKit.Button> {
+        guard let layout else { return [] }
+
+        let buttonSize = layout.buttonSize
+        let contactRadius = min(
+            max(touch.majorRadius, buttonSize * 0.18),
+            buttonSize * 0.27
+        )
+        let hitRadius = buttonSize / 2 + contactRadius
+        let location = touch.location(in: self)
+
+        var buttons: Set<SlyKit.Button> = []
+        for placement in layout.placements {
+            let distance = hypot(
+                location.x - placement.center.x,
+                location.y - placement.center.y
+            )
+            if distance <= hitRadius {
+                buttons.insert(placement.control.button)
+            }
+        }
+        return buttons
     }
 }
 
@@ -259,12 +471,7 @@ private struct DirectionPad: View {
     private func setPressedButtons(_ next: Set<SlyKit.Button>) {
         guard next != pressedButtons else { return }
 
-        for button in pressedButtons.subtracting(next) {
-            onButtonChanged(button, false)
-        }
-        for button in next.subtracting(pressedButtons) {
-            onButtonChanged(button, true)
-        }
+        emitButtonChanges(from: pressedButtons, to: next, onButtonChanged)
         pressedButtons = next
     }
 
@@ -306,6 +513,42 @@ private func controlFill(_ isPressed: Bool) -> Color {
     .primary.opacity(isPressed ? 0.22 : 0.12)
 }
 
+private func emitButtonChanges(
+    from current: Set<SlyKit.Button>,
+    to next: Set<SlyKit.Button>,
+    _ onButtonChanged: (SlyKit.Button, Bool) -> Void
+) {
+    for button in current.subtracting(next) {
+        onButtonChanged(button, false)
+    }
+    for button in next.subtracting(current) {
+        onButtonChanged(button, true)
+    }
+}
+
+private extension ControlButtonConfiguration {
+    func fill(isPressed: Bool) -> Color {
+        guard let color else { return controlFill(isPressed) }
+        return isPressed ? color.opacity(0.72) : color
+    }
+}
+
+private struct ControlButtonLabel<ControlShape: Shape>: View {
+    let control: ControlButtonConfiguration
+    let font: Font
+    let shape: ControlShape
+    let isPressed: Bool
+
+    var body: some View {
+        Text(control.label)
+            .font(font)
+            .foregroundStyle(control.color == nil ? Color.primary : .white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(control.fill(isPressed: isPressed), in: shape)
+            .scaleEffect(isPressed ? 0.94 : 1)
+    }
+}
+
 private struct ControlButton<ControlShape: Shape>: View {
     let control: ControlButtonConfiguration
     let font: Font
@@ -319,18 +562,13 @@ private struct ControlButton<ControlShape: Shape>: View {
                 onButtonChanged(control.button, pressed)
             }
         ) { isPressed in
-            Text(control.label)
-                .font(font)
-                .foregroundStyle(control.color == nil ? Color.primary : .white)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(fill(isPressed), in: shape)
-                .scaleEffect(isPressed ? 0.94 : 1)
+            ControlButtonLabel(
+                control: control,
+                font: font,
+                shape: shape,
+                isPressed: isPressed
+            )
         }
-    }
-
-    private func fill(_ isPressed: Bool) -> Color {
-        guard let color = control.color else { return controlFill(isPressed) }
-        return isPressed ? color.opacity(0.72) : color
     }
 }
 
