@@ -122,7 +122,7 @@ jobs:
         run: cargo build -p sly-ffi -p sly-cxx
       - name: Check committed C header compiles
         run: |
-          gcc -fsyntax-only -std=c11 -x c crates/ffi/include/sly.h
-          g++ -fsyntax-only -std=c++17 -x c++ crates/ffi/include/sly.h
+          gcc -fsyntax-only -std=c11 -x c bindings/c/include/sly.h
+          g++ -fsyntax-only -std=c++17 -x c++ bindings/c/include/sly.h
       - name: Check committed C header is current
-        run: git diff --exit-code -- crates/ffi/include/sly.h
+        run: git diff --exit-code -- bindings/c/include/sly.h
