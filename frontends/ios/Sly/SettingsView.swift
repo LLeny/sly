@@ -1,4 +1,5 @@
 import SwiftUI
+import SlyKit
 
 struct SettingsView: View {
     @AppStorage(AppSettings.imageFilteringKey)
@@ -9,6 +10,9 @@ struct SettingsView: View {
 
     @AppStorage(AppSettings.autoLoadQuickSaveKey)
     private var autoLoadQuickSave = AppSettings.defaultAutoLoadQuickSave
+
+    @AppStorage(AppSettings.artworkRegionKey)
+    private var artworkRegion = AppSettings.defaultArtworkRegion
 
     var body: some View {
         NavigationStack {
@@ -31,10 +35,23 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                 }
 
-                Section("Library") {
+                Section {
+                    Picker("Preferred Cover Region", selection: $artworkRegion) {
+                        ForEach(ArtworkRegion.allCases) { region in
+                            Text(region.displayName).tag(region)
+                        }
+                    }
+
                     Toggle(
                         "Show File Extensions",
                         isOn: $showFileExtensions
+                    )
+                } header: {
+                    Text("Library")
+                } footer: {
+                    Text(
+                        "Automatic uses the ROMs detected region and falls " +
+                        "back to another available cover when necessary."
                     )
                 }
 

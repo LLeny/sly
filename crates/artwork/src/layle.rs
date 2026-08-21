@@ -20,6 +20,15 @@ pub struct Metadata {
     pub art: Vec<String>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct ArtworkManifest {
+    pub title: String,
+    pub front: Option<String>,
+    pub back: Option<String>,
+    pub spine: Option<String>,
+    pub label: Option<String>,
+}
+
 pub fn metadata_url(sha1: &str) -> String {
     format!("{BASE_URL}/snes/{sha1}")
 }
@@ -32,10 +41,33 @@ pub fn parse_metadata(bytes: &[u8]) -> Result<Metadata, serde_json::Error> {
     serde_json::from_slice(bytes)
 }
 
-pub fn select_art(available: &[String], kind: &str, region: Region) -> Option<String> {
+/// `regions` is a priority list, most preferred first; an empty list falls back to any region.
+pub fn resolve_metadata(
+    sha1: &str,
+    regions: &[Region],
+    bytes: &[u8],
+) -> Result<ArtworkManifest, serde_json::Error> {
+    let metadata = parse_metadata(bytes)?;
+    let url = |kind| select_art(&metadata.art, kind, regions).map(|art| art_url(sha1, &art));
+    Ok(ArtworkManifest {
+        title: metadata.title,
+        front: url("box-front"),
+        back: url("box-back"),
+        spine: url("box-spine"),
+        label: url("support-texture"),
+    })
+}
+
+/// Picks the first art of `kind` matching `regions` in order, then any region, then any variant.
+pub fn select_art(available: &[String], kind: &str, regions: &[Region]) -> Option<String> {
+    const GLOBAL_FALLBACKS: &[&str] =
+        &["wor", "us", "eu", "jp", "de", "fr", "sp", "au", "br", "ss"];
+
     let prefix = format!("{kind}/");
-    preferred_art_variants(region)
+    regions
         .iter()
+        .flat_map(|region| art_variants(*region))
+        .chain(GLOBAL_FALLBACKS)
         .find_map(|variant| {
             let candidate = format!("{prefix}{variant}");
             let numbered = format!("{candidate}_");
@@ -52,24 +84,19 @@ pub fn select_art(available: &[String], kind: &str, region: Region) -> Option<St
         })
 }
 
-fn preferred_art_variants(region: Region) -> &'static [&'static str] {
+fn art_variants(region: Region) -> &'static [&'static str] {
     match region {
-        Region::Japan => &["jp", "us", "wor", "eu"],
-        Region::NorthAmerica | Region::SouthKorea => &["us", "jp", "wor", "eu"],
-        Region::Canada => &["us", "fr", "jp", "wor", "eu"],
-        Region::Brazil => &["br", "us", "jp", "wor", "eu"],
-        Region::China => &["jp", "us", "wor", "eu"],
-        Region::Common | Region::Other(_) => &["wor", "us", "jp", "eu"],
-        Region::Germany => &["de", "eu", "fr", "sp", "au", "wor", "us"],
-        Region::France => &["fr", "eu", "de", "sp", "au", "wor", "us"],
-        Region::Spain => &["sp", "eu", "fr", "de", "au", "wor", "us"],
-        Region::Australia => &["au", "eu", "de", "fr", "sp", "wor", "us"],
-        Region::Scandinavia | Region::Finland | Region::Denmark => {
-            &["ss", "eu", "de", "fr", "sp", "au", "wor", "us"]
-        }
-        Region::Europe | Region::Netherlands | Region::Italy | Region::Indonesia => {
-            &["eu", "de", "fr", "sp", "au", "wor", "us"]
-        }
+        Region::Japan | Region::China => &["jp"],
+        Region::NorthAmerica | Region::SouthKorea => &["us"],
+        Region::Canada => &["us", "fr"],
+        Region::Brazil => &["br"],
+        Region::Common | Region::Other(_) => &["wor"],
+        Region::Germany => &["de", "eu"],
+        Region::France => &["fr", "eu"],
+        Region::Spain => &["sp", "eu"],
+        Region::Australia => &["au", "eu"],
+        Region::Scandinavia | Region::Finland | Region::Denmark => &["ss", "eu"],
+        Region::Europe | Region::Netherlands | Region::Italy | Region::Indonesia => &["eu"],
     }
 }
 
@@ -191,7 +218,7 @@ mod fetch {
     }
 
     fn fetch_kind(sha1: &str, available: &[String], kind: &str, region: Region) -> Option<Vec<u8>> {
-        let selected = super::select_art(available, kind, region)?;
+        let selected = super::select_art(available, kind, &[region])?;
         get(&super::art_url(sha1, &selected))
             .and_then(|response| response.into_body().read_to_vec())
             .ok()

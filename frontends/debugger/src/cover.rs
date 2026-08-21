@@ -31,7 +31,7 @@ async fn fetch_sly_cover(client: Arc<dyn HttpClient>, query: &ArtQuery) -> Resul
     }
 
     let metadata = artwork::layle::parse_metadata(&body)?;
-    let art = artwork::layle::select_art(&metadata.art, "box-front", query.region)
+    let art = artwork::layle::select_art(&metadata.art, "box-front", &[query.region])
         .ok_or_else(|| gpui::http_client::anyhow!("no box front art for {}", query.sha1))?;
     Ok(artwork::layle::art_url(&query.sha1, &art))
 }

@@ -6,6 +6,7 @@ use crate::error::SnesError;
 
 pub const TITLE_LENGTH: usize = 21;
 const HEADER_LENGTH: usize = 0x20;
+const COPIER_HEADER_LENGTH: usize = 512;
 
 #[derive(Serialize, Deserialize)]
 pub struct Cartridge {
@@ -168,19 +169,35 @@ impl Cartridge {
     }
 
     pub fn region(&self) -> Region {
+        Self::region_at(&self.rom, self.header_offset)
+    }
+
+    /// Reads the region straight from a borrowed ROM, without building a cartridge.
+    pub fn region_of(rom: &[u8]) -> Result<Region, SnesError> {
+        let rom = Self::without_copier_header(rom);
+        let header_offset = Self::search_header(rom).ok_or(SnesError::InvalidRomHeader)?;
+        Ok(Self::region_at(rom, header_offset))
+    }
+
+    fn region_at(rom: &[u8], header_offset: usize) -> Region {
         const REGION_OFFSET: usize = 0x19;
 
-        let code = self
-            .rom
-            .get(self.header_offset + REGION_OFFSET)
+        let code = rom
+            .get(header_offset + REGION_OFFSET)
             .copied()
             .unwrap_or(0xFF);
         region_from_code(code)
     }
 
-    fn strip_copier_header(rom: &mut Vec<u8>) {
-        const COPIER_HEADER_LENGTH: usize = 512;
+    fn without_copier_header(rom: &[u8]) -> &[u8] {
+        if rom.len() % 1024 == COPIER_HEADER_LENGTH {
+            &rom[COPIER_HEADER_LENGTH..]
+        } else {
+            rom
+        }
+    }
 
+    fn strip_copier_header(rom: &mut Vec<u8>) {
         if rom.len() % 1024 == COPIER_HEADER_LENGTH {
             rom.drain(..COPIER_HEADER_LENGTH);
         }

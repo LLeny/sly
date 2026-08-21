@@ -3,12 +3,14 @@ import SlyKit
 
 struct PlayerView: View {
     let player: Player
-    let onExit: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
 
     @AppStorage(AppSettings.imageFilteringKey)
     private var imageFiltering = AppSettings.defaultImageFiltering
+
+    @AppStorage(AppSettings.showFileExtensionsKey)
+    private var showFileExtensions = AppSettings.defaultShowFileExtensions
 
     @State private var isMenuPresented = false
     @State private var errorMessage: String?
@@ -22,41 +24,14 @@ struct PlayerView: View {
                 )
 
                 VStack(spacing: 0) {
-                    VStack(spacing: 0) {
-                        HStack {
-                            Button(action: leaveGame) {
-                                Label("Back", systemImage: "chevron.left")
-                            }
-
-                            Spacer()
-
-                            Button {
-                                isMenuPresented = true
-                            } label: {
-                                Label("Menu", systemImage: "line.3.horizontal")
-                            }
-                            .popover(
-                                isPresented: $isMenuPresented,
-                                arrowEdge: .top
-                            ) {
-                                menu
-                                    .presentationCompactAdaptation(.popover)
-                            }
-                        }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.capsule)
-                        .padding()
-
-                        MetalPlayerView(
-                            player: player,
-                            framesPerSecond: Int(
-                                (1_000_000_000 / Double(frameInterval)).rounded()
-                            ),
-                            isPaused: isMenuPresented,
-                            imageFiltering: imageFiltering
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
+                    MetalPlayerView(
+                        player: player,
+                        framesPerSecond: Int(
+                            (1_000_000_000 / Double(frameInterval)).rounded()
+                        ),
+                        isPaused: isMenuPresented,
+                        imageFiltering: imageFiltering
+                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .layoutPriority(1)
 
@@ -67,6 +42,29 @@ struct PlayerView: View {
                 }
             }
             .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+            .navigationTitle(
+                AppSettings.displayName(
+                    for: player.currentRom,
+                    showingFileExtensions: showFileExtensions
+                )
+            )
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isMenuPresented = true
+                    } label: {
+                        Label("Menu", systemImage: "line.3.horizontal")
+                    }
+                    .popover(
+                        isPresented: $isMenuPresented,
+                        arrowEdge: .top
+                    ) {
+                        menu
+                            .presentationCompactAdaptation(.popover)
+                    }
+                }
+            }
             .alert(
                 "Unable to Complete Action",
                 isPresented: Binding(
@@ -81,6 +79,13 @@ struct PlayerView: View {
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase != .active else { return }
                 perform { try player.persistSaveRAM() }
+            }
+            .onDisappear {
+                do {
+                    try player.persistSaveRAM()
+                } catch {
+                    print("Failed to persist save RAM while leaving game:", error)
+                }
             }
         } else {
             ContentUnavailableView(
@@ -127,11 +132,6 @@ struct PlayerView: View {
                 .padding(12)
                 .contentShape(.rect)
         }
-    }
-
-    private func leaveGame() {
-        perform { try player.persistSaveRAM() }
-        onExit()
     }
 
     private func perform(_ action: () throws -> Void) {

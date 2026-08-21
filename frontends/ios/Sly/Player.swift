@@ -1,7 +1,9 @@
 import Foundation
 import SlyKit
 
-public final class Player {
+public final class Player: Identifiable {
+    public let id = UUID()
+
     private static let saveRAMFlushInterval: TimeInterval = 60
 
     let currentSystem: System

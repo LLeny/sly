@@ -23,11 +23,34 @@ typedef enum SlyStatus {
   SLY_STATUS_STATE_ROM_MISMATCH,
   SLY_STATUS_STATE_TRUNCATED,
   SLY_STATUS_STATE_CORRUPT,
+  SLY_STATUS_ARTWORK_METADATA,
 } SlyStatus;
 
 typedef enum SlySystem {
   SLY_SYSTEM_SNES = 0,
 } SlySystem;
+
+typedef enum SlyRegion {
+  SLY_REGION_JAPAN = 0,
+  SLY_REGION_NORTH_AMERICA,
+  SLY_REGION_EUROPE,
+  SLY_REGION_SCANDINAVIA,
+  SLY_REGION_FINLAND,
+  SLY_REGION_DENMARK,
+  SLY_REGION_FRANCE,
+  SLY_REGION_NETHERLANDS,
+  SLY_REGION_SPAIN,
+  SLY_REGION_GERMANY,
+  SLY_REGION_ITALY,
+  SLY_REGION_CHINA,
+  SLY_REGION_INDONESIA,
+  SLY_REGION_SOUTH_KOREA,
+  SLY_REGION_COMMON,
+  SLY_REGION_CANADA,
+  SLY_REGION_BRAZIL,
+  SLY_REGION_AUSTRALIA,
+  SLY_REGION_OTHER,
+} SlyRegion;
 
 typedef enum SlyButton {
   SLY_BUTTON_UP = 0,
@@ -51,6 +74,30 @@ typedef enum SlyTvSystem {
 
 typedef struct SlyCore SlyCore;
 
+// Rust-allocated. Free exactly once with `sly_buffer_free`.
+typedef struct SlyBuffer {
+  uint8_t *data;
+  size_t len;
+} SlyBuffer;
+
+// Rust-allocated fields. Release them exactly once with `sly_artwork_query_free`.
+typedef struct SlyArtworkQuery {
+  struct SlyBuffer sha1;
+  struct SlyBuffer metadata_url;
+  struct SlyBuffer authorization;
+  enum SlyRegion region;
+} SlyArtworkQuery;
+
+// Rust-allocated UTF-8 fields. Empty artwork URL fields mean unavailable.
+// Release them exactly once with `sly_artwork_manifest_free`.
+typedef struct SlyArtworkManifest {
+  struct SlyBuffer title;
+  struct SlyBuffer front_url;
+  struct SlyBuffer back_url;
+  struct SlyBuffer spine_url;
+  struct SlyBuffer label_url;
+} SlyArtworkManifest;
+
 typedef struct SlyAudioSpec {
   uint32_t sample_rate;
   uint8_t channels;
@@ -65,15 +112,30 @@ typedef struct SlyFrame {
   size_t pixels_len;
 } SlyFrame;
 
-// Rust-allocated. Free exactly once with `sly_buffer_free`.
-typedef struct SlyBuffer {
-  uint8_t *data;
-  size_t len;
-} SlyBuffer;
-
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
+
+// Inspect a ROM without constructing an emulator core and prepare a art.layle.dev artwork query.
+enum SlyStatus sly_artwork_query(enum SlySystem system,
+                                 const uint8_t *rom,
+                                 size_t rom_len,
+                                 struct SlyArtworkQuery *out_query);
+
+// Resolve art.layle.dev metadata into region-preferred artwork URLs without performing network I/O.
+enum SlyStatus sly_artwork_resolve(const uint8_t *sha1,
+                                   size_t sha1_len,
+                                   enum SlyRegion preferred_region,
+                                   enum SlyRegion rom_region,
+                                   const uint8_t *metadata,
+                                   size_t metadata_len,
+                                   struct SlyArtworkManifest *out_manifest);
+
+// NULL is a no-op. Invalidates every field in the query.
+void sly_artwork_query_free(struct SlyArtworkQuery *query);
+
+// NULL is a no-op. Invalidates every field in the manifest.
+void sly_artwork_manifest_free(struct SlyArtworkManifest *manifest);
 
 uint32_t sly_abi_version(void);
 

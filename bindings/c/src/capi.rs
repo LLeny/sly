@@ -23,6 +23,7 @@ pub enum SlyStatus {
     StateRomMismatch,
     StateTruncated,
     StateCorrupt,
+    ArtworkMetadata,
 }
 
 #[repr(C)]
@@ -94,7 +95,7 @@ thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
 }
 
-fn set_last_error(msg: &str) {
+pub(crate) fn set_last_error(msg: &str) {
     let cstring = cstring_lossy(msg);
     LAST_ERROR.with(|slot| *slot.borrow_mut() = cstring);
 }
@@ -154,11 +155,7 @@ pub unsafe extern "C" fn sly_core_create(
         return SlyStatus::InvalidArg;
     };
 
-    let bytes = if rom_len == 0 {
-        Vec::new()
-    } else {
-        unsafe { std::slice::from_raw_parts(rom, rom_len) }.to_vec()
-    };
+    let bytes = unsafe { slice_from_raw(rom, rom_len) }.to_vec();
 
     match Runtime::new(system, bytes) {
         Ok(rt) => {
@@ -325,11 +322,7 @@ pub unsafe extern "C" fn sly_core_load_state(
         return SlyStatus::InvalidArg;
     }
 
-    let bytes: &[u8] = if len == 0 {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(data, len) }
-    };
+    let bytes = unsafe { slice_from_raw(data, len) };
 
     match core.rt.load_state(bytes) {
         Ok(()) => SlyStatus::Ok,
@@ -393,11 +386,7 @@ pub unsafe extern "C" fn sly_core_load_save_ram(
     if data.is_null() && len > 0 {
         return false;
     }
-    let bytes: &[u8] = if len == 0 {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(data, len) }
-    };
+    let bytes = unsafe { slice_from_raw(data, len) };
     core.rt.load_save_ram(bytes)
 }
 
@@ -453,7 +442,15 @@ pub unsafe extern "C" fn sly_core_sram_size(core: *const SlyCore) -> usize {
     unsafe { core.as_ref() }.map_or(0, |core| core.rt.meta().sram_size)
 }
 
-fn buffer_from_vec(bytes: Vec<u8>) -> SlyBuffer {
+pub(crate) unsafe fn slice_from_raw<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
+    if len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(ptr, len) }
+    }
+}
+
+pub(crate) fn buffer_from_vec(bytes: Vec<u8>) -> SlyBuffer {
     let slice = Box::into_raw(bytes.into_boxed_slice());
     SlyBuffer {
         data: slice.cast(),

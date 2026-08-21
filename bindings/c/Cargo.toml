@@ -8,6 +8,7 @@ name = "sly"
 crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
+artwork = { path = "../../crates/artwork" }
 core-model = { path = "../../crates/models/core" }
 snes = { path = "../../crates/cores/snes" }
 

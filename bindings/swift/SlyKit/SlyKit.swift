@@ -7,7 +7,7 @@ public enum SlyError: Error, Equatable {
     case native(status: Int, message: String)
 }
 
-public enum System {
+public enum System: Hashable, Sendable {
     case snes
 
     public var displayName: String {
@@ -17,7 +17,7 @@ public enum System {
         }
     }
     
-    fileprivate var native: SlySystem {
+    var native: SlySystem {
         switch self {
         case .snes: SLY_SYSTEM_SNES
         }
@@ -98,7 +98,7 @@ public final class EmulatorCore {
                 &core
             )
         }
-        try Self.check(status)
+        try checkNativeStatus(status)
 
         guard let core else {
             throw SlyError.native(
@@ -167,7 +167,7 @@ public final class EmulatorCore {
 
     public func saveState() throws -> Data {
         var buffer = SlyBuffer(data: nil, len: 0)
-        try Self.check(sly_core_save_state(handle, &buffer))
+        try checkNativeStatus(sly_core_save_state(handle, &buffer))
         defer { sly_buffer_free(&buffer) }
 
         guard let data = buffer.data else { return Data() }
@@ -182,7 +182,7 @@ public final class EmulatorCore {
                 bytes.count
             )
         }
-        try Self.check(status)
+        try checkNativeStatus(status)
     }
 
     public func saveRAM() -> Data? {
@@ -207,9 +207,9 @@ public final class EmulatorCore {
 
     public var cartridge: Cartridge {
         Cartridge(
-            title: Self.string(sly_core_title(handle)),
-            system: Self.string(sly_core_system(handle)),
-            region: Self.string(sly_core_region_name(handle)),
+            title: nativeString(sly_core_title(handle)),
+            system: nativeString(sly_core_system(handle)),
+            region: nativeString(sly_core_region_name(handle)),
             televisionSystem: sly_core_tv_system(handle) == SLY_TV_SYSTEM_PAL
                 ? .pal
                 : .ntsc,
@@ -219,16 +219,17 @@ public final class EmulatorCore {
         )
     }
 
-    private static func check(_ status: SlyStatus) throws {
-        guard status == SLY_STATUS_OK else {
-            throw SlyError.native(
-                status: Int(status.rawValue),
-                message: string(sly_last_error())
-            )
-        }
-    }
+}
 
-    private static func string(_ pointer: UnsafePointer<CChar>?) -> String {
-        pointer.map(String.init(cString:)) ?? ""
+func nativeString(_ pointer: UnsafePointer<CChar>?) -> String {
+    pointer.map(String.init(cString:)) ?? ""
+}
+
+func checkNativeStatus(_ status: SlyStatus) throws {
+    guard status == SLY_STATUS_OK else {
+        throw SlyError.native(
+            status: Int(status.rawValue),
+            message: nativeString(sly_last_error())
+        )
     }
 }

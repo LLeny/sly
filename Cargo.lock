@@ -8976,6 +8976,7 @@ dependencies = [
 name = "sly-ffi"
 version = "0.1.0"
 dependencies = [
+ "artwork",
  "cbindgen 0.29.4",
  "core-model",
  "snes",
