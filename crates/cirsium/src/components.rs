@@ -5,6 +5,7 @@ mod menu;
 mod panel;
 mod primitives;
 mod rows;
+mod scroll_shadow;
 mod segmented;
 mod status_bar;
 mod text_input;
@@ -25,6 +26,7 @@ pub use rows::{
     DETAIL_INDENT, FOOTER_ROW_H, INDENT_STEP, RowCallback, chevron_slot, detail_row,
     footer_placeholder, footer_row, footer_row_el, row_toggle,
 };
+pub use scroll_shadow::{uniform_vertical_scroll_area, vertical_scroll_area};
 pub use segmented::Segmented;
 pub use status_bar::{StatusView, console_pill, status_bar};
 pub use text_input::{TextInput, TextInputEvent, register_text_input_keys};

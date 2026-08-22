@@ -11,7 +11,7 @@ use gpui::{
 
 use self::complete::Suggestions;
 use self::element::EditorElement;
-use crate::components::text_offsets;
+use crate::components::{text_offsets, vertical_scroll_area};
 use crate::theme::Theme;
 
 mod complete;
@@ -713,6 +713,8 @@ impl Render for CodeEditor {
             .child(EditorElement {
                 editor: cx.entity(),
             });
+
+        let editor = vertical_scroll_area(editor, self.scroll.clone(), t).flex_1();
 
         div()
             .relative()

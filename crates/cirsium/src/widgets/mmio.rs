@@ -3,12 +3,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, FontWeight, SharedString, Stateful, Window, div, px};
+use gpui::{
+    App, ClickEvent, Div, FontWeight, ScrollHandle, SharedString, Stateful, Window, div, px,
+};
 
 use crate::assets::icon;
 use crate::components::{
     ClickHandler, DETAIL_INDENT, INDENT_STEP, Panel, RowCallback, chevron_slot, hex, label_text,
-    row_toggle,
+    row_toggle, vertical_scroll_area,
 };
 use crate::diff::{Highlight, highlight_color};
 use crate::theme::Theme;
@@ -107,6 +109,7 @@ pub struct MmioWidget {
     expanded: HashSet<SharedString>,
     collapsed: bool,
     priority: Option<SharedString>,
+    scroll: ScrollHandle,
     on_toggle: Option<ClickHandler>,
     on_toggle_register: Option<RowCallback>,
 }
@@ -120,6 +123,7 @@ impl MmioWidget {
             expanded: HashSet::new(),
             collapsed: false,
             priority: None,
+            scroll: ScrollHandle::new(),
             on_toggle: None,
             on_toggle_register: None,
         }
@@ -137,6 +141,11 @@ impl MmioWidget {
 
     pub fn priority(mut self, group: Option<SharedString>) -> Self {
         self.priority = group;
+        self
+    }
+
+    pub fn scroll(mut self, scroll: ScrollHandle) -> Self {
+        self.scroll = scroll;
         self
     }
 
@@ -161,6 +170,7 @@ impl RenderOnce for MmioWidget {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
+        let scroll = self.scroll.clone();
 
         let count = self.view.register_count();
 
@@ -170,7 +180,8 @@ impl RenderOnce for MmioWidget {
             .flex_col()
             .flex_1()
             .min_h(px(0.))
-            .overflow_y_scroll();
+            .overflow_y_scroll()
+            .track_scroll(&scroll);
 
         if count == 0 {
             list = list.items_center().justify_center().child(
@@ -212,7 +223,7 @@ impl RenderOnce for MmioWidget {
             .collapsed(self.collapsed)
             .meta(format!("{count}"))
             .on_toggle_opt(self.on_toggle)
-            .child(list)
+            .child(vertical_scroll_area(list, scroll, t).flex_1())
     }
 }
 

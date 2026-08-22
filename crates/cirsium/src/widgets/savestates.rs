@@ -3,12 +3,12 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    App, ImageFiltering, MouseButton, MouseDownEvent, ObjectFit, RenderImage, SharedString, Window,
-    div, img, px, svg,
+    App, ImageFiltering, MouseButton, MouseDownEvent, ObjectFit, RenderImage, ScrollHandle,
+    SharedString, Window, div, img, px, svg,
 };
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, empty_state};
+use crate::components::{ClickHandler, Panel, empty_state, vertical_scroll_area};
 use crate::theme::Theme;
 
 #[derive(Clone)]
@@ -59,6 +59,7 @@ pub struct SavestatesWidget {
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
     selected: Option<SharedString>,
+    scroll: ScrollHandle,
     on_action: Option<SlotHandler>,
 }
 
@@ -71,6 +72,7 @@ impl SavestatesWidget {
             collapsed: false,
             on_toggle: None,
             selected: None,
+            scroll: ScrollHandle::new(),
             on_action: None,
         }
     }
@@ -93,6 +95,11 @@ impl SavestatesWidget {
         self
     }
 
+    pub fn scroll(mut self, scroll: ScrollHandle) -> Self {
+        self.scroll = scroll;
+        self
+    }
+
     pub fn on_action(
         mut self,
         handler: impl Fn(SlotAction, SharedString, &mut Window, &mut App) + 'static,
@@ -106,6 +113,7 @@ impl RenderOnce for SavestatesWidget {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
+        let scroll = self.scroll.clone();
 
         let body = if self.view.slots.is_empty() {
             div()
@@ -116,18 +124,19 @@ impl RenderOnce for SavestatesWidget {
             let selected = self.selected;
             let thumb_width = thumb_width(&self.view);
 
-            div()
+            let list = div()
                 .id("savestate-list")
                 .flex()
                 .flex_col()
                 .gap_1()
                 .max_h(px(LIST_MAX_HEIGHT))
                 .overflow_y_scroll()
+                .track_scroll(&scroll)
                 .children(self.view.slots.into_iter().map(|slot| {
                     let is_selected = selected.as_ref() == Some(&slot.id);
                     row(t, slot, thumb_width, is_selected, on_action.clone())
-                }))
-                .into_any_element()
+                }));
+            vertical_scroll_area(list, scroll, t).into_any_element()
         };
 
         Panel::new(Self::ID, "Save States")

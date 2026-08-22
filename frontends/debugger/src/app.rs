@@ -27,8 +27,8 @@ use debugger_model::{BreakpointMark, CpuId, CpuView, DebugCore, RunOutcome, Vide
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, FocusHandle, KeyDownEvent,
-    KeyUpEvent, MouseDownEvent, Pixels, Point, RenderImage, SharedString, Size, Task, Window, div,
-    px, rgb,
+    KeyUpEvent, MouseDownEvent, Pixels, Point, RenderImage, ScrollHandle, SharedString, Size, Task,
+    Window, div, px, rgb,
 };
 use web_time::Instant;
 use workspace_model::{PanelDescriptor, PanelKind, RefreshPolicy, WorkspaceIcon};
@@ -112,6 +112,7 @@ pub(crate) struct Debugger {
     palette_view: Arc<PaletteView>,
     palette_selected: Option<(usize, usize)>,
     structured_views: HashMap<SharedString, Arc<StructuredView>>,
+    panel_scrolls: HashMap<String, ScrollHandle>,
     table_views: HashMap<SharedString, Arc<TableView>>,
     table_selection: HashMap<SharedString, usize>,
     scopes_views: HashMap<SharedString, AudioScopesView>,
@@ -283,6 +284,12 @@ impl Debugger {
         let mut panel_factory = DebuggerPanelFactory::new(panel_frames.clone());
         let registry = cirsium::PanelRegistry::new(manifest, &mut panel_factory, cx)
             .expect("invalid component manifest");
+        let panel_scrolls = registry
+            .manifest()
+            .panels
+            .iter()
+            .map(|panel| (panel.id.to_string(), ScrollHandle::new()))
+            .collect();
         let mut status: StatusView = target.session_info().into();
         status.state = target.caption("paused").into();
 
@@ -293,6 +300,7 @@ impl Debugger {
             palette_view: Arc::new(target.palette_view().into()),
             palette_selected: None,
             structured_views: HashMap::new(),
+            panel_scrolls,
             table_views: HashMap::new(),
             table_selection: HashMap::new(),
             scopes_views: HashMap::new(),
@@ -364,6 +372,10 @@ impl Debugger {
             #[cfg(target_family = "wasm")]
             web_tick_armed: false,
         }
+    }
+
+    fn scroll_for(&self, id: &str) -> ScrollHandle {
+        self.panel_scrolls.get(id).cloned().unwrap_or_default()
     }
 
     pub(crate) fn set_cover_art(&mut self, cover: Arc<str>, cx: &mut Context<Self>) {

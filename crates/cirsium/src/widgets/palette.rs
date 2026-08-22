@@ -2,11 +2,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, Rgba, SharedString, Window, div, px, rgb};
+use gpui::{App, ClickEvent, Div, Rgba, ScrollHandle, SharedString, Window, div, px, rgb};
 
 use crate::assets::icon;
 use crate::components::{
     ClickHandler, Panel, empty_state, footer_placeholder, footer_row, hex, mono_text,
+    vertical_scroll_area,
 };
 use crate::theme::Theme;
 
@@ -39,6 +40,7 @@ pub struct PaletteWidget {
     view: Arc<PaletteView>,
     selected: Option<(usize, usize)>,
     collapsed: bool,
+    scroll: ScrollHandle,
     on_toggle: Option<ClickHandler>,
     on_select: Option<SelectCallback>,
 }
@@ -51,6 +53,7 @@ impl PaletteWidget {
             view,
             selected: None,
             collapsed: false,
+            scroll: ScrollHandle::new(),
             on_toggle: None,
             on_select: None,
         }
@@ -63,6 +66,11 @@ impl PaletteWidget {
 
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
+        self
+    }
+
+    pub fn scroll(mut self, scroll: ScrollHandle) -> Self {
+        self.scroll = scroll;
         self
     }
 
@@ -89,6 +97,7 @@ impl RenderOnce for PaletteWidget {
         let t = &*theme;
 
         let active = self.selected.map(|(palette, _)| palette);
+        let scroll = self.scroll.clone();
 
         let mut grid = div()
             .id("palette-grid")
@@ -97,7 +106,8 @@ impl RenderOnce for PaletteWidget {
             .flex_1()
             .min_h(px(0.))
             .gap(px(2.))
-            .overflow_y_scroll();
+            .overflow_y_scroll()
+            .track_scroll(&scroll);
 
         if self.view.palettes.is_empty() {
             grid = grid
@@ -132,6 +142,7 @@ impl RenderOnce for PaletteWidget {
             }
         }
 
+        let grid = vertical_scroll_area(grid, scroll, t).flex_1();
         let mut body = div().flex().flex_col().flex_1().min_h(px(0.)).child(grid);
         if !self.view.palettes.is_empty() {
             let selected = self.selected.and_then(|(palette_ix, color_ix)| {

@@ -3,13 +3,14 @@ use std::sync::Arc;
 use debugger_model::{BUILTIN_GROUPS, ConsoleLevel, ScriptStatus};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, ClickEvent, FontWeight, Hsla, SharedString, UniformListScrollHandle, Window,
-    div, px, uniform_list,
+    AnyElement, App, ClickEvent, FontWeight, Hsla, ScrollHandle, SharedString,
+    UniformListScrollHandle, Window, div, px, uniform_list,
 };
 
 use crate::assets::icon;
 use crate::components::{
     ClickHandler, PanelChrome, badge, empty_state, field_button, field_text_button,
+    uniform_vertical_scroll_area, vertical_scroll_area,
 };
 use crate::theme::Theme;
 
@@ -309,15 +310,17 @@ impl RenderOnce for ScriptConsoleWidget {
                 .into_any_element()
         } else {
             let view = self.view.clone();
-            uniform_list("script-console", count, move |range, _window, cx| {
+            let list = uniform_list("script-console", count, move |range, _window, cx| {
                 let theme = Theme::global(cx);
                 range
                     .map(|ix| self::console_row(&theme, ix, &view.entries[ix]))
                     .collect::<Vec<_>>()
             })
             .track_scroll(&self.scroll)
-            .h(px(CONSOLE_HEIGHT))
-            .into_any_element()
+            .h(px(CONSOLE_HEIGHT));
+            uniform_vertical_scroll_area(list, &self.scroll, t)
+                .h(px(CONSOLE_HEIGHT))
+                .into_any_element()
         };
 
         let mut panel = self
@@ -365,6 +368,7 @@ pub struct ScriptBuiltinsWidget {
     chrome: PanelChrome,
     filter: Option<AnyElement>,
     query: SharedString,
+    scroll: ScrollHandle,
     on_insert: Option<InsertCallback>,
 }
 
@@ -374,6 +378,7 @@ impl ScriptBuiltinsWidget {
             chrome,
             filter: None,
             query: SharedString::default(),
+            scroll: ScrollHandle::new(),
             on_insert: None,
         }
     }
@@ -381,6 +386,11 @@ impl ScriptBuiltinsWidget {
     pub fn filter(mut self, input: impl IntoElement, query: impl Into<SharedString>) -> Self {
         self.filter = Some(input.into_any_element());
         self.query = query.into();
+        self
+    }
+
+    pub fn scroll(mut self, scroll: ScrollHandle) -> Self {
+        self.scroll = scroll;
         self
     }
 
@@ -394,6 +404,7 @@ impl RenderOnce for ScriptBuiltinsWidget {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
+        let scroll = self.scroll.clone();
         let query = self.query.to_lowercase();
         let on_insert: Option<Arc<InsertCallback>> = self.on_insert.map(Arc::new);
 
@@ -467,19 +478,20 @@ impl RenderOnce for ScriptBuiltinsWidget {
             body = body.child(empty_state(t, "No builtin matches"));
         }
 
+        let body = div()
+            .id("script-builtins")
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_y_scroll()
+            .track_scroll(&scroll)
+            .child(body);
+
         self.chrome
             .panel()
             .glyph(icon::LIST)
             .grow(true)
             .meta(format!("{shown}"))
-            .child(
-                div()
-                    .id("script-builtins")
-                    .flex_1()
-                    .min_h(px(0.))
-                    .overflow_y_scroll()
-                    .child(body),
-            )
+            .child(vertical_scroll_area(body, scroll, t).flex_1())
     }
 }
 

@@ -1,7 +1,7 @@
 use gpui::prelude::*;
-use gpui::{App, Bounds, Hsla, Pixels, Window, canvas, div, fill, point, px, size};
+use gpui::{App, Bounds, Hsla, Pixels, ScrollHandle, Window, canvas, div, fill, point, px, size};
 
-use crate::components::{PanelChrome, empty_state_centered, status_flag};
+use crate::components::{PanelChrome, empty_state_centered, status_flag, vertical_scroll_area};
 use crate::theme::{Theme, with_alpha};
 use crate::widgets::scope::scope_baseline;
 
@@ -11,11 +11,21 @@ pub use debugger_model::AudioScopesView;
 pub struct ChannelScopesWidget {
     chrome: PanelChrome,
     view: AudioScopesView,
+    scroll: ScrollHandle,
 }
 
 impl ChannelScopesWidget {
     pub fn new(chrome: PanelChrome, view: AudioScopesView) -> Self {
-        Self { chrome, view }
+        Self {
+            chrome,
+            view,
+            scroll: ScrollHandle::new(),
+        }
+    }
+
+    pub fn scroll(mut self, scroll: ScrollHandle) -> Self {
+        self.scroll = scroll;
+        self
     }
 }
 
@@ -23,27 +33,28 @@ impl RenderOnce for ChannelScopesWidget {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
+        let scroll = self.scroll.clone();
 
         let has_data = self.view.channels.iter().any(|c| c.waveform.len() > 1);
 
         let body = if !has_data {
             empty_state_centered(t, "No audio").into_any_element()
         } else {
-            self.view
-                .channels
-                .into_iter()
-                .fold(
-                    div()
-                        .id("channel-scopes")
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_h(px(0.))
-                        .gap(px(3.))
-                        .pb(px(2.))
-                        .overflow_y_scroll(),
-                    |col, c| col.child(scope_row(t, c.label, c.active, c.waveform)),
-                )
+            let list = self.view.channels.into_iter().fold(
+                div()
+                    .id("channel-scopes")
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .gap(px(3.))
+                    .pb(px(2.))
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll),
+                |col, c| col.child(scope_row(t, c.label, c.active, c.waveform)),
+            );
+            vertical_scroll_area(list, scroll, t)
+                .flex_1()
                 .into_any_element()
         };
 

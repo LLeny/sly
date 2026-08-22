@@ -5,7 +5,9 @@ use gpui::{
 };
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, combobox_button, field_button};
+use crate::components::{
+    ClickHandler, Panel, combobox_button, field_button, uniform_vertical_scroll_area,
+};
 use crate::theme::Theme;
 
 const ROW_HEIGHT: f32 = 17.;
@@ -187,6 +189,7 @@ impl RenderOnce for LogWidget {
         let t = &*theme;
 
         let count = self.view.entries.len();
+        let scroll = self.scroll.clone();
 
         let list = if count == 0 {
             div()
@@ -200,17 +203,19 @@ impl RenderOnce for LogWidget {
                 .child("No log output")
                 .into_any_element()
         } else {
-            uniform_list("log-list", count, move |range, _window, cx| {
+            let list = uniform_list("log-list", count, move |range, _window, cx| {
                 let theme = Theme::global(cx);
                 let t = &*theme;
                 range
                     .map(|ix| self::log_row(t, ix, &self.view.entries[ix]))
                     .collect::<Vec<_>>()
             })
-            .track_scroll(&self.scroll)
+            .track_scroll(&scroll)
             .flex_1()
-            .min_h(px(MIN_LIST_HEIGHT))
-            .into_any_element()
+            .min_h(px(MIN_LIST_HEIGHT));
+            uniform_vertical_scroll_area(list, &scroll, t)
+                .flex_1()
+                .into_any_element()
         };
 
         let target_combo = combobox_button(t, "log-target", self.target_label, move |e, w, cx| {

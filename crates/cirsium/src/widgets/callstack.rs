@@ -1,9 +1,9 @@
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, SharedString, Window, div, px};
+use gpui::{App, ClickEvent, ScrollHandle, SharedString, Window, div, px};
 use std::sync::Arc;
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Copyable, Panel};
+use crate::components::{ClickHandler, Copyable, Panel, vertical_scroll_area};
 use crate::theme::Theme;
 
 #[derive(Clone)]
@@ -45,6 +45,7 @@ pub struct CallStackWidget {
     title: SharedString,
     collapsed: bool,
     scrollable: bool,
+    scroll: ScrollHandle,
     on_toggle: Option<ClickHandler>,
 }
 
@@ -58,6 +59,7 @@ impl CallStackWidget {
             title: "Call Stack".into(),
             collapsed: false,
             scrollable: false,
+            scroll: ScrollHandle::new(),
             on_toggle: None,
         }
     }
@@ -82,6 +84,11 @@ impl CallStackWidget {
         self
     }
 
+    pub fn scroll(mut self, scroll: ScrollHandle) -> Self {
+        self.scroll = scroll;
+        self
+    }
+
     pub fn on_toggle(
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -95,6 +102,7 @@ impl RenderOnce for CallStackWidget {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
+        let scroll = self.scroll.clone();
 
         // Depth counts only the real call frames, not the synthetic PC row.
         let depth = self.view.frames.len().saturating_sub(1);
@@ -104,7 +112,10 @@ impl RenderOnce for CallStackWidget {
             .flex()
             .flex_col()
             .when(self.scrollable, |d| {
-                d.flex_1().min_h(px(0.)).overflow_y_scroll()
+                d.flex_1()
+                    .min_h(px(0.))
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll)
             });
 
         if self.view.frames.is_empty() {
@@ -130,6 +141,14 @@ impl RenderOnce for CallStackWidget {
                     .map(|(ix, frame)| self::frame_row(t, &self.id, ix, frame.clone())),
             );
         }
+
+        let list = if self.scrollable {
+            vertical_scroll_area(list, self.scroll, t)
+                .flex_1()
+                .into_any_element()
+        } else {
+            list.into_any_element()
+        };
 
         Panel::new(self.id.clone(), self.title.clone())
             .glyph(icon::LIST)

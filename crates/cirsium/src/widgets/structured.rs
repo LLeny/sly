@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, Div, SharedString, Window, div, px};
+use gpui::{App, Div, ScrollHandle, SharedString, Window, div, px};
 
 use crate::components::{
     PanelChrome, label_text, meter_bar_scaled, mono_text, section_header, status_flag,
+    vertical_scroll_area,
 };
 use crate::theme::Theme;
 
@@ -14,11 +15,21 @@ pub use debugger_model::{Field, FlagView, Row, Section, StructuredView, Tone};
 pub struct StructuredPanel {
     chrome: PanelChrome,
     view: Arc<StructuredView>,
+    scroll: ScrollHandle,
 }
 
 impl StructuredPanel {
     pub fn new(chrome: PanelChrome, view: Arc<StructuredView>) -> Self {
-        Self { chrome, view }
+        Self {
+            chrome,
+            view,
+            scroll: ScrollHandle::new(),
+        }
+    }
+
+    pub fn scroll(mut self, scroll: ScrollHandle) -> Self {
+        self.scroll = scroll;
+        self
     }
 }
 
@@ -44,13 +55,15 @@ impl RenderOnce for StructuredPanel {
         }
 
         let scroll_id = SharedString::from(format!("{}.structured", self.chrome.id()));
+        let scroll = self.scroll;
         let mut body = div()
             .id(scroll_id)
             .flex()
             .flex_col()
             .flex_1()
             .min_h(px(0.))
-            .overflow_y_scroll();
+            .overflow_y_scroll()
+            .track_scroll(&scroll);
         for block in blocks {
             if block.len() == 1 && block[0].group == 0 {
                 body = body.child(section_column(t, block[0]));
@@ -70,6 +83,8 @@ impl RenderOnce for StructuredPanel {
                 body = body.child(row);
             }
         }
+
+        let body = vertical_scroll_area(body, scroll, t).flex_1();
 
         self.chrome
             .panel()

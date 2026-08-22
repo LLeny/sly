@@ -3,11 +3,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, SharedString, Stateful, Window, div, px};
+use gpui::{App, ClickEvent, Div, ScrollHandle, SharedString, Stateful, Window, div, px};
 
 use crate::assets::icon;
 use crate::components::{
     ClickHandler, Panel, RowCallback, chevron_slot, empty_state, label_text, row_toggle,
+    vertical_scroll_area,
 };
 use crate::theme::Theme;
 use crate::widgets::field::Field;
@@ -53,6 +54,7 @@ pub struct PpuWidget {
     view: Arc<PpuView>,
     expanded: HashSet<SharedString>,
     collapsed: bool,
+    scroll: ScrollHandle,
     on_toggle: Option<ClickHandler>,
     on_toggle_group: Option<RowCallback>,
 }
@@ -65,6 +67,7 @@ impl PpuWidget {
             view,
             expanded: HashSet::new(),
             collapsed: false,
+            scroll: ScrollHandle::new(),
             on_toggle: None,
             on_toggle_group: None,
         }
@@ -77,6 +80,11 @@ impl PpuWidget {
 
     pub fn collapsed(mut self, collapsed: bool) -> Self {
         self.collapsed = collapsed;
+        self
+    }
+
+    pub fn scroll(mut self, scroll: ScrollHandle) -> Self {
+        self.scroll = scroll;
         self
     }
 
@@ -101,6 +109,7 @@ impl RenderOnce for PpuWidget {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
+        let scroll = self.scroll.clone();
 
         let mut list = div()
             .id("ppu-list")
@@ -108,7 +117,8 @@ impl RenderOnce for PpuWidget {
             .flex_col()
             .flex_1()
             .min_h(px(0.))
-            .overflow_y_scroll();
+            .overflow_y_scroll()
+            .track_scroll(&scroll);
 
         if self.view.properties.is_empty() && self.view.groups.is_empty() {
             list = list
@@ -148,7 +158,7 @@ impl RenderOnce for PpuWidget {
             .grow(true)
             .collapsed(self.collapsed)
             .on_toggle_opt(self.on_toggle)
-            .child(list)
+            .child(vertical_scroll_area(list, scroll, t).flex_1())
     }
 }
 

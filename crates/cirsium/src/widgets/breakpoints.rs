@@ -1,10 +1,12 @@
 use std::rc::Rc;
 
 use gpui::prelude::*;
-use gpui::{AnyElement, App, ClickEvent, Hsla, SharedString, Window, div, px, svg};
+use gpui::{AnyElement, App, ClickEvent, Hsla, ScrollHandle, SharedString, Window, div, px, svg};
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, badge, combobox_button, field_button};
+use crate::components::{
+    ClickHandler, Panel, badge, combobox_button, field_button, vertical_scroll_area,
+};
 use crate::theme::Theme;
 
 type RowCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
@@ -54,6 +56,7 @@ pub struct BreakpointsWidget {
     on_remove: Option<RowCallback>,
     on_toggle_entry: Option<RowCallback>,
     scrollable: bool,
+    scroll: ScrollHandle,
 }
 
 impl BreakpointsWidget {
@@ -71,11 +74,17 @@ impl BreakpointsWidget {
             on_remove: None,
             on_toggle_entry: None,
             scrollable: false,
+            scroll: ScrollHandle::new(),
         }
     }
 
     pub fn scrollable(mut self, scrollable: bool) -> Self {
         self.scrollable = scrollable;
+        self
+    }
+
+    pub fn scroll(mut self, scroll: ScrollHandle) -> Self {
+        self.scroll = scroll;
         self
     }
 
@@ -131,6 +140,7 @@ impl RenderOnce for BreakpointsWidget {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
+        let scroll = self.scroll.clone();
 
         let kind_combo = combobox_button(t, "bp-kind", self.draft_kind.tag(), move |e, w, cx| {
             if let Some(handler) = self.on_kind_open.as_ref() {
@@ -159,7 +169,10 @@ impl RenderOnce for BreakpointsWidget {
             .flex()
             .flex_col()
             .when(self.scrollable, |d| {
-                d.flex_1().min_h(px(0.)).overflow_y_scroll()
+                d.flex_1()
+                    .min_h(px(0.))
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll)
             });
         if count == 0 {
             list = list
@@ -185,6 +198,14 @@ impl RenderOnce for BreakpointsWidget {
                 )
             }));
         }
+
+        let list = if self.scrollable {
+            vertical_scroll_area(list, self.scroll, t)
+                .flex_1()
+                .into_any_element()
+        } else {
+            list.into_any_element()
+        };
 
         let body = div()
             .flex()

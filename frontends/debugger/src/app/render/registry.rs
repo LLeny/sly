@@ -58,11 +58,15 @@ impl Debugger {
                 }
                 PanelKind::Structured => {
                     let view = self.structured_views.get(id).cloned().unwrap_or_default();
-                    StructuredPanel::new(chrome, view).into_any_element()
+                    StructuredPanel::new(chrome, view)
+                        .scroll(self.scroll_for(id))
+                        .into_any_element()
                 }
                 PanelKind::ChannelScopes => {
                     let view = self.scopes_views.get(id).cloned().unwrap_or_default();
-                    ChannelScopesWidget::new(chrome, view).into_any_element()
+                    ChannelScopesWidget::new(chrome, view)
+                        .scroll(self.scroll_for(id))
+                        .into_any_element()
                 }
                 PanelKind::AudioScope => {
                     AudioScopeWidget::new(chrome, self.scope_view.clone()).into_any_element()
@@ -92,6 +96,7 @@ impl Debugger {
                         .into_any_element()
                 }
                 PanelKind::ScriptBuiltins => ScriptBuiltinsWidget::new(chrome)
+                    .scroll(self.scroll_for(id))
                     .filter(
                         self.builtin_filter_input.clone(),
                         self.builtin_filter.clone(),

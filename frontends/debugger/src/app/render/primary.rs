@@ -52,6 +52,7 @@ impl Debugger {
         let savestates = visible.contains(SavestatesWidget::ID).then(|| {
             let this = this.clone();
             SavestatesWidget::new((*self.savestates_view()).clone())
+                .scroll(self.scroll_for(SavestatesWidget::ID))
                 .collapsed(self.is_collapsed(SavestatesWidget::ID))
                 .selected(self.active_slot().id())
                 .on_toggle(cx.listener(|this, _, _, cx| this.toggle(SavestatesWidget::ID, cx)))
@@ -68,6 +69,7 @@ impl Debugger {
             .find(|w| w.id.as_ref() == self.workspace.as_ref())
             .and_then(|w| w.mmio_group.clone());
         let mmio = MmioWidget::new(self.mmio_view.clone())
+            .scroll(self.scroll_for(MmioWidget::ID))
             .priority(mmio_priority.map(SharedString::from))
             .expanded(self.expanded_set(MmioWidget::ID))
             .collapsed(self.is_collapsed(MmioWidget::ID))
@@ -79,6 +81,7 @@ impl Debugger {
 
         let dma = visible.contains(DmaWidget::ID).then(|| {
             DmaWidget::new(self.dma_view.clone())
+                .scroll(self.scroll_for(DmaWidget::ID))
                 .expanded(self.expanded_set(DmaWidget::ID))
                 .collapsed(self.is_collapsed(DmaWidget::ID))
                 .on_toggle(cx.listener(|this, _, _, cx| this.toggle(DmaWidget::ID, cx)))
@@ -92,6 +95,7 @@ impl Debugger {
 
         let palette = visible.contains(PaletteWidget::ID).then(|| {
             PaletteWidget::new(self.palette_view.clone())
+                .scroll(self.scroll_for(PaletteWidget::ID))
                 .selected(self.palette_selected)
                 .collapsed(self.is_collapsed(PaletteWidget::ID))
                 .on_toggle(cx.listener(|this, _, _, cx| this.toggle(PaletteWidget::ID, cx)))
@@ -105,6 +109,7 @@ impl Debugger {
 
         let ppu = visible.contains(PpuWidget::ID).then(|| {
             PpuWidget::new(self.ppu_view.clone())
+                .scroll(self.scroll_for(PpuWidget::ID))
                 .expanded(self.expanded_set(PpuWidget::ID))
                 .collapsed(self.is_collapsed(PpuWidget::ID))
                 .on_toggle(cx.listener(|this, _, _, cx| this.toggle(PpuWidget::ID, cx)))
@@ -152,6 +157,7 @@ impl Debugger {
         let breakpoints =
             visible.contains(BreakpointsWidget::ID).then(|| {
                 BreakpointsWidget::new(self.breakpoints.view(), self.breakpoints.draft_kind())
+                    .scroll(self.scroll_for(BreakpointsWidget::ID))
                     .collapsed(self.is_collapsed(BreakpointsWidget::ID))
                     .scrollable(true)
                     .address_input(self.bp_input.clone())
@@ -269,6 +275,7 @@ impl Debugger {
                 .id(cs_id.clone())
                 .title(cs_title)
                 .scrollable(true)
+                .scroll(self.scroll_for(&cs_id))
                 .collapsed(self.is_collapsed(&cs_id))
                 .on_toggle({
                     let id = cs_id.clone();

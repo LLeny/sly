@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, combobox_button};
+use crate::components::{ClickHandler, Panel, combobox_button, uniform_vertical_scroll_area};
 use crate::diff::Highlight;
 use crate::theme::Theme;
 use crate::widgets::BreakpointKind;
@@ -167,6 +167,7 @@ impl RenderOnce for MemoryWidget {
         let provider = self.rows;
         let selection = self.selection.map(|(a, b)| (a.min(b), a.max(b)));
         let breakpoints = Rc::new(self.breakpoints);
+        let scroll = self.scroll.clone();
 
         let list = uniform_list("mem-list", self.row_count, move |range, _window, cx| {
             let rows = provider(range, cx);
@@ -190,9 +191,10 @@ impl RenderOnce for MemoryWidget {
                 })
                 .collect::<Vec<_>>()
         })
-        .track_scroll(&self.scroll)
+        .track_scroll(&scroll)
         .flex_1()
         .min_h(px(MIN_LIST_HEIGHT));
+        let list = uniform_vertical_scroll_area(list, &scroll, t).flex_1();
 
         let body = div()
             .flex()

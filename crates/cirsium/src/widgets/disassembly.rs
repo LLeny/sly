@@ -12,7 +12,7 @@ use gpui::{
 
 use super::breakpoints::{BreakpointKind, breakpoint_color};
 use crate::assets::icon;
-use crate::components::{ClickHandler, Panel, Segmented};
+use crate::components::{ClickHandler, Panel, Segmented, uniform_vertical_scroll_area};
 use crate::theme::Theme;
 
 mod arrows;
@@ -343,39 +343,43 @@ impl RenderOnce for DisassemblyWidget {
                 }
             });
 
+        let theme = Theme::global(cx);
+        let t = &*theme;
+
         let body = match view_mode {
-            ViewMode::Linear => self::linear::render_linear(
-                view,
-                scroll,
-                id.clone(),
-                rows,
-                layout_cache,
-                on_select,
-                on_context,
-            )
-            .into_any_element(),
-            ViewMode::Graph => {
-                let theme = Theme::global(cx);
-                self::graph_view::render_graph(
-                    &theme,
+            ViewMode::Linear => {
+                let list = self::linear::render_linear(
                     view,
+                    scroll.clone(),
                     id.clone(),
                     rows,
                     layout_cache,
-                    graph_offset,
-                    follow,
-                    graph_viewport,
-                    hovered_edge,
                     on_select,
                     on_context,
-                    on_pan_begin,
-                    on_pan_drag,
-                    on_viewport,
-                    on_edge_hover,
-                    on_jump,
-                )
-                .into_any_element()
+                );
+                uniform_vertical_scroll_area(list, &scroll, t)
+                    .flex_1()
+                    .into_any_element()
             }
+            ViewMode::Graph => self::graph_view::render_graph(
+                &theme,
+                view,
+                id.clone(),
+                rows,
+                layout_cache,
+                graph_offset,
+                follow,
+                graph_viewport,
+                hovered_edge,
+                on_select,
+                on_context,
+                on_pan_begin,
+                on_pan_drag,
+                on_viewport,
+                on_edge_hover,
+                on_jump,
+            )
+            .into_any_element(),
         };
 
         let mut panel = Panel::new(id, title)
