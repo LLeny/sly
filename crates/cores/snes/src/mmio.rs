@@ -188,7 +188,7 @@ impl<M: MemoryMap> Bus<M> {
     fn cart_read(&self, region: CartRegion, index: usize, addr: Address) -> u8 {
         match self.mmu.cartridge.coprocessor() {
             Coprocessor::SuperFx => crate::superfx::snes_cart_read(self, region, index, addr),
-            Coprocessor::Sa1 => crate::sa1::snes_cart_read(self, region, index),
+            Coprocessor::Sa1 => crate::sa1::snes_cart_read(self, region, index, addr),
             _ => self.mmu.cart_read(region, index),
         }
     }

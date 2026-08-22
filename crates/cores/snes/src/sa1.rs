@@ -9,9 +9,10 @@ use serde_big_array::BigArray;
 use self::math::Math;
 use self::regs::{
     BMAP, BwramWriteEnable, BwramWriteProtectedArea, CBWE, CIC, CIE, CIWP,
-    CharacterConversionDmaParameters, IramWriteProtection, ROM_BANK_START, Sa1BwramMapping,
-    Sa1CpuControl, Sa1Flags, Sa1InterruptBits, SnesBwramMapping, SnesCpuControl, SnesFlags,
-    SnesInterruptBits, SuperMmcBank, VECTOR_COUNT, VECTOR_START,
+    CharacterConversionDmaParameters, IramWriteProtection, ROM_BANK_START, SNES_VECTOR_COUNT,
+    SNES_VECTOR_END, SNES_VECTOR_START, Sa1BwramMapping, Sa1CpuControl, Sa1Flags, Sa1InterruptBits,
+    SnesBwramMapping, SnesCpuControl, SnesFlags, SnesInterruptBits, SuperMmcBank, VECTOR_COUNT,
+    VECTOR_START,
 };
 use crate::Cartridge;
 use crate::cartridge::Coprocessor;
@@ -24,9 +25,32 @@ pub(crate) const SNES_IRAM_END: u16 = 0x37FF;
 const IRAM_BLOCK_SIZE: usize = 0x100;
 const IRAM_ZEROED: [u8; IRAM_SIZE] = [0; IRAM_SIZE];
 
-fn vector_slot(reg: u16) -> Option<(usize, usize)> {
-    let index = usize::from(reg.checked_sub(VECTOR_START)?);
+fn vector_slot(reg: u16, start: u16) -> Option<(usize, usize)> {
+    let index = usize::from(reg.checked_sub(start)?);
     Some((index / 2, index % 2))
+}
+
+fn set_vector_byte(vectors: &mut [u16], start: u16, reg: u16, value: u8) {
+    let Some((slot, byte)) = self::vector_slot(reg, start) else {
+        return;
+    };
+    let Some(vector) = vectors.get_mut(slot) else {
+        return;
+    };
+
+    let mut bytes = vector.to_le_bytes();
+    bytes[byte] = value;
+    *vector = u16::from_le_bytes(bytes);
+}
+
+fn vector_byte(vectors: &[u16], start: u16, reg: u16) -> u8 {
+    let Some((slot, byte)) = self::vector_slot(reg, start) else {
+        return 0;
+    };
+
+    vectors
+        .get(slot)
+        .map_or(0, |vector| vector.to_le_bytes()[byte])
 }
 
 #[derive(Serialize, Deserialize)]
@@ -274,6 +298,7 @@ pub struct Sa1 {
     scnt: SnesCpuControl,
     interrupts: InterruptState,
     vectors: [u16; VECTOR_COUNT],
+    snes_vectors: [u16; SNES_VECTOR_COUNT],
     pub(crate) memory: MemoryControl,
     pub(crate) cdma: CharacterConversionDmaParameters,
     math: Math,
@@ -328,26 +353,31 @@ impl Sa1 {
     }
 
     pub(crate) fn set_vector_byte(&mut self, reg: u16, value: u8) {
-        let Some((slot, byte)) = self::vector_slot(reg) else {
-            return;
-        };
-        let Some(vector) = self.vectors.get_mut(slot) else {
-            return;
-        };
-
-        let mut bytes = vector.to_le_bytes();
-        bytes[byte] = value;
-        *vector = u16::from_le_bytes(bytes);
+        self::set_vector_byte(&mut self.vectors, VECTOR_START, reg, value);
     }
 
     pub(crate) fn vector_byte(&self, reg: u16) -> u8 {
-        let Some((slot, byte)) = self::vector_slot(reg) else {
-            return 0;
+        self::vector_byte(&self.vectors, VECTOR_START, reg)
+    }
+
+    fn selected_snes_vector_byte(&self, addr: Address) -> Option<u8> {
+        if !matches!(addr.bank(), 0x00 | 0x80) {
+            return None;
+        }
+
+        let reg = match addr.address() {
+            0xFFEA if self.scnt.nmi_vector_from_port() => SNES_VECTOR_START,
+            0xFFEB if self.scnt.nmi_vector_from_port() => SNES_VECTOR_START + 1,
+            0xFFEE if self.scnt.irq_vector_from_port() => SNES_VECTOR_START + 2,
+            0xFFEF if self.scnt.irq_vector_from_port() => SNES_VECTOR_END,
+            _ => return None,
         };
 
-        self.vectors
-            .get(slot)
-            .map_or(0, |vector| vector.to_le_bytes()[byte])
+        Some(self::vector_byte(
+            &self.snes_vectors,
+            SNES_VECTOR_START,
+            reg,
+        ))
     }
 
     pub(crate) fn sfr(&self) -> SnesFlags {
@@ -384,6 +414,7 @@ impl Sa1 {
             interrupts,
             cdma,
             math,
+            snes_vectors,
             irq_from_sa1_pending,
             ..
         } = self;
@@ -399,6 +430,7 @@ impl Sa1 {
                 interrupts,
                 cdma,
                 math,
+                snes_vectors,
                 irq_from_sa1_pending,
             },
         )
@@ -434,6 +466,7 @@ pub(crate) struct Bus<'a> {
     interrupts: &'a mut InterruptState,
     cdma: &'a mut CharacterConversionDmaParameters,
     math: &'a mut Math,
+    snes_vectors: &'a mut [u16; SNES_VECTOR_COUNT],
     irq_from_sa1_pending: &'a mut bool,
 }
 
@@ -452,6 +485,7 @@ impl Bus<'_> {
 
         match reg {
             BMAP | CBWE | CIWP | CIE | CIC => OPEN_BUS,
+            SNES_VECTOR_START..=SNES_VECTOR_END => OPEN_BUS,
             reg if reg == SnesCpuControl::ADDRESS => OPEN_BUS,
             reg if reg == CharacterConversionDmaParameters::ADDRESS => OPEN_BUS,
             reg if reg == Sa1Flags::ADDRESS => {
@@ -483,6 +517,9 @@ impl Bus<'_> {
             }
             CIE => self.interrupts.set_enable(value),
             CIC => self.interrupts.clear(value),
+            SNES_VECTOR_START..=SNES_VECTOR_END => {
+                self::set_vector_byte(self.snes_vectors, SNES_VECTOR_START, reg, value);
+            }
             BMAP => self.memory.set_bwram_sa1_mapping(value),
             CBWE => self.memory.set_bwram_sa1_write_enable(value),
             CIWP => *self.ciwp = IramWriteProtection::from_raw(value),
@@ -507,6 +544,9 @@ impl Bus<'_> {
             reg if reg == SnesCpuControl::ADDRESS => self.scnt.raw(),
             CIE => self.interrupts.enable.raw(),
             CIC => 0,
+            SNES_VECTOR_START..=SNES_VECTOR_END => {
+                self::vector_byte(self.snes_vectors, SNES_VECTOR_START, reg)
+            }
             BMAP => self.memory.bwram_sa1_mapping_raw(),
             CBWE => self.memory.bwram_sa1_write_enable_raw(),
             CIWP => self.ciwp.raw(),
@@ -524,7 +564,9 @@ impl CpuBus for Bus<'_> {
         match self.space(addr) {
             AddressSpace::Iram(index) => self.iram[index],
             AddressSpace::Cart(CartRegion::Ram, index) => self.cartridge.sram_read(index),
-            AddressSpace::Rom(index) => self.cartridge.rom[index],
+            AddressSpace::Rom(index) | AddressSpace::Cart(CartRegion::Rom, index) => {
+                self.cartridge.rom[index]
+            }
             AddressSpace::Io(reg) => self.read_io(reg),
             _ => {
                 tracing::error!(
@@ -551,7 +593,7 @@ impl CpuBus for Bus<'_> {
                 self.cartridge.sram_write(index, value);
             }
             AddressSpace::Cart(CartRegion::Ram, _) => {}
-            AddressSpace::Rom(_) => tracing::warn!(
+            AddressSpace::Rom(_) | AddressSpace::Cart(CartRegion::Rom, _) => tracing::warn!(
                 cpu = "SA-1",
                 addr = format!("{addr:?}"),
                 value = format!("{value:02X}"),
@@ -571,7 +613,9 @@ impl CpuBus for Bus<'_> {
         match self.space(addr) {
             AddressSpace::Iram(index) => self.iram[index],
             AddressSpace::Cart(CartRegion::Ram, index) => self.cartridge.sram_read(index),
-            AddressSpace::Rom(index) => self.cartridge.rom[index],
+            AddressSpace::Rom(index) | AddressSpace::Cart(CartRegion::Rom, index) => {
+                self.cartridge.rom[index]
+            }
             AddressSpace::Io(reg) => self.peek_io(reg),
             _ => OPEN_BUS,
         }
@@ -631,10 +675,14 @@ pub(crate) fn snes_cart_read<M: crate::mmio::MemoryMap>(
     snes: &crate::Bus<M>,
     region: crate::mmio::CartRegion,
     index: usize,
+    addr: Address,
 ) -> u8 {
     match region {
         crate::mmio::CartRegion::Ram => snes.mmu.cartridge.sram_read(index),
-        crate::mmio::CartRegion::Rom => snes.mmu.cart_read(region, index),
+        crate::mmio::CartRegion::Rom => snes
+            .sa1
+            .selected_snes_vector_byte(addr)
+            .unwrap_or_else(|| snes.mmu.cart_read(region, index)),
     }
 }
 

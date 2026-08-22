@@ -69,7 +69,7 @@ fn rom_space(
     };
     let index = (usize::from(block) * ROM_BLOCK_SIZE) | in_block;
 
-    AddressSpace::Rom(rom_index(cartridge, index))
+    AddressSpace::Cart(CartRegion::Rom, rom_index(cartridge, index))
 }
 
 fn lo_rom_window(bank: u8) -> u8 {

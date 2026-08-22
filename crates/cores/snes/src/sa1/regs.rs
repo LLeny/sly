@@ -7,6 +7,9 @@ pub(crate) const CIC: u16 = 0x220B;
 pub(crate) const VECTOR_COUNT: usize = 3;
 pub(crate) const VECTOR_START: u16 = 0x2203;
 pub(crate) const VECTOR_END: u16 = 0x2208;
+pub(crate) const SNES_VECTOR_COUNT: usize = 2;
+pub(crate) const SNES_VECTOR_START: u16 = 0x220C;
+pub(crate) const SNES_VECTOR_END: u16 = 0x220F;
 pub(crate) const ROM_BANK_START: u16 = 0x2220;
 pub(crate) const ROM_BANK_END: u16 = 0x2223;
 pub(crate) const BMAPS: u16 = 0x2224;
@@ -125,6 +128,10 @@ register_mmio_raw! {
     VECTOR_START + 3 => "CNVH",
     VECTOR_START + 4 => "CIVL",
     VECTOR_START + 5 => "CIVH",
+    SNES_VECTOR_START => "SNVL",
+    SNES_VECTOR_START + 1 => "SNVH",
+    SNES_VECTOR_START + 2 => "SIVL",
+    SNES_VECTOR_END => "SIVH",
 }
 
 register_mmio_family! {
