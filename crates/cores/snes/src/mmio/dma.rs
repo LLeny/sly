@@ -1,4 +1,4 @@
-use crate::Snes;
+use crate::SnesBus;
 use crate::mmio::device::{IoRegister, RegEntry};
 use crate::mmio::regs::{
     AddressAdjustMode, Direction, DmaAddress, DmaByteCount, DmaChannelParameters, HdmaLineCounter,
@@ -26,11 +26,11 @@ impl IoRegister for DmaChannelRegs {
     const START: u16 = CHANNEL_REGS_START;
     const END: u16 = CHANNEL_REGS_END;
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, reg: u16, value: u8) {
         snes.dma.channels[Dma::channel_index(reg)].write(reg, value);
     }
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, reg: u16) -> u8 {
         snes.dma.channels[Dma::channel_index(reg)].read(reg)
     }
 }
@@ -129,7 +129,7 @@ impl Dma {
     }
 }
 
-pub(crate) fn start_mdma(snes: &mut Snes<impl MemoryMap>) {
+pub(crate) fn start_mdma(snes: &mut SnesBus<impl MemoryMap>) {
     for index in 0..CHANNEL_COUNT {
         if snes.dma.mdmaen.raw() & (1 << index) != 0 {
             run_dma_channel(snes, index);
@@ -150,7 +150,7 @@ pub(crate) fn transfer_pattern_offsets(pattern: TransferPattern) -> &'static [u8
     }
 }
 
-pub(crate) fn init_hdma<M: MemoryMap>(snes: &mut Snes<M>, _deadline: u64) {
+pub(crate) fn init_hdma<M: MemoryMap>(snes: &mut SnesBus<M>, _deadline: u64) {
     let clocks_before = snes.mmu.clocks;
     let enabled = snes.dma.hdmaen.raw();
 
@@ -180,7 +180,7 @@ pub(crate) fn init_hdma<M: MemoryMap>(snes: &mut Snes<M>, _deadline: u64) {
 
 /// Performs one HDMA step during HBLANK. A transfer at the end of line N
 /// changes PPU state used to render line N + 1.
-pub(crate) fn run_hdma<M: MemoryMap>(snes: &mut Snes<M>, deadline: u64) {
+pub(crate) fn run_hdma<M: MemoryMap>(snes: &mut SnesBus<M>, deadline: u64) {
     if snes.scheduler.scanline_at(deadline) > crate::ppu::SCREEN_HEIGHT as u64 {
         return;
     }
@@ -217,7 +217,7 @@ pub(crate) fn run_hdma<M: MemoryMap>(snes: &mut Snes<M>, deadline: u64) {
     snes.scheduler.advance_by(snes.mmu.clocks - clocks_before);
 }
 
-fn transfer_hdma_channel(snes: &mut Snes<impl MemoryMap>, index: usize) {
+fn transfer_hdma_channel(snes: &mut SnesBus<impl MemoryMap>, index: usize) {
     let bit = channel_bit(index);
     let mut channel = snes.dma.channels[index];
 
@@ -228,7 +228,7 @@ fn transfer_hdma_channel(snes: &mut Snes<impl MemoryMap>, index: usize) {
     snes.dma.channels[index] = channel;
 }
 
-fn advance_hdma_channel(snes: &mut Snes<impl MemoryMap>, index: usize) {
+fn advance_hdma_channel(snes: &mut SnesBus<impl MemoryMap>, index: usize) {
     let bit = channel_bit(index);
     let mut channel = snes.dma.channels[index];
 
@@ -247,7 +247,7 @@ fn advance_hdma_channel(snes: &mut Snes<impl MemoryMap>, index: usize) {
     snes.dma.channels[index] = channel;
 }
 
-fn reload_hdma_entry(snes: &mut Snes<impl MemoryMap>, index: usize, channel: &mut DmaChannel) {
+fn reload_hdma_entry(snes: &mut SnesBus<impl MemoryMap>, index: usize, channel: &mut DmaChannel) {
     let bit = channel_bit(index);
     let descriptor = read_hdma_table_byte(snes, channel);
     if descriptor == 0 {
@@ -270,7 +270,7 @@ fn reload_hdma_entry(snes: &mut Snes<impl MemoryMap>, index: usize, channel: &mu
     }
 }
 
-fn transfer_hdma_unit(snes: &mut Snes<impl MemoryMap>, channel: &mut DmaChannel) {
+fn transfer_hdma_unit(snes: &mut SnesBus<impl MemoryMap>, channel: &mut DmaChannel) {
     let pattern = transfer_pattern_offsets(channel.params.transfer_pattern());
     let indirect = channel.params.indirect();
     let direction = channel.params.direction();
@@ -302,7 +302,7 @@ fn transfer_hdma_unit(snes: &mut Snes<impl MemoryMap>, channel: &mut DmaChannel)
 /// A-bus cannot reach the B-bus/IO region (reads yield open bus, writes are
 /// dropped). Costs 8 master clocks. Shared by GDMA and HDMA.
 fn transfer_dma_byte(
-    snes: &mut Snes<impl MemoryMap>,
+    snes: &mut SnesBus<impl MemoryMap>,
     a_bus: Address,
     b_bus: Address,
     direction: Direction,
@@ -338,7 +338,7 @@ fn transfer_dma_byte(
     snes.mmu.clocks = clocks_before + 8;
 }
 
-fn read_hdma_table_byte(snes: &mut Snes<impl MemoryMap>, channel: &mut DmaChannel) -> u8 {
+fn read_hdma_table_byte(snes: &mut SnesBus<impl MemoryMap>, channel: &mut DmaChannel) -> u8 {
     let clocks_before = snes.mmu.clocks;
     let address = Address::new(channel.a_bus_addr.table_bank(), channel.table_addr);
     channel.table_addr = channel.table_addr.wrapping_add(1);
@@ -357,7 +357,7 @@ fn channel_bit(index: usize) -> u8 {
     1 << index
 }
 
-fn run_dma_channel(snes: &mut Snes<impl MemoryMap>, index: usize) {
+fn run_dma_channel(snes: &mut SnesBus<impl MemoryMap>, index: usize) {
     let mut channel = snes.dma.channels[index];
 
     let pattern = transfer_pattern_offsets(channel.params.transfer_pattern());

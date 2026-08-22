@@ -35,12 +35,16 @@ use crate::ppu::Ppu;
 use crate::sa1::Sa1;
 use crate::scheduler::{EventKind, Scheduler};
 use crate::superfx::SuperFx;
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::ops::{Deref, DerefMut};
 
-#[derive(Serialize, Deserialize)]
-#[serde(bound = "")]
 pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub cpu: Cpu,
+    bus: SnesBus<M>,
+}
+
+pub struct SnesBus<M: MemoryMap = CartridgeMap> {
     pub mmu: Mmio<M>,
     pub irq: Irq,
     pub dma: Dma,
@@ -54,6 +58,75 @@ pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub superfx: SuperFx,
 }
 
+#[derive(Deserialize)]
+#[serde(bound = "")]
+struct SerializedSnes<M: MemoryMap> {
+    cpu: Cpu,
+    mmu: Mmio<M>,
+    irq: Irq,
+    dma: Dma,
+    apu: Apu,
+    ppu: Ppu,
+    math: Math,
+    joypads: Joypads,
+    scheduler: Scheduler,
+    sa1: Sa1,
+    superfx: SuperFx,
+}
+
+impl<M: MemoryMap> Serialize for Snes<M> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("Snes", 11)?;
+        state.serialize_field("cpu", &self.cpu)?;
+        state.serialize_field("mmu", &self.mmu)?;
+        state.serialize_field("irq", &self.irq)?;
+        state.serialize_field("dma", &self.dma)?;
+        state.serialize_field("apu", &self.apu)?;
+        state.serialize_field("ppu", &self.ppu)?;
+        state.serialize_field("math", &self.math)?;
+        state.serialize_field("joypads", &self.joypads)?;
+        state.serialize_field("scheduler", &self.scheduler)?;
+        state.serialize_field("sa1", &self.sa1)?;
+        state.serialize_field("superfx", &self.superfx)?;
+        state.end()
+    }
+}
+
+impl<'de, M: MemoryMap> Deserialize<'de> for Snes<M> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let state = SerializedSnes::deserialize(deserializer)?;
+        Ok(Self {
+            cpu: state.cpu,
+            bus: SnesBus {
+                mmu: state.mmu,
+                irq: state.irq,
+                dma: state.dma,
+                apu: state.apu,
+                ppu: state.ppu,
+                math: state.math,
+                joypads: state.joypads,
+                scheduler: state.scheduler,
+                sa1: state.sa1,
+                superfx: state.superfx,
+            },
+        })
+    }
+}
+
+impl<M: MemoryMap> Deref for Snes<M> {
+    type Target = SnesBus<M>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bus
+    }
+}
+
+impl<M: MemoryMap> DerefMut for Snes<M> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.bus
+    }
+}
+
 impl Snes {
     pub fn new(cartridge: Cartridge) -> Self {
         Self::with_mmu(Mmio::new(cartridge))
@@ -65,16 +138,18 @@ impl<M: MemoryMap> Snes<M> {
         let tv_system = mmu.cartridge.region().tv_system();
         let mut snes = Self {
             cpu: Cpu::new(0),
-            mmu,
-            irq: Irq::default(),
-            dma: Dma::default(),
-            apu: Apu::new(),
-            ppu: Ppu::new(),
-            math: Math::new(),
-            joypads: Joypads::default(),
-            scheduler: Scheduler::new(tv_system),
-            sa1: Sa1::default(),
-            superfx: SuperFx::default(),
+            bus: SnesBus {
+                mmu,
+                irq: Irq::default(),
+                dma: Dma::default(),
+                apu: Apu::new(),
+                ppu: Ppu::new(),
+                math: Math::new(),
+                joypads: Joypads::default(),
+                scheduler: Scheduler::new(tv_system),
+                sa1: Sa1::default(),
+                superfx: SuperFx::default(),
+            },
         };
         snes.reset();
         snes
@@ -97,22 +172,23 @@ impl<M: MemoryMap> Snes<M> {
 
         self.scheduler = Scheduler::new(tv_system);
         let spc_delay = self.scheduler.spc_master_clocks(1);
+        let frame_cycles = self.scheduler.cycles_per_frame();
         self.scheduler
             .schedule_event(spc_delay, EventKind::Spc700Tick);
         self.scheduler.schedule_periodic_at(
             scheduler::VBLANK_START_SCANLINE * scheduler::MASTER_CLOCKS_PER_SCANLINE,
-            self.scheduler.cycles_per_frame(),
+            frame_cycles,
             EventKind::VblankStart,
         );
         self.scheduler
-            .schedule_periodic(self.scheduler.cycles_per_frame(), EventKind::VblankEnd);
+            .schedule_periodic(frame_cycles, EventKind::VblankEnd);
         self.scheduler.schedule_periodic(
             scheduler::MASTER_CLOCKS_PER_SCANLINE,
             EventKind::DrawScanline,
         );
         self.scheduler.schedule_periodic_at(
             dma::HDMA_INIT_CLOCK,
-            self.scheduler.cycles_per_frame(),
+            frame_cycles,
             EventKind::InitHdma,
         );
         self.scheduler.schedule_periodic_at(
@@ -149,6 +225,20 @@ impl<M: MemoryMap> Snes<M> {
         self.disassemble_at(self.cpu.pc)
     }
 
+    pub fn step(&mut self) {
+        cpu::step(self);
+        self.bus.sync();
+    }
+
+    pub fn run_frame(&mut self) {
+        let end = self.scheduler.frame_deadline();
+        while self.scheduler.cycles() < end {
+            self.step();
+        }
+    }
+}
+
+impl<M: MemoryMap> SnesBus<M> {
     #[inline]
     pub(crate) fn sync(&mut self) {
         let clocks = self.mmu.clocks;
@@ -162,18 +252,6 @@ impl<M: MemoryMap> Snes<M> {
     fn drain_events(&mut self) {
         while let Some((deadline, kind)) = self.scheduler.pop_current_event() {
             kind.dispatch(self, deadline);
-        }
-    }
-
-    pub fn step(&mut self) {
-        cpu::step(self);
-        self.sync();
-    }
-
-    pub fn run_frame(&mut self) {
-        let end = self.scheduler.frame_deadline();
-        while self.scheduler.cycles() < end {
-            self.step();
         }
     }
 }

@@ -7,12 +7,56 @@ mod timing;
 
 pub use disasm::disassemble_at;
 
-use crate::Snes;
 #[cfg(feature = "debug")]
 use crate::callstack::CallFrame;
 use crate::mmio::{Address, MemoryMap, map};
+use crate::{Snes, SnesBus};
 use interpreter::Interpreter;
 use serde::{Deserialize, Serialize};
+
+pub(crate) trait CpuBus {
+    fn read8(&mut self, addr: Address) -> u8;
+    fn write8(&mut self, addr: Address, value: u8);
+    fn peek8(&self, addr: Address) -> u8;
+
+    fn read16(&mut self, addr: Address) -> u16 {
+        let lo = self.read8(addr) as u16;
+        let hi = self.read8(addr.wrapping_add(1)) as u16;
+        lo | (hi << 8)
+    }
+
+    fn read24(&mut self, addr: Address) -> u32 {
+        let lo = self.read16(addr) as u32;
+        let hi = self.read8(addr.wrapping_add(2)) as u32;
+        lo | (hi << 16)
+    }
+
+    fn peek16(&self, addr: Address) -> u16 {
+        let lo = self.peek8(addr) as u16;
+        let hi = self.peek8(addr.wrapping_add(1)) as u16;
+        lo | (hi << 8)
+    }
+
+    fn peek24(&self, addr: Address) -> u32 {
+        let lo = self.peek16(addr) as u32;
+        let hi = self.peek8(addr.wrapping_add(2)) as u32;
+        lo | (hi << 16)
+    }
+}
+
+impl<M: MemoryMap> CpuBus for SnesBus<M> {
+    fn read8(&mut self, addr: Address) -> u8 {
+        SnesBus::read8(self, addr)
+    }
+
+    fn write8(&mut self, addr: Address, value: u8) {
+        SnesBus::write8(self, addr, value);
+    }
+
+    fn peek8(&self, addr: Address) -> u8 {
+        SnesBus::peek8(self, addr)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecutionState {
@@ -114,14 +158,15 @@ impl Cpu {
     }
 }
 
-pub(crate) struct CodeReader<'a, M: MemoryMap> {
-    pub snes: &'a Snes<M>,
+pub(crate) struct CodeReader<'a, B: CpuBus> {
+    pub cpu: &'a Cpu,
+    pub bus: &'a B,
     pub bank: u8,
 }
 
-impl<M: MemoryMap> decoder::DisasmCtx for CodeReader<'_, M> {
+impl<B: CpuBus> decoder::DisasmCtx for CodeReader<'_, B> {
     fn read_u8(&self, addr: u64) -> u8 {
-        self.snes.peek8(Address::new(self.bank, addr as u16))
+        self.bus.peek8(Address::new(self.bank, addr as u16))
     }
 
     fn symbol(&self, addr: u64) -> Option<(String, u64)> {
@@ -130,10 +175,9 @@ impl<M: MemoryMap> decoder::DisasmCtx for CodeReader<'_, M> {
 
     /// The decoder's `m`/`x` width selectors.
     fn mode(&self, name: &str) -> u64 {
-        let cpu = &self.snes.cpu;
         match name {
-            "m" => !cpu.acc_wide() as u64,
-            "x" => !cpu.index_wide() as u64,
+            "m" => !self.cpu.acc_wide() as u64,
+            "x" => !self.cpu.index_wide() as u64,
             _ => 0,
         }
     }
@@ -199,64 +243,75 @@ pub fn effective_address<M: MemoryMap>(snes: &Snes<M>, pc: u16) -> Option<Addres
         return None;
     }
 
-    let reader = CodeReader { snes, bank };
+    let reader = CodeReader {
+        cpu: &snes.cpu,
+        bus: &snes.bus,
+        bank,
+    };
     let arg = operand::fetch_arg(inst, mnemonic, form, pc as u64, &reader);
-    addressing::resolve(snes, form, arg).map(|(lo, _)| lo)
+    addressing::resolve(&snes.cpu, &snes.bus, form, arg).map(|(lo, _)| lo)
 }
 
 /// Execute one instruction and return the CPU cycles it took.
 pub fn step<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
-    match snes.cpu.execution {
+    let Snes { cpu, bus } = snes;
+    self::step_main(cpu, bus)
+}
+
+fn step_main<M: MemoryMap>(cpu: &mut Cpu, snes: &mut SnesBus<M>) -> u64 {
+    match cpu.execution {
         ExecutionState::Stopped => self::idle(snes),
-        _ if snes.irq.take_nmi() => self::service_interrupt(snes, 0xFFEA, 0xFFFA),
-        _ if snes.irq.irq_pending() && !snes.cpu.flags.irq_disable() => {
-            self::service_interrupt(snes, 0xFFEE, 0xFFFE)
+        _ if snes.irq.take_nmi() => self::service_interrupt(cpu, snes, 0xFFEA, 0xFFFA),
+        _ if snes.irq.irq_pending() && !cpu.flags.irq_disable() => {
+            self::service_interrupt(cpu, snes, 0xFFEE, 0xFFFE)
         }
         ExecutionState::Waiting if snes.irq.irq_pending() => {
-            snes.cpu.execution = ExecutionState::Running;
-            self::execute_instruction(snes)
+            cpu.execution = ExecutionState::Running;
+            self::execute_instruction(cpu, snes)
         }
         ExecutionState::Waiting => self::idle(snes),
-        ExecutionState::Running => self::execute_instruction(snes),
+        ExecutionState::Running => self::execute_instruction(cpu, snes),
     }
 }
 
-fn charge<M: MemoryMap>(snes: &mut Snes<M>, cycles: u64) -> u64 {
+fn charge<M: MemoryMap>(snes: &mut SnesBus<M>, cycles: u64) -> u64 {
     snes.mmu.clocks += map::WAITSTATES_FAST * cycles;
     cycles
 }
 
-fn idle<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
+fn idle<M: MemoryMap>(snes: &mut SnesBus<M>) -> u64 {
     let cycles = self::idle_cycles(snes);
     self::charge(snes, cycles)
 }
 
-fn service_interrupt<M: MemoryMap>(snes: &mut Snes<M>, native: u16, emulation: u16) -> u64 {
+fn service_interrupt<M: MemoryMap>(
+    cpu: &mut Cpu,
+    snes: &mut SnesBus<M>,
+    native: u16,
+    emulation: u16,
+) -> u64 {
     #[cfg(feature = "debug")]
     if native == 0xFFEA {
-        snes.cpu.interrupts.nmi += 1;
+        cpu.interrupts.nmi += 1;
     } else {
-        snes.cpu.interrupts.irq += 1;
+        cpu.interrupts.irq += 1;
     }
 
-    snes.cpu.execution = ExecutionState::Running;
-    self::service_vectored(snes, native, emulation);
-    let cycles = timing::interrupt_cycles(&snes.cpu);
+    cpu.execution = ExecutionState::Running;
+    self::service_vectored(cpu, snes, native, emulation);
+    let cycles = timing::interrupt_cycles(cpu);
     self::charge(snes, cycles)
 }
 
-fn idle_cycles<M: MemoryMap>(snes: &Snes<M>) -> u64 {
+fn idle_cycles<M: MemoryMap>(snes: &SnesBus<M>) -> u64 {
     let clocks = snes.scheduler.next_deadline().map_or(0, |deadline| {
         deadline.saturating_sub(snes.scheduler.cycles())
     });
     clocks.div_ceil(map::WAITSTATES_FAST).max(1)
 }
 
-fn execute_instruction<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
-    let (bank, pc, combo) = {
-        let cpu = &snes.cpu;
-        (cpu.program_bank, cpu.pc, self::mode_selectors(cpu))
-    };
+fn execute_instruction<M: MemoryMap>(cpu: &mut Cpu, snes: &mut SnesBus<M>) -> u64 {
+    let (bank, pc, combo) = { (cpu.program_bank, cpu.pc, self::mode_selectors(cpu)) };
 
     let opcode = snes.read8(Address::new(bank, pc));
     let Decoded {
@@ -268,7 +323,11 @@ fn execute_instruction<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
     let len = decoder::stream_len_of(combo, id);
 
     let arg = {
-        let reader = CodeReader { snes: &*snes, bank };
+        let reader = CodeReader {
+            cpu,
+            bus: &*snes,
+            bank,
+        };
         operand::fetch_arg(inst, mnemonic, form, pc as u64, &reader)
     };
 
@@ -277,18 +336,18 @@ fn execute_instruction<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
         snes.mmu.clocks += snes.mmu.waitstates(addr);
     }
 
-    if let Some((ptr, bytes)) = addressing::pointer_fetch(snes, form, arg) {
+    if let Some((ptr, bytes)) = addressing::pointer_fetch(cpu, form, arg) {
         for i in 0..bytes as u16 {
             snes.mmu.clocks += snes.mmu.waitstates(ptr.wrapping_add(i));
         }
     }
 
-    let cycles = self::charge(snes, timing::cycles(snes, mnemonic, form, arg));
+    let cycles = self::charge(snes, timing::cycles(cpu, snes, mnemonic, form, arg));
 
     #[cfg(feature = "debug")]
     snes.mmu.access.resume();
 
-    let mut vm = Interpreter::new(&mut *snes, len);
+    let mut vm = Interpreter::new(cpu, &mut *snes, len);
     vm.exec(mnemonic, form, arg);
     vm.commit();
 
@@ -298,8 +357,8 @@ fn execute_instruction<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
     cycles
 }
 
-pub(crate) fn service_vectored<M: MemoryMap>(snes: &mut Snes<M>, native: u16, emulation: u16) {
-    let mut vm = Interpreter::new(snes, 0);
+pub(crate) fn service_vectored<B: CpuBus>(cpu: &mut Cpu, bus: &mut B, native: u16, emulation: u16) {
+    let mut vm = Interpreter::new(cpu, bus, 0);
     vm.service_interrupt(native, emulation);
     vm.commit();
 }

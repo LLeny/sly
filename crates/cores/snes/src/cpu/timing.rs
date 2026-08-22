@@ -1,12 +1,11 @@
 use super::addressing;
 use super::decoder::{Form, Mnemonic};
 use super::operand::Arg;
-use crate::Snes;
-use crate::cpu::Cpu;
-use crate::mmio::MemoryMap;
+use crate::cpu::{Cpu, CpuBus};
 
-pub(super) fn cycles<M: MemoryMap>(
-    snes: &Snes<M>,
+pub(super) fn cycles<B: CpuBus>(
+    cpu: &Cpu,
+    bus: &B,
     mnemonic: Mnemonic,
     form: Form,
     arg: Arg,
@@ -14,7 +13,6 @@ pub(super) fn cycles<M: MemoryMap>(
     use Form as F;
     use Mnemonic as M;
 
-    let cpu = &snes.cpu;
     let m_wide = cpu.acc_wide() as u64;
     let x_wide = cpu.index_wide() as u64;
     let native = !cpu.emulation as u64;
@@ -22,9 +20,9 @@ pub(super) fn cycles<M: MemoryMap>(
 
     match mnemonic {
         M::Lda | M::Adc | M::Sbc | M::And | M::Ora | M::Eor | M::Cmp | M::Bit => {
-            self::read(snes, form, arg, m_wide, dl)
+            self::read(cpu, bus, form, arg, m_wide, dl)
         }
-        M::Ldx | M::Ldy | M::Cpx | M::Cpy => self::read(snes, form, arg, x_wide, dl),
+        M::Ldx | M::Ldy | M::Cpx | M::Cpy => self::read(cpu, bus, form, arg, x_wide, dl),
 
         M::Sta | M::Stz => self::store(form, m_wide, dl),
         M::Stx | M::Sty => self::store(form, x_wide, dl),
@@ -86,10 +84,8 @@ pub(super) fn interrupt_cycles(cpu: &Cpu) -> u64 {
     7 + !cpu.emulation as u64
 }
 
-fn read<M: MemoryMap>(snes: &Snes<M>, form: Form, arg: Arg, wide: u64, dl: u64) -> u64 {
+fn read<B: CpuBus>(cpu: &Cpu, bus: &B, form: Form, arg: Arg, wide: u64, dl: u64) -> u64 {
     use Form as F;
-
-    let cpu = &snes.cpu;
 
     let base = match form {
         F::Imm | F::Immx => 2,
@@ -105,7 +101,7 @@ fn read<M: MemoryMap>(snes: &Snes<M>, form: Form, arg: Arg, wide: u64, dl: u64) 
                 unreachable!("idy operand")
             };
 
-            let ptr = snes.peek16(addressing::direct(snes, dp, 0));
+            let ptr = bus.peek16(addressing::direct(cpu, dp, 0));
             5 + dl + self::indexed(cpu, ptr, cpu.index_y)
         }
         F::Idx | F::Idl | F::Idly => 6 + dl,

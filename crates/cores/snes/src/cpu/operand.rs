@@ -1,6 +1,5 @@
-use super::CodeReader;
 use super::decoder::{Form, Instruction, Mnemonic};
-use crate::mmio::MemoryMap;
+use super::{CodeReader, CpuBus};
 
 #[derive(Clone, Copy)]
 pub(crate) enum Arg {
@@ -23,12 +22,12 @@ impl Arg {
     }
 }
 
-pub(crate) fn fetch_arg<M: MemoryMap>(
+pub(crate) fn fetch_arg<B: CpuBus>(
     inst: Instruction,
     mnemonic: Mnemonic,
     form: Form,
     pc: u64,
-    r: &CodeReader<M>,
+    r: &CodeReader<B>,
 ) -> Arg {
     use Form as F;
     use Mnemonic as M;

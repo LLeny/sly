@@ -1,4 +1,4 @@
-use crate::Snes;
+use crate::SnesBus;
 use crate::mmio::MemoryMap;
 use crate::mmio::device::{IoRegister, RegEntry};
 use crate::superfx::regs::{BRAMR, CBR, Cfgr, Clsr, PBR, RAMBR, ROMBR, SCBR, Scmr, Sfr, VCR};
@@ -43,7 +43,7 @@ impl IoRegister for Gsu {
     const START: u16 = 0x3000;
     const END: u16 = 0x34FF;
 
-    fn read<M: MemoryMap>(snes: &mut Snes<M>, reg: u16) -> u8 {
+    fn read<M: MemoryMap>(snes: &mut SnesBus<M>, reg: u16) -> u8 {
         let target = map(reg);
         let value = peek_target(snes, &target);
 
@@ -55,7 +55,7 @@ impl IoRegister for Gsu {
         value
     }
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, reg: u16, value: u8) {
         match map(reg) {
             Target::GprLow(_) => snes.superfx.latch = value,
             Target::GprHigh(n) => {
@@ -105,12 +105,12 @@ impl IoRegister for Gsu {
         }
     }
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, reg: u16) -> u8 {
         peek_target(snes, &map(reg))
     }
 }
 
-fn peek_target<M: MemoryMap>(snes: &Snes<M>, target: &Target) -> u8 {
+fn peek_target<M: MemoryMap>(snes: &SnesBus<M>, target: &Target) -> u8 {
     match target {
         Target::GprLow(n) => snes.superfx.r[*n] as u8,
         Target::GprHigh(n) => (snes.superfx.r[*n] >> 8) as u8,

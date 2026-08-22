@@ -1,4 +1,4 @@
-use crate::Snes;
+use crate::SnesBus;
 use crate::macros::register_mmio;
 use crate::mmio::MemoryMap;
 use crate::mmio::device::IoRegister;
@@ -65,11 +65,11 @@ impl Mosaic {
 impl IoRegister for MosaicRegister {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
         snes.ppu.mosaic.write(value);
     }
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         snes.ppu.mosaic.raw()
     }
 }

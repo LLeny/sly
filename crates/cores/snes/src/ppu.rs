@@ -29,7 +29,7 @@ use crate::ppu::vram::Vram;
 use crate::ppu::window::WindowTrace;
 use crate::ppu::window::Windows;
 use crate::scheduler::{MASTER_CLOCKS_PER_SCANLINE, Scheduler, VBLANK_START_SCANLINE};
-use crate::{MemoryMap, Snes};
+use crate::{MemoryMap, SnesBus};
 use serde::{Deserialize, Serialize};
 
 const HBLANK_START_CLOCK: u64 = 274 * 4;
@@ -446,7 +446,7 @@ impl TilemapData {
     }
 }
 
-pub(crate) fn vblank_start<M: MemoryMap>(snes: &mut Snes<M>, _deadline: u64) {
+pub(crate) fn vblank_start<M: MemoryMap>(snes: &mut SnesBus<M>, _deadline: u64) {
     #[cfg(feature = "debug")]
     snes.ppu.window_trace.finish_frame();
 
@@ -461,7 +461,7 @@ pub(crate) fn vblank_start<M: MemoryMap>(snes: &mut Snes<M>, _deadline: u64) {
     }
 }
 
-pub(crate) fn vblank_end<M: MemoryMap>(snes: &mut Snes<M>, _deadline: u64) {
+pub(crate) fn vblank_end<M: MemoryMap>(snes: &mut SnesBus<M>, _deadline: u64) {
     snes.irq.set_vblank(false);
 }
 
@@ -474,13 +474,13 @@ pub(crate) fn in_hblank(scheduler: &Scheduler) -> bool {
     scheduler.cycles() % MASTER_CLOCKS_PER_SCANLINE >= HBLANK_START_CLOCK
 }
 
-pub(crate) fn latch_hv_counters<M: MemoryMap>(snes: &mut Snes<M>) {
+pub(crate) fn latch_hv_counters<M: MemoryMap>(snes: &mut SnesBus<M>) {
     let master_clock = snes.scheduler.cycles();
     let scanline = snes.scheduler.scanline_at(master_clock) as u16;
     snes.ppu.latch_counters(master_clock, scanline);
 }
 
-pub(crate) fn draw_scanline<M: MemoryMap>(snes: &mut Snes<M>, deadline: u64) {
+pub(crate) fn draw_scanline<M: MemoryMap>(snes: &mut SnesBus<M>, deadline: u64) {
     let scanline = snes.scheduler.scanline_at(deadline);
     if (1..=SCREEN_HEIGHT as u64).contains(&scanline) {
         snes.ppu.render_scanline(scanline as usize - 1);

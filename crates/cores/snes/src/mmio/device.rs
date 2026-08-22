@@ -1,5 +1,5 @@
 use crate::mmio::{MemoryMap, OPEN_BUS};
-use crate::{Cartridge, Snes};
+use crate::{Cartridge, SnesBus};
 
 pub const IO_BASE: u16 = 0x2000;
 pub const IO_SIZE: usize = 0x4000;
@@ -9,9 +9,9 @@ pub const IO_END: u16 = IO_BASE + IO_SIZE as u16 - 1;
 const HANDLER_SLOTS: usize = u8::MAX as usize + 1;
 
 pub struct Handler<M: MemoryMap> {
-    pub read: fn(&mut Snes<M>, u16) -> u8,
-    pub write: fn(&mut Snes<M>, u16, u8),
-    pub peek: fn(&Snes<M>, u16) -> u8, // side effect free
+    pub read: fn(&mut SnesBus<M>, u16) -> u8,
+    pub write: fn(&mut SnesBus<M>, u16, u8),
+    pub peek: fn(&SnesBus<M>, u16) -> u8, // side effect free
 }
 
 impl<M: MemoryMap> Clone for Handler<M> {
@@ -81,16 +81,16 @@ pub(crate) trait IoRegister {
     const WRITE: Access = Access::Handled;
 
     /// Defaults to `peek`. Override only when reading has a side effect.
-    fn read<M: MemoryMap>(snes: &mut Snes<M>, reg: u16) -> u8 {
+    fn read<M: MemoryMap>(snes: &mut SnesBus<M>, reg: u16) -> u8 {
         Self::peek(snes, reg)
     }
 
     /// Defaults to reporting itself, so a register with no write port needs no body.
-    fn write<M: MemoryMap>(_snes: &mut Snes<M>, reg: u16, value: u8) {
+    fn write<M: MemoryMap>(_snes: &mut SnesBus<M>, reg: u16, value: u8) {
         unmapped_write(reg, value);
     }
 
-    fn peek<M: MemoryMap>(_snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(_snes: &SnesBus<M>, _reg: u16) -> u8 {
         OPEN_BUS
     }
 

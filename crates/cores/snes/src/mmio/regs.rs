@@ -1,7 +1,7 @@
 use crate::mmio::device::{Access, IoRegister};
 use chapa::bitenum;
 
-use crate::Snes;
+use crate::SnesBus;
 use crate::macros::{register_mmio, register_mmio_family, register_mmio_raw};
 use crate::mmio::MemoryMap;
 
@@ -53,11 +53,11 @@ register_mmio! {
 impl IoRegister for MemorySelect {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
         snes.mmu.fastrom = Self::from_raw(value).fast_rom();
     }
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         Self::default().with_fast_rom(snes.mmu.fastrom).raw()
     }
 }
@@ -322,11 +322,11 @@ register_dma_channel_symbols!(0, 1, 2, 3, 4, 5, 6, 7);
 impl IoRegister for NmiTimerEnable {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
         snes.irq.write_nmitimen(value);
     }
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         snes.irq.nmitimen_raw()
     }
 }
@@ -334,7 +334,7 @@ impl IoRegister for NmiTimerEnable {
 impl IoRegister for MdmaTransferStart {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
         snes.dma.mdmaen = Self::from_raw(value);
         tracing::trace!(
             channel0 = snes.dma.mdmaen.channel0(),
@@ -350,7 +350,7 @@ impl IoRegister for MdmaTransferStart {
         super::dma::start_mdma(snes);
     }
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         snes.dma.mdmaen.raw()
     }
 }
@@ -358,7 +358,7 @@ impl IoRegister for MdmaTransferStart {
 impl IoRegister for HdmaTransferEnable {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
         snes.dma.hdmaen = Self::from_raw(value);
         tracing::trace!(
             channel0 = snes.dma.hdmaen.channel0(),
@@ -373,7 +373,7 @@ impl IoRegister for HdmaTransferEnable {
         );
     }
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         snes.dma.hdmaen.raw()
     }
 }
@@ -382,7 +382,7 @@ impl IoRegister for HvStatusJoypadBusy {
     const START: u16 = Self::ADDRESS;
     const WRITE: Access = Access::Ignored;
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         // TODO
         let mut value = Self::default();
         value.set_vblank(crate::ppu::in_vblank(&snes.scheduler));
@@ -395,11 +395,11 @@ impl IoRegister for VblankFlagCpuVersion {
     const START: u16 = Self::ADDRESS;
     const WRITE: Access = Access::Ignored;
 
-    fn read<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16) -> u8 {
+    fn read<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16) -> u8 {
         snes.irq.read_rdnmi()
     }
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         snes.irq.rdnmi_raw()
     }
 }
@@ -408,11 +408,11 @@ impl IoRegister for TimerUp {
     const START: u16 = Self::ADDRESS;
     const WRITE: Access = Access::Ignored;
 
-    fn read<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16) -> u8 {
+    fn read<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16) -> u8 {
         snes.irq.read_timeup()
     }
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         snes.irq.peek_timeup()
     }
 }

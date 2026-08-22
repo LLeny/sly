@@ -1,4 +1,4 @@
-use crate::Snes;
+use crate::SnesBus;
 use crate::mmio::MemoryMap;
 use crate::mmio::device::{Access, IoRegister, RegEntry};
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,7 @@ impl IoRegister for MulFactorA {
     const START: u16 = WRMPYA;
     const READ: Access = Access::Unmapped;
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
         snes.math.mul_factor_a = value;
     }
 }
@@ -45,7 +45,7 @@ impl IoRegister for MulFactorB {
     const START: u16 = WRMPYB;
     const READ: Access = Access::Unmapped;
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
         snes.math.mul_factor_b = value;
         snes.math.process_mul();
     }
@@ -57,7 +57,7 @@ impl IoRegister for DividendLow {
     const START: u16 = WRDIVL;
     const READ: Access = Access::Unmapped;
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
         snes.math.div_dividend = (snes.math.div_dividend & 0xFF00) | value as u16;
     }
 }
@@ -68,7 +68,7 @@ impl IoRegister for DividendHigh {
     const START: u16 = WRDIVH;
     const READ: Access = Access::Unmapped;
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
         snes.math.div_dividend = (snes.math.div_dividend & 0x00FF) | ((value as u16) << 8);
     }
 }
@@ -79,7 +79,7 @@ impl IoRegister for Divisor {
     const START: u16 = WRDIVB;
     const READ: Access = Access::Unmapped;
 
-    fn write<M: MemoryMap>(snes: &mut Snes<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
         snes.math.div_divisor = value;
         snes.math.process_div();
     }
@@ -90,7 +90,7 @@ struct QuotientLow;
 impl IoRegister for QuotientLow {
     const START: u16 = RDDIVL;
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         snes.math.div_quotient as u8
     }
 }
@@ -100,7 +100,7 @@ struct QuotientHigh;
 impl IoRegister for QuotientHigh {
     const START: u16 = RDDIVH;
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         (snes.math.div_quotient >> 8) as u8
     }
 }
@@ -110,7 +110,7 @@ struct ProductLow;
 impl IoRegister for ProductLow {
     const START: u16 = RDMPYL;
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         snes.math.product_or_remainder as u8
     }
 }
@@ -120,7 +120,7 @@ struct ProductHigh;
 impl IoRegister for ProductHigh {
     const START: u16 = RDMPYH;
 
-    fn peek<M: MemoryMap>(snes: &Snes<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
         (snes.math.product_or_remainder >> 8) as u8
     }
 }

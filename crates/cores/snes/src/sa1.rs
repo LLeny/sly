@@ -206,7 +206,7 @@ impl Sa1 {
 }
 
 pub(crate) fn snes_cart_read<M: crate::mmio::MemoryMap>(
-    snes: &crate::Snes<M>,
+    snes: &crate::SnesBus<M>,
     region: crate::mmio::CartRegion,
     index: usize,
 ) -> u8 {
@@ -217,7 +217,7 @@ pub(crate) fn snes_cart_read<M: crate::mmio::MemoryMap>(
 }
 
 pub(crate) fn snes_cart_write<M: crate::mmio::MemoryMap>(
-    snes: &mut crate::Snes<M>,
+    snes: &mut crate::SnesBus<M>,
     region: crate::mmio::CartRegion,
     index: usize,
     value: u8,
