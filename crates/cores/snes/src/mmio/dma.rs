@@ -308,7 +308,7 @@ fn transfer_dma_byte(
     direction: Direction,
 ) {
     let clocks_before = snes.mmu.clocks;
-    let a_bus_space = snes.mmu.map(a_bus);
+    let a_bus_space = snes.mmu.map(&snes.sa1, a_bus);
 
     if b_bus.address() == WMDATA
         && let AddressSpace::Wram(index) = &a_bus_space
@@ -320,20 +320,19 @@ fn transfer_dma_byte(
         return;
     }
 
-    let (src, dst) = match direction {
-        Direction::AToB => (a_bus, b_bus),
-        Direction::BToA => (b_bus, a_bus),
-    };
-
-    let a_bus_blocked = matches!(a_bus_space, AddressSpace::Io(_));
+    let a_bus_blocked = matches!(&a_bus_space, AddressSpace::Io(_));
     let value = if a_bus_blocked && matches!(direction, Direction::AToB) {
         OPEN_BUS
+    } else if matches!(direction, Direction::AToB) {
+        snes.read8_mapped(a_bus, &a_bus_space)
     } else {
-        snes.read8_direct(src)
+        snes.read8_direct(b_bus)
     };
 
-    if !(a_bus_blocked && matches!(direction, Direction::BToA)) {
-        snes.write8_direct(dst, value);
+    match direction {
+        Direction::AToB => snes.write8_direct(b_bus, value),
+        Direction::BToA if !a_bus_blocked => snes.write8_mapped(a_bus, &a_bus_space, value),
+        Direction::BToA => {}
     }
 
     snes.mmu.clocks = clocks_before + 8;
@@ -344,10 +343,11 @@ fn read_hdma_table_byte(snes: &mut Snes<impl MemoryMap>, channel: &mut DmaChanne
     let address = Address::new(channel.a_bus_addr.table_bank(), channel.table_addr);
     channel.table_addr = channel.table_addr.wrapping_add(1);
 
-    let value = if matches!(snes.mmu.map(address), AddressSpace::Io(_)) {
+    let space = snes.mmu.map(&snes.sa1, address);
+    let value = if matches!(&space, AddressSpace::Io(_)) {
         OPEN_BUS
     } else {
-        snes.read8_direct(address)
+        snes.read8_mapped(address, &space)
     };
     snes.mmu.clocks = clocks_before + 8;
     value

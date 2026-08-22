@@ -1,6 +1,7 @@
 use crate::Cartridge;
 use crate::cartridge::{Coprocessor, MapMode};
 use crate::mmio::{Address, AddressSpace, device};
+use crate::sa1::{SNES_IRAM_END, SNES_IRAM_START, Sa1};
 
 pub(crate) const WAITSTATES_FAST: u64 = 6;
 const WAITSTATES_SLOW: u64 = 8;
@@ -10,6 +11,11 @@ pub trait MemoryMap: Default + 'static {
     const WRAM_SIZE: usize;
 
     fn map(&self, cartridge: &Cartridge, addr: Address) -> AddressSpace;
+
+    #[doc(hidden)]
+    fn map_with_sa1(&self, cartridge: &Cartridge, _sa1: &Sa1, addr: Address) -> AddressSpace {
+        self.map(cartridge, addr)
+    }
 
     fn speed(&self, addr: Address, fastrom: bool) -> u64 {
         let _ = (addr, fastrom);
@@ -33,34 +39,52 @@ impl MemoryMap for CartridgeMap {
     }
 
     fn map(&self, cartridge: &Cartridge, addr: Address) -> AddressSpace {
-        let bank = addr.bank();
-        let offset = addr.address();
+        self::map_cartridge(cartridge, None, addr)
+    }
 
-        match bank {
-            // "The first 8 KiB of RAM is mirrored into many banks for convenient access,
-            // and banks $7E-$7F provide continuous access to the entire 128 KiB in
-            // one continuous address range."
-            0x7E | 0x7F => {
-                let index = (((bank - 0x7E) as usize) << 16) | offset as usize;
-                AddressSpace::Wram(index)
-            }
-            // $00-$3F (and $80-$BF mirror) are Low RAM
-            // https://snes.nesdev.org/wiki/Memory_map
-            0x00..=0x3F | 0x80..=0xBF => match offset {
-                0x0000..=0x1FFF => AddressSpace::Wram(offset as usize), // 8 KiB WRAM
-                device::IO_BASE..=device::IO_END => AddressSpace::Io(offset), // PPU/APU/CPU/DMA MMIO
-                _ => self::cart_space(cartridge, bank, offset),
-            },
-            _ => self::cart_space(cartridge, bank, offset),
-        }
+    fn map_with_sa1(&self, cartridge: &Cartridge, sa1: &Sa1, addr: Address) -> AddressSpace {
+        self::map_cartridge(cartridge, Some(sa1), addr)
     }
 }
 
-fn cart_space(cartridge: &Cartridge, bank: u8, offset: u16) -> AddressSpace {
-    if cartridge.coprocessor() == Coprocessor::SuperFx {
-        return crate::superfx::map::cart_space(cartridge, bank, offset);
-    }
+fn map_cartridge(cartridge: &Cartridge, sa1: Option<&Sa1>, addr: Address) -> AddressSpace {
+    let bank = addr.bank();
+    let offset = addr.address();
 
+    match bank {
+        // "The first 8 KiB of RAM is mirrored into many banks for convenient access,
+        // and banks $7E-$7F provide continuous access to the entire 128 KiB in
+        // one continuous address range."
+        0x7E | 0x7F => {
+            let index = (usize::from(bank - 0x7E) << 16) | usize::from(offset);
+            AddressSpace::Wram(index)
+        }
+        // $00-$3F (and $80-$BF mirror) are Low RAM
+        // https://snes.nesdev.org/wiki/Memory_map
+        0x00..=0x3F | 0x80..=0xBF => match offset {
+            0x0000..=0x1FFF => AddressSpace::Wram(usize::from(offset)), // 8 KiB WRAM
+            // PPU/APU/CPU/DMA MMIO, minus the SA-1 I-RAM window carved out of it
+            device::IO_BASE..=device::IO_END => match offset {
+                SNES_IRAM_START..=SNES_IRAM_END if cartridge.coprocessor() == Coprocessor::Sa1 => {
+                    AddressSpace::Iram(usize::from(offset - SNES_IRAM_START))
+                }
+                _ => AddressSpace::Io(offset),
+            },
+            _ => self::cart_space(cartridge, sa1, bank, offset),
+        },
+        _ => self::cart_space(cartridge, sa1, bank, offset),
+    }
+}
+
+fn cart_space(cartridge: &Cartridge, sa1: Option<&Sa1>, bank: u8, offset: u16) -> AddressSpace {
+    match cartridge.coprocessor() {
+        Coprocessor::SuperFx => crate::superfx::map::cart_space(cartridge, bank, offset),
+        Coprocessor::Sa1 => crate::sa1::map::cart_space(cartridge, sa1, bank, offset),
+        _ => self::standard_cart_space(cartridge, bank, offset),
+    }
+}
+
+fn standard_cart_space(cartridge: &Cartridge, bank: u8, offset: u16) -> AddressSpace {
     if let Some(space) = self::map_sram(cartridge, bank, offset) {
         return space;
     }

@@ -101,6 +101,10 @@ impl SnesDebug {
     fn has_gsu(&self) -> bool {
         self.core.mmu.cartridge.coprocessor() == crate::cartridge::Coprocessor::SuperFx
     }
+
+    fn has_sa1(&self) -> bool {
+        self.core.mmu.cartridge.coprocessor() == crate::cartridge::Coprocessor::Sa1
+    }
 }
 
 impl Core for SnesDebug {

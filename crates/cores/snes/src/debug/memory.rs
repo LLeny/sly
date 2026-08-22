@@ -4,6 +4,7 @@ impl SnesDebug {
     pub(super) fn region_byte(&self, region: &str, addr: u32) -> u8 {
         match region {
             "wram" => self.core.mmu.wram.get(addr as usize).copied().unwrap_or(0),
+            "iram" => self.core.sa1.iram.get(addr as usize).copied().unwrap_or(0),
             "sram" => self
                 .core
                 .mmu
@@ -31,6 +32,7 @@ impl SnesDebug {
     pub(super) fn region_key(&self, region: &str, addr: u32) -> Option<(MemKind, u32)> {
         match region {
             "wram" => Some((MemKind::Wram, addr)),
+            "iram" => Some((MemKind::Iram, addr)),
             "sram" => Some((MemKind::Sram, addr)),
             "rom" => Some((MemKind::Rom, addr)),
             "bus" => self.core.classify(Address::from_24bit(addr & 0x00FF_FFFF)),
@@ -60,6 +62,11 @@ impl SnesDebug {
                 MemoryRegion::new("sram", name, 0, self.core.mmu.cartridge.sram.len() as u32),
             );
         }
+        if self.has_sa1() {
+            let iram_size = u32::try_from(crate::sa1::IRAM_SIZE)
+                .expect("SA-1 I-RAM size must fit in the debugger address space");
+            regions.insert(1, MemoryRegion::new("iram", "SA-1 I-RAM", 0, iram_size));
+        }
         if self.has_gsu() {
             regions.push(MemoryRegion::new("gsu", "GSU Bus", 0, 0x80_0000));
             regions.push(MemoryRegion::new("gsucache", "GSU Cache", 0, 0x200));
@@ -80,6 +87,7 @@ impl SnesDebug {
 
         match region {
             "wram" => window(&self.core.mmu.wram, addr, len),
+            "iram" => window(&self.core.sa1.iram, addr, len),
             "sram" => window(&self.core.mmu.cartridge.sram, addr, len),
             "rom" => window(&self.core.mmu.cartridge.rom, addr, len),
             _ => (0..len as u32)
@@ -98,6 +106,7 @@ impl SnesDebug {
 
         match region {
             "wram" => patch(&mut self.core.mmu.wram, addr, bytes),
+            "iram" => patch(&mut self.core.sa1.iram, addr, bytes),
             "sram" => patch(&mut self.core.mmu.cartridge.sram, addr, bytes),
             "rom" => patch(&mut self.core.mmu.cartridge.rom, addr, bytes),
             "spc" => {
@@ -129,6 +138,7 @@ impl SnesDebug {
     pub(super) fn format_addr(&self, region: &str, addr: u32) -> String {
         match region {
             "wram" => format!("{:02X}:{:04X}", 0x7E + (addr >> 16), addr & 0xFFFF),
+            "iram" => format!("{addr:03X}"),
             "sram" => format!("{addr:06X}"),
             "rom" => format!("{addr:06X}"),
             "bus" => format!("{:02X}:{:04X}", (addr >> 16) & 0xFF, addr & 0xFFFF),
@@ -165,6 +175,7 @@ impl SnesDebug {
         let (kind, offset) = self.last_access.last?;
         let region = match kind {
             MemKind::Wram => "wram",
+            MemKind::Iram => "iram",
             MemKind::Sram => "sram",
             MemKind::Rom => "rom",
             MemKind::Io if (PPU_BASE..PPU_BASE + PPU_SIZE).contains(&offset) => "ppu",

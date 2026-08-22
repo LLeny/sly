@@ -14,6 +14,7 @@ mod macros;
 mod math;
 pub mod mmio;
 pub mod ppu;
+pub mod sa1;
 pub mod scheduler;
 pub mod state;
 pub mod superfx;
@@ -31,6 +32,7 @@ use crate::math::Math;
 use crate::mmio::Address;
 use crate::mmio::dma::{self, Dma};
 use crate::ppu::Ppu;
+use crate::sa1::Sa1;
 use crate::scheduler::{EventKind, Scheduler};
 use crate::superfx::SuperFx;
 use serde::{Deserialize, Serialize};
@@ -47,6 +49,8 @@ pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub math: Math,
     pub joypads: Joypads,
     pub scheduler: Scheduler,
+    /// State for the cartridge's SA-1 coprocessor.
+    pub sa1: Sa1,
     pub superfx: SuperFx,
 }
 
@@ -69,6 +73,7 @@ impl<M: MemoryMap> Snes<M> {
             math: Math::new(),
             joypads: Joypads::default(),
             scheduler: Scheduler::new(tv_system),
+            sa1: Sa1::default(),
             superfx: SuperFx::default(),
         };
         snes.reset();
@@ -87,6 +92,7 @@ impl<M: MemoryMap> Snes<M> {
         self.apu = Apu::new();
         self.ppu = Ppu::new();
         self.joypads.reset();
+        self.sa1 = Sa1::default();
         self.superfx = SuperFx::default();
 
         self.scheduler = Scheduler::new(tv_system);

@@ -15,6 +15,7 @@ pub use access::{AccessTracker, MemoryAccess, TrackMode};
 
 use crate::cartridge::Coprocessor;
 use crate::mmio::wram::WramPort;
+use crate::sa1::Sa1;
 use crate::{Cartridge, Snes};
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +29,7 @@ pub use symbol::{MmioSymbol, address_of, is_symbol, symbol, symbols};
 pub(crate) fn coprocessor_devices<M: MemoryMap>(cartridge: &Cartridge) -> Vec<RegEntry<M>> {
     match cartridge.coprocessor() {
         crate::cartridge::Coprocessor::SuperFx => crate::superfx::io::registers(),
+        crate::cartridge::Coprocessor::Sa1 => crate::sa1::io::registers(),
         _ => Vec::new(),
     }
 }
@@ -71,6 +73,7 @@ pub struct Mmio<M: MemoryMap = CartridgeMap> {
 
 pub enum AddressSpace {
     Wram(usize),
+    Iram(usize), // SA-1
     Sram(usize),
     Rom(usize),
     Cart(CartRegion, usize),
@@ -87,6 +90,7 @@ pub enum CartRegion {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum MemKind {
     Wram,
+    Iram,
     Sram,
     Rom,
     Io,
@@ -94,15 +98,20 @@ pub enum MemKind {
 }
 
 fn space_key(space: &AddressSpace) -> Option<(MemKind, u32)> {
-    match space {
-        AddressSpace::Wram(index) => Some((MemKind::Wram, *index as u32)),
-        AddressSpace::Sram(index) => Some((MemKind::Sram, *index as u32)),
-        AddressSpace::Rom(index) => Some((MemKind::Rom, *index as u32)),
-        AddressSpace::Cart(CartRegion::Rom, index) => Some((MemKind::Rom, *index as u32)),
-        AddressSpace::Cart(CartRegion::Ram, index) => Some((MemKind::Sram, *index as u32)),
-        AddressSpace::Io(reg) => Some((MemKind::Io, *reg as u32)),
-        AddressSpace::Unmapped => None,
-    }
+    let (kind, index) = match space {
+        AddressSpace::Wram(index) => (MemKind::Wram, *index),
+        AddressSpace::Iram(index) => (MemKind::Iram, *index),
+        AddressSpace::Sram(index) | AddressSpace::Cart(CartRegion::Ram, index) => {
+            (MemKind::Sram, *index)
+        }
+        AddressSpace::Rom(index) | AddressSpace::Cart(CartRegion::Rom, index) => {
+            (MemKind::Rom, *index)
+        }
+        AddressSpace::Io(reg) => return Some((MemKind::Io, u32::from(*reg))),
+        AddressSpace::Unmapped => return None,
+    };
+
+    Some((kind, u32::try_from(index).ok()?))
 }
 
 impl Mmio {
@@ -147,8 +156,8 @@ impl<M: MemoryMap> Mmio<M> {
     }
 
     /// Translate a CPU address to an address space (WRAM, ROM, I/O or unmapped).
-    pub(crate) fn map(&self, addr: Address) -> AddressSpace {
-        self.map.map(&self.cartridge, addr)
+    pub(crate) fn map(&self, sa1: &Sa1, addr: Address) -> AddressSpace {
+        self.map.map_with_sa1(&self.cartridge, sa1, addr)
     }
 
     pub(crate) fn cart_read(&self, region: CartRegion, index: usize) -> u8 {
@@ -179,6 +188,7 @@ impl<M: MemoryMap> Snes<M> {
     fn cart_read(&self, region: CartRegion, index: usize, addr: Address) -> u8 {
         match self.mmu.cartridge.coprocessor() {
             Coprocessor::SuperFx => crate::superfx::snes_cart_read(self, region, index, addr),
+            Coprocessor::Sa1 => crate::sa1::snes_cart_read(self, region, index),
             _ => self.mmu.cart_read(region, index),
         }
     }
@@ -186,6 +196,7 @@ impl<M: MemoryMap> Snes<M> {
     fn cart_write(&mut self, region: CartRegion, index: usize, value: u8) {
         match self.mmu.cartridge.coprocessor() {
             Coprocessor::SuperFx => crate::superfx::snes_cart_write(self, region, index, value),
+            Coprocessor::Sa1 => crate::sa1::snes_cart_write(self, region, index, value),
             _ => self.mmu.cart_write(region, index, value),
         }
     }
@@ -232,17 +243,21 @@ impl<M: MemoryMap> Snes<M> {
 
     /// Does not bill cycles or sync scheduler. Used by DMA.
     pub(crate) fn read8_direct(&mut self, addr: Address) -> u8 {
-        let space = self.mmu.map(addr);
+        let space = self.mmu.map(&self.sa1, addr);
+        self.read8_mapped(addr, &space)
+    }
 
+    pub(crate) fn read8_mapped(&mut self, addr: Address, space: &AddressSpace) -> u8 {
         #[cfg(feature = "debug")]
-        self.record_access(&space, false);
+        self.record_access(space, false);
 
         match space {
-            AddressSpace::Wram(index) => self.mmu.wram[index],
-            AddressSpace::Sram(index) => self.mmu.cartridge.sram[index],
-            AddressSpace::Rom(index) => self.mmu.cartridge.rom[index],
-            AddressSpace::Cart(region, index) => self.cart_read(region, index, addr),
-            AddressSpace::Io(reg) => self.read_io(reg),
+            AddressSpace::Wram(index) => self.mmu.wram[*index],
+            AddressSpace::Iram(index) => self.sa1.iram[*index],
+            AddressSpace::Sram(index) => self.mmu.cartridge.sram[*index],
+            AddressSpace::Rom(index) => self.mmu.cartridge.rom[*index],
+            AddressSpace::Cart(region, index) => self.cart_read(*region, *index, addr),
+            AddressSpace::Io(reg) => self.read_io(*reg),
             AddressSpace::Unmapped => {
                 tracing::error!(addr = format!("{addr:?}"), "Read from unmapped address");
                 OPEN_BUS
@@ -251,12 +266,13 @@ impl<M: MemoryMap> Snes<M> {
     }
 
     pub fn classify(&self, addr: Address) -> Option<(MemKind, u32)> {
-        self::space_key(&self.mmu.map(addr))
+        self::space_key(&self.mmu.map(&self.sa1, addr))
     }
 
     pub fn peek8(&self, addr: Address) -> u8 {
-        match self.mmu.map(addr) {
+        match self.mmu.map(&self.sa1, addr) {
             AddressSpace::Wram(index) => self.mmu.wram[index],
+            AddressSpace::Iram(index) => self.sa1.iram[index],
             AddressSpace::Sram(index) => self.mmu.cartridge.sram[index],
             AddressSpace::Rom(index) => self.mmu.cartridge.rom[index],
             AddressSpace::Cart(region, index) => self.cart_read(region, index, addr),
@@ -274,15 +290,19 @@ impl<M: MemoryMap> Snes<M> {
 
     /// Does not bill cycles or sync scheduler. Used by DMA.
     pub(crate) fn write8_direct(&mut self, addr: Address, value: u8) {
-        let space = self.mmu.map(addr);
+        let space = self.mmu.map(&self.sa1, addr);
+        self.write8_mapped(addr, &space, value);
+    }
 
+    pub(crate) fn write8_mapped(&mut self, addr: Address, space: &AddressSpace, value: u8) {
         #[cfg(feature = "debug")]
-        self.record_access(&space, true);
+        self.record_access(space, true);
 
         match space {
-            AddressSpace::Wram(index) => self.mmu.wram[index] = value,
-            AddressSpace::Sram(index) => self.mmu.cartridge.sram[index] = value,
-            AddressSpace::Cart(region, index) => self.cart_write(region, index, value),
+            AddressSpace::Wram(index) => self.mmu.wram[*index] = value,
+            AddressSpace::Iram(index) => self.sa1.write_iram_from_snes(*index, value),
+            AddressSpace::Sram(index) => self.mmu.cartridge.sram[*index] = value,
+            AddressSpace::Cart(region, index) => self.cart_write(*region, *index, value),
             AddressSpace::Rom(_) => {
                 tracing::warn!(
                     addr = format!("{addr:?}"),
@@ -290,7 +310,7 @@ impl<M: MemoryMap> Snes<M> {
                     "Write to ROM"
                 );
             }
-            AddressSpace::Io(reg) => self.write_io(reg, value),
+            AddressSpace::Io(reg) => self.write_io(*reg, value),
             AddressSpace::Unmapped => {
                 tracing::error!(
                     addr = format!("{addr:?}"),
@@ -306,7 +326,7 @@ impl<M: MemoryMap> Snes<M> {
     }
 
     fn write_io(&mut self, reg: u16, value: u8) {
-        (self.mmu.devices.handler(reg).write)(self, reg, value)
+        (self.mmu.devices.handler(reg).write)(self, reg, value);
     }
 
     fn peek_io(&self, reg: u16) -> u8 {
