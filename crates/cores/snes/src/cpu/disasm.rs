@@ -1,7 +1,7 @@
 use super::decoder::{self, DisasmCtx, Form, Instruction, Mnemonic};
 use super::operand::{Arg, fetch_arg};
 use crate::Snes;
-use crate::cpu::{CodeReader, CpuBus};
+use crate::cpu::{CodeReader, CpuPeek};
 use crate::mmio::map::MemoryMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,13 +42,17 @@ impl std::fmt::Display for Disasm {
 
 #[inline]
 pub fn disassemble_at<M: MemoryMap>(snes: &Snes<M>, pc: u16) -> Disasm {
+    self::disassemble(&snes.cpu, &snes.bus, pc)
+}
+
+pub(crate) fn disassemble<B: CpuPeek>(cpu: &crate::Cpu, bus: &B, pc: u16) -> Disasm {
     let reader = CodeReader {
-        cpu: &snes.cpu,
-        bus: &snes.bus,
-        bank: snes.cpu.program_bank,
+        cpu,
+        bus,
+        bank: cpu.program_bank,
     };
     let addr = pc as u64;
-    let combo = super::mode_selectors(&snes.cpu);
+    let combo = super::mode_selectors(cpu);
 
     let (text, length) = decoder::disasm_ctx(addr, &reader);
     let super::Decoded {
@@ -116,7 +120,7 @@ fn instruction_class(id: usize, flow: FlowKind, m: Mnemonic) -> InstructionClass
     }
 }
 
-fn control_target<B: CpuBus>(
+fn control_target<B: CpuPeek>(
     inst: Instruction,
     m: Mnemonic,
     form: Form,

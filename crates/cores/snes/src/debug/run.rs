@@ -60,13 +60,41 @@ impl EventWatch {
     }
 }
 
+pub(super) struct Sa1Stops<'a> {
+    cpu: CpuId,
+    marks: Vec<&'a BreakpointMark>,
+}
+
+impl<'a> Sa1Stops<'a> {
+    fn new(breakpoints: &'a [BreakpointMark]) -> Self {
+        let cpu = CpuId::from(sa1::CPU);
+        let marks = breakpoints
+            .iter()
+            .filter(|mark| mark.kind == BreakpointKind::Execute && mark.cpu == cpu)
+            .collect();
+
+        Self { cpu, marks }
+    }
+
+    fn covers(&self, pc: u32) -> bool {
+        self.marks
+            .iter()
+            .any(|mark| mark.covers(BreakpointKind::Execute, &self.cpu, pc))
+    }
+}
+
 impl SnesDebug {
-    pub(super) fn execute_hit(&self, breakpoints: &[BreakpointMark]) -> bool {
-        let pcs = [
+    fn cpu_pcs(&self) -> [(&'static str, u32); 4] {
+        [
             (CPU_MAIN, self.core.cpu.pc as u32),
             (CPU_SPC, self.core.apu.spc700.pc as u32),
+            (sa1::CPU, self.core.sa1.cpu.pc as u32),
             (superfx::CPU_GSU, superfx::pc(&self.core.superfx) as u32),
-        ];
+        ]
+    }
+
+    pub(super) fn execute_hit(&self, breakpoints: &[BreakpointMark]) -> bool {
+        let pcs = self.cpu_pcs();
 
         breakpoints
             .iter()
@@ -99,6 +127,10 @@ impl SnesDebug {
 
     pub(super) fn step_captured(&mut self) -> MemoryAccess {
         self.captured(TrackMode::Full, |debug| debug.core.step())
+    }
+
+    fn step_stopping_at(&mut self, sa1: &Sa1Stops<'_>) {
+        self.core.step_until_sa1(|cpu| sa1.covers(cpu.pc as u32));
     }
 
     pub(super) fn track_mode(&self) -> TrackMode {
@@ -217,11 +249,7 @@ impl SnesDebug {
     ) -> Vec<HookHit> {
         const MAX_HITS: usize = 64;
 
-        let pcs = [
-            (CPU_MAIN, self.core.cpu.pc as u32),
-            (CPU_SPC, self.core.apu.spc700.pc as u32),
-            (superfx::CPU_GSU, superfx::pc(&self.core.superfx) as u32),
-        ];
+        let pcs = self.cpu_pcs();
         let main_pc = self.core.cpu.pc as u32;
 
         let mut hits = Vec::new();
@@ -330,6 +358,7 @@ impl SnesDebug {
             Irq,
             Spc,
             Dsp,
+            Sa1,
             Gsu,
         }
 
@@ -341,6 +370,7 @@ impl SnesDebug {
                     "irq" => Some(Self::Irq),
                     "spc" => Some(Self::Spc),
                     "dsp" => Some(Self::Dsp),
+                    "sa1" => Some(Self::Sa1),
                     "gsu" => Some(Self::Gsu),
                     _ => None,
                 }
@@ -354,12 +384,21 @@ impl SnesDebug {
             ]
         }
 
+        fn sa1_state(sa1: &crate::sa1::Sa1) -> [u32; 3] {
+            [
+                (u32::from(sa1.cpu.program_bank) << 16) | u32::from(sa1.cpu.pc),
+                (u32::from(sa1.cpu.acc) << 16) | u32::from(sa1.cpu.index_x),
+                (u32::from(sa1.cpu.index_y) << 16) | u32::from(sa1.cpu.stack_pointer),
+            ]
+        }
+
         enum Watch {
             Scanline(u64),
             Nmi(u64),
             Irq(u64),
             Spc([u32; 2]),
             Dsp(u64),
+            Sa1([u32; 3]),
             Gsu,
         }
 
@@ -371,6 +410,7 @@ impl SnesDebug {
             Target::Irq => Watch::Irq(core.cpu.interrupts.irq),
             Target::Spc => Watch::Spc(spc_state(&core.apu.spc700)),
             Target::Dsp => Watch::Dsp(core.apu.samples_generated()),
+            Target::Sa1 => Watch::Sa1(sa1_state(&core.sa1)),
             Target::Gsu => Watch::Gsu,
         };
 
@@ -380,9 +420,13 @@ impl SnesDebug {
             Watch::Irq(count) => core.cpu.interrupts.irq != *count,
             Watch::Spc(state) => spc_state(&core.apu.spc700) != *state,
             Watch::Dsp(count) => core.apu.samples_generated() != *count,
+            Watch::Sa1(state) => sa1_state(&core.sa1) != *state,
             Watch::Gsu => core.superfx.sfr.go(),
         };
 
+        if matches!(target, Target::Sa1) && crate::sa1::debug_step(&mut self.core) {
+            return RunOutcome::Breakpoint;
+        }
         if matches!(target, Target::Gsu) && crate::superfx::debug_step(&mut self.core) {
             return RunOutcome::Breakpoint;
         }
@@ -410,6 +454,7 @@ impl SnesDebug {
     }
 
     pub(super) fn run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome {
+        let sa1_stops = Sa1Stops::new(breakpoints);
         let watch = breakpoints
             .iter()
             .any(|m| matches!(m.kind, BreakpointKind::Read | BreakpointKind::Write));
@@ -424,7 +469,8 @@ impl SnesDebug {
         if watch {
             let mut access = MemoryAccess::default();
             while self.core.scheduler.cycles() < frame_end {
-                let step_access = self.step_captured();
+                let step_access =
+                    self.captured(TrackMode::Full, |debug| debug.step_stopping_at(&sa1_stops));
                 access.merge(&step_access);
 
                 let breakpoint =
@@ -459,7 +505,7 @@ impl SnesDebug {
             }
 
             while debug.core.scheduler.cycles() < frame_end {
-                debug.core.step();
+                debug.step_stopping_at(&sa1_stops);
 
                 let breakpoint = debug.execute_hit(breakpoints);
                 let event = debug.scan_events();

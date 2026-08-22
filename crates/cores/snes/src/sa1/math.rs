@@ -64,6 +64,16 @@ impl Math {
         }
     }
 
+    #[cfg(feature = "debug")]
+    pub(super) fn result(&self) -> u64 {
+        self.result
+    }
+
+    #[cfg(feature = "debug")]
+    pub(super) fn operands(&self) -> (u16, u16) {
+        (self.parameter_a, self.parameter_b)
+    }
+
     pub(super) fn is_write_only(reg: u16) -> bool {
         reg == ArithmeticControl::ADDRESS
             || (ARITHMETIC_PARAMETER_A_START..=ARITHMETIC_PARAMETER_B_END).contains(&reg)

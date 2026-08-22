@@ -1,5 +1,51 @@
 use super::*;
 
+pub(super) fn sa1_manifest(manifest: &mut ComponentManifest) {
+    use sa1::{CPU, STATE_ID, WORKSPACE};
+
+    manifest
+        .workspaces
+        .push(WorkspaceDescriptor::new(WORKSPACE, "SA-1", WorkspaceIcon::Chip).mmio_group("SA-1"));
+
+    let disasm_id = format!("{CPU}.disasm");
+    let callstack_id = format!("{CPU}.callstack");
+
+    for id in [CPU, disasm_id.as_str(), callstack_id.as_str()] {
+        manifest.untag(id, CPU_WORKSPACE);
+    }
+
+    manifest.insert_before(
+        PanelKind::Mmio,
+        PanelDescriptor::new(
+            STATE_ID,
+            "SA-1 State",
+            PanelKind::Structured,
+            DockLocation::Right,
+            RefreshPolicy::OnPause,
+        )
+        .tag(WORKSPACE),
+    );
+
+    for id in [
+        CPU,
+        disasm_id.as_str(),
+        callstack_id.as_str(),
+        "breakpoints",
+        "memory",
+        "log",
+    ] {
+        manifest.tag(id, WORKSPACE);
+    }
+
+    manifest.compose_in(
+        WORKSPACE,
+        disasm_id,
+        callstack_id,
+        PanelGroupLayout::CompanionRail,
+    );
+    manifest.compose_in(WORKSPACE, "memory", "mmio", PanelGroupLayout::CompanionRail);
+}
+
 pub(super) fn superfx_manifest(manifest: &mut ComponentManifest) {
     use superfx::{CACHE_ID, CPU_GSU, STATE_ID, WORKSPACE};
 
@@ -12,9 +58,7 @@ pub(super) fn superfx_manifest(manifest: &mut ComponentManifest) {
     let disasm_id = format!("{CPU_GSU}.disasm");
 
     for id in [CPU_GSU, disasm_id.as_str()] {
-        if let Some(panel) = manifest.panels.iter_mut().find(|p| &*p.id == id) {
-            panel.workspaces.retain(|w| &**w != CPU_WORKSPACE);
-        }
+        manifest.untag(id, CPU_WORKSPACE);
     }
 
     manifest.insert_before(
@@ -207,8 +251,6 @@ impl SnesDebug {
             .tag(SOUND_WORKSPACE),
         );
 
-        manifest.workspace_last(debugger_model::SCRIPT_WORKSPACE);
-
         manifest.relocate_after("framebuffer", PanelKind::Controls, DockLocation::Left);
         manifest.insert_after(
             PanelKind::Framebuffer,
@@ -264,6 +306,10 @@ impl SnesDebug {
         if self.has_gsu() {
             self::superfx_manifest(&mut manifest);
         }
+        if self.has_sa1() {
+            self::sa1_manifest(&mut manifest);
+        }
+        manifest.workspace_last(debugger_model::SCRIPT_WORKSPACE);
 
         manifest
     }

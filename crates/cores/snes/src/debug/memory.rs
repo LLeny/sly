@@ -22,6 +22,7 @@ impl SnesDebug {
                 .copied()
                 .unwrap_or(0),
             "bus" => self.core.peek8(Address::from_24bit(addr & 0x00FF_FFFF)),
+            "sa1" => sa1::bus_peek(&self.core, Address::from_24bit(addr & 0x00FF_FFFF)),
             "spc" => self.core.apu.peek(addr as u16),
             "gsu" => superfx::bus_peek(&self.core, (addr >> 16) as u8 & 0x7F, addr as u16),
             "gsucache" => self.core.superfx.cache.data[addr as usize & 0x1FF],
@@ -37,7 +38,7 @@ impl SnesDebug {
             "rom" => Some((MemKind::Rom, addr)),
             "bus" => self.core.classify(Address::from_24bit(addr & 0x00FF_FFFF)),
             "spc" => Some((MemKind::Spc, addr)),
-            "gsu" | "gsucache" => None,
+            "sa1" | "gsu" | "gsucache" => None,
             _ => Some((MemKind::Io, addr)),
         }
     }
@@ -54,6 +55,8 @@ impl SnesDebug {
         if !self.core.mmu.cartridge.sram.is_empty() {
             let name = if self.has_gsu() {
                 "Game Pak RAM"
+            } else if self.has_sa1() {
+                "SA-1 BW-RAM"
             } else {
                 "Cartridge SRAM"
             };
@@ -66,6 +69,7 @@ impl SnesDebug {
             let iram_size = u32::try_from(crate::sa1::IRAM_SIZE)
                 .expect("SA-1 I-RAM size must fit in the debugger address space");
             regions.insert(1, MemoryRegion::new("iram", "SA-1 I-RAM", 0, iram_size));
+            regions.push(MemoryRegion::new("sa1", "SA-1 Bus", 0, BUS_SIZE));
         }
         if self.has_gsu() {
             regions.push(MemoryRegion::new("gsu", "GSU Bus", 0, 0x80_0000));
@@ -117,7 +121,7 @@ impl SnesDebug {
                 }
                 bytes.len()
             }
-            "gsu" | "gsucache" => 0,
+            "sa1" | "gsu" | "gsucache" => 0,
             "bus" => {
                 for (ix, byte) in bytes.iter().enumerate() {
                     let addr = addr.wrapping_add(ix as u32) & 0x00FF_FFFF;
@@ -141,7 +145,7 @@ impl SnesDebug {
             "iram" => format!("{addr:03X}"),
             "sram" => format!("{addr:06X}"),
             "rom" => format!("{addr:06X}"),
-            "bus" => format!("{:02X}:{:04X}", (addr >> 16) & 0xFF, addr & 0xFFFF),
+            "bus" | "sa1" => format!("{:02X}:{:04X}", (addr >> 16) & 0xFF, addr & 0xFFFF),
             "spc" => format!("{:04X}", addr & 0xFFFF),
             "gsu" => format!("{:02X}:{:04X}", (addr >> 16) & 0x7F, addr & 0xFFFF),
             "gsucache" => format!("{:03X}", addr & 0x1FF),

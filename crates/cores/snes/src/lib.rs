@@ -226,10 +226,14 @@ impl<M: MemoryMap> Snes<M> {
     }
 
     pub fn step(&mut self) {
+        self.step_until_sa1(|_| false);
+    }
+
+    pub(crate) fn step_until_sa1(&mut self, stop: impl FnMut(&Cpu) -> bool) {
         cpu::step(self);
         self.bus.sync();
         let clocks = self.mmu.clocks;
-        sa1::run_until(&mut self.bus, clocks);
+        sa1::run_until_if(&mut self.bus, clocks, stop);
     }
 
     pub fn run_frame(&mut self) {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::cpu::CpuPeek;
 
 pub(super) const MAX_VIEW_FRAMES: usize = 64;
 
@@ -69,21 +70,25 @@ pub(super) fn cpu_view(cpu: &crate::Cpu) -> CpuView {
     }
 }
 
-pub(super) fn disasm_line_at(snes: &Snes, addr: u16, with_ea: bool) -> (DisasmLine, u8) {
-    let bank = snes.cpu.program_bank;
-    let d = snes.disassemble_at(addr);
+pub(super) fn disasm_line_on<B: CpuPeek>(
+    cpu: &crate::Cpu,
+    bus: &B,
+    addr: u16,
+    ea: Option<Address>,
+) -> (DisasmLine, u8) {
+    let bank = cpu.program_bank;
+    let d = crate::cpu::disasm::disassemble(cpu, bus, addr);
     let len = d.length.max(1);
     let text = strip_symbol_sigils(&d.text, &SNES_SYNTAX);
     let tokens = tokenize(&text, self::mnemonic_kind(d.class), &SNES_SYNTAX);
-    let ea = with_ea
-        .then(|| crate::cpu::effective_address(snes, addr))
-        .flatten();
     let note = self::disasm_note(&tokens, &d, bank, ea);
 
     let line = DisasmLine::new(
         addr as u32,
         format!("{bank:02X}:{addr:04X}"),
-        self::read_bytes(snes, bank, addr, len),
+        self::format_bytes(len, |offset| {
+            bus.peek8(Address::new(bank, addr.wrapping_add(offset)))
+        }),
         &*text,
         tokens,
     )
@@ -94,17 +99,55 @@ pub(super) fn disasm_line_at(snes: &Snes, addr: u16, with_ea: bool) -> (DisasmLi
     (line, len)
 }
 
-pub(super) fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
+pub(super) fn disasm_line_at(snes: &Snes, addr: u16, with_ea: bool) -> (DisasmLine, u8) {
+    let ea = with_ea
+        .then(|| crate::cpu::effective_address(snes, addr))
+        .flatten();
+
+    self::disasm_line_on(&snes.cpu, &snes.bus, addr, ea)
+}
+
+pub(super) fn disasm_view_on<B: CpuPeek>(
+    cpu: &crate::Cpu,
+    bus: &B,
+    base: u16,
+    count: usize,
+) -> Vec<DisasmLine> {
     let mut addr = base;
     let mut lines = Vec::with_capacity(count);
 
     for _ in 0..count {
-        let (line, len) = self::disasm_line_at(snes, addr, false);
+        let (line, len) = self::disasm_line_on(cpu, bus, addr, None);
         lines.push(line);
         addr = addr.wrapping_add(len as u16);
     }
 
     lines
+}
+
+pub(super) fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
+    self::disasm_view_on(&snes.cpu, &snes.bus, base, count)
+}
+
+pub(super) fn fingerprint_65c816<B: CpuPeek>(
+    cpu: &crate::Cpu,
+    bus: &B,
+    base: u16,
+    count: usize,
+) -> u64 {
+    use std::hash::{DefaultHasher, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    let mut addr = base;
+
+    hasher.write_u8(cpu.program_bank);
+    hasher.write_usize(crate::cpu::mode_selectors(cpu));
+    for _ in 0..count * 4 {
+        hasher.write_u8(bus.peek8(Address::new(cpu.program_bank, addr)));
+        addr = addr.wrapping_add(1);
+    }
+
+    hasher.finish()
 }
 
 pub(super) fn spc_cpu_view(spc: &spc700::Spc700) -> CpuView {
@@ -186,18 +229,19 @@ pub(super) const SPC_SYNTAX: SyntaxSpec = SyntaxSpec {
     symbols: crate::apu::is_symbol,
 };
 
-pub(super) fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
-    self::format_bytes(len, |offset| {
-        snes.peek8(Address::new(bank, addr.wrapping_add(offset)))
-    })
-}
-
 pub(super) fn field(label: &str, value: String) -> debugger_model::Row {
     debugger_model::Row::Field(debugger_model::Field {
         label: label.into(),
         value: value.into(),
         accent: false,
     })
+}
+
+pub(super) fn flags_row(note: &str, flags: Vec<FlagView>) -> debugger_model::Row {
+    debugger_model::Row::Flags {
+        flags,
+        note: Some((note.into(), debugger_model::Tone::Normal)),
+    }
 }
 
 pub(super) fn section(title: &str, rows: Vec<debugger_model::Row>) -> debugger_model::Section {
@@ -280,33 +324,28 @@ impl SnesDebug {
     pub(super) fn fingerprint(&self, cpu: &CpuId, base: u32, count: usize) -> Option<u64> {
         use std::hash::{DefaultHasher, Hasher};
 
-        let mut hasher = DefaultHasher::new();
-        let mut addr = base as u16;
-
-        match cpu.as_str() {
-            superfx::CPU_GSU => return Some(superfx::fingerprint(&self.core, base as u16, count)),
+        let base = base as u16;
+        let fingerprint = match cpu.as_str() {
+            sa1::CPU => sa1::fingerprint(&self.core, base, count),
+            superfx::CPU_GSU => superfx::fingerprint(&self.core, base, count),
             CPU_SPC => {
+                let mut hasher = DefaultHasher::new();
+                let mut addr = base;
                 for _ in 0..count * 3 {
                     hasher.write_u8(self.core.apu.peek(addr));
                     addr = addr.wrapping_add(1);
                 }
+                hasher.finish()
             }
-            _ => {
-                let bank = self.core.cpu.program_bank;
-                hasher.write_u8(bank);
-                hasher.write_usize(crate::cpu::mode_selectors(&self.core.cpu));
-                for _ in 0..count * 4 {
-                    hasher.write_u8(self.core.peek8(Address::new(bank, addr)));
-                    addr = addr.wrapping_add(1);
-                }
-            }
-        }
+            _ => self::fingerprint_65c816(&self.core.cpu, &self.core.bus, base, count),
+        };
 
-        Some(hasher.finish())
+        Some(fingerprint)
     }
 
     pub(super) fn set_register(&mut self, cpu: &CpuId, name: &str, value: u32) -> bool {
         match cpu.as_str() {
+            sa1::CPU => self::set_65c816_register(&mut self.core.sa1.cpu, name, value),
             CPU_SPC => {
                 let spc = &mut self.core.apu.spc700;
                 match name.to_ascii_uppercase().as_str() {
@@ -327,22 +366,23 @@ impl SnesDebug {
                 }
                 false
             }
-            _ => {
-                let cpu = &mut self.core.cpu;
-                match name.to_ascii_uppercase().as_str() {
-                    "A" => cpu.acc = value as u16,
-                    "X" => cpu.index_x = value as u16,
-                    "Y" => cpu.index_y = value as u16,
-                    "S" => cpu.stack_pointer = value as u16,
-                    "DB" => cpu.data_bank = value as u8,
-                    "DP" => cpu.direct_page = value as u16,
-                    "PB" => cpu.program_bank = value as u8,
-                    "P" => cpu.flags = crate::cpu::Flags::from_raw(value as u8),
-                    "PC" => cpu.pc = value as u16,
-                    _ => return false,
-                }
-                true
-            }
+            _ => self::set_65c816_register(&mut self.core.cpu, name, value),
         }
     }
+}
+
+fn set_65c816_register(cpu: &mut crate::Cpu, name: &str, value: u32) -> bool {
+    match name.to_ascii_uppercase().as_str() {
+        "A" => cpu.acc = value as u16,
+        "X" => cpu.index_x = value as u16,
+        "Y" => cpu.index_y = value as u16,
+        "S" => cpu.stack_pointer = value as u16,
+        "DB" => cpu.data_bank = value as u8,
+        "DP" => cpu.direct_page = value as u16,
+        "PB" => cpu.program_bank = value as u8,
+        "P" => cpu.flags = crate::cpu::Flags::from_raw(value as u8),
+        "PC" => cpu.pc = value as u16,
+        _ => return false,
+    }
+    true
 }

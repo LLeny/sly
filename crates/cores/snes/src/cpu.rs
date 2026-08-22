@@ -14,22 +14,8 @@ use crate::{Bus, Snes};
 use interpreter::Interpreter;
 use serde::{Deserialize, Serialize};
 
-pub(crate) trait CpuBus {
-    fn read8(&mut self, addr: Address) -> u8;
-    fn write8(&mut self, addr: Address, value: u8);
+pub(crate) trait CpuPeek {
     fn peek8(&self, addr: Address) -> u8;
-
-    fn read16(&mut self, addr: Address) -> u16 {
-        let lo = self.read8(addr) as u16;
-        let hi = self.read8(addr.wrapping_add(1)) as u16;
-        lo | (hi << 8)
-    }
-
-    fn read24(&mut self, addr: Address) -> u32 {
-        let lo = self.read16(addr) as u32;
-        let hi = self.read8(addr.wrapping_add(2)) as u32;
-        lo | (hi << 16)
-    }
 
     fn peek16(&self, addr: Address) -> u16 {
         let lo = self.peek8(addr) as u16;
@@ -44,6 +30,29 @@ pub(crate) trait CpuBus {
     }
 }
 
+impl<M: MemoryMap> CpuPeek for Bus<M> {
+    fn peek8(&self, addr: Address) -> u8 {
+        Bus::peek8(self, addr)
+    }
+}
+
+pub(crate) trait CpuBus: CpuPeek {
+    fn read8(&mut self, addr: Address) -> u8;
+    fn write8(&mut self, addr: Address, value: u8);
+
+    fn read16(&mut self, addr: Address) -> u16 {
+        let lo = self.read8(addr) as u16;
+        let hi = self.read8(addr.wrapping_add(1)) as u16;
+        lo | (hi << 8)
+    }
+
+    fn read24(&mut self, addr: Address) -> u32 {
+        let lo = self.read16(addr) as u32;
+        let hi = self.read8(addr.wrapping_add(2)) as u32;
+        lo | (hi << 16)
+    }
+}
+
 impl<M: MemoryMap> CpuBus for Bus<M> {
     fn read8(&mut self, addr: Address) -> u8 {
         Bus::read8(self, addr)
@@ -51,10 +60,6 @@ impl<M: MemoryMap> CpuBus for Bus<M> {
 
     fn write8(&mut self, addr: Address, value: u8) {
         Bus::write8(self, addr, value);
-    }
-
-    fn peek8(&self, addr: Address) -> u8 {
-        Bus::peek8(self, addr)
     }
 }
 
@@ -164,13 +169,13 @@ impl Cpu {
     }
 }
 
-pub(crate) struct CodeReader<'a, B: CpuBus> {
+pub(crate) struct CodeReader<'a, B: CpuPeek> {
     pub cpu: &'a Cpu,
     pub bus: &'a B,
     pub bank: u8,
 }
 
-impl<B: CpuBus> decoder::DisasmCtx for CodeReader<'_, B> {
+impl<B: CpuPeek> decoder::DisasmCtx for CodeReader<'_, B> {
     fn read_u8(&self, addr: u64) -> u8 {
         self.bus.peek8(Address::new(self.bank, addr as u16))
     }

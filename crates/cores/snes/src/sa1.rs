@@ -16,7 +16,7 @@ use self::regs::{
 };
 use crate::Cartridge;
 use crate::cartridge::Coprocessor;
-use crate::cpu::{Cpu, CpuBus};
+use crate::cpu::{Cpu, CpuBus, CpuPeek};
 use crate::mmio::{Address, AddressSpace, CartRegion, MemoryMap, OPEN_BUS};
 
 pub const IRAM_SIZE: usize = 0x800;
@@ -164,14 +164,31 @@ impl MemoryControl {
         self.bwram_protected_area.raw()
     }
 
-    pub(crate) fn bwram_snes_write_allowed(&self, offset: usize) -> bool {
+    pub(crate) fn bwram_protected_bytes(&self) -> usize {
+        0x100usize << self.bwram_protected_area.protected_size_exponent()
+    }
+
+    #[cfg(feature = "debug")]
+    pub(crate) fn bwram_snes_write_override(&self) -> bool {
         self.bwram_snes_write_enable.write_enable()
-            || offset >= 0x100usize << self.bwram_protected_area.protected_size_exponent()
+    }
+
+    #[cfg(feature = "debug")]
+    pub(crate) fn bwram_sa1_write_override(&self) -> bool {
+        self.bwram_sa1_write_enable.write_enable()
+    }
+
+    #[cfg(feature = "debug")]
+    pub(crate) fn bwram_sa1_bitmap_block(&self) -> u8 {
+        self.bwram_sa1_mapping.bwram_block()
+    }
+
+    pub(crate) fn bwram_snes_write_allowed(&self, offset: usize) -> bool {
+        self.bwram_snes_write_enable.write_enable() || offset >= self.bwram_protected_bytes()
     }
 
     fn bwram_sa1_write_allowed(&self, offset: usize) -> bool {
-        self.bwram_sa1_write_enable.write_enable()
-            || offset >= 0x100usize << self.bwram_protected_area.protected_size_exponent()
+        self.bwram_sa1_write_enable.write_enable() || offset >= self.bwram_protected_bytes()
     }
 }
 
@@ -307,6 +324,68 @@ pub struct Sa1 {
 }
 
 impl Sa1 {
+    #[cfg(feature = "debug")]
+    pub(crate) fn peek8(&self, cartridge: &Cartridge, addr: Address) -> u8 {
+        match map::cpu_space(cartridge, &self.memory, addr.bank(), addr.address()) {
+            AddressSpace::Iram(index) => self.iram[index],
+            AddressSpace::Cart(CartRegion::Ram, index) => cartridge.sram_read(index),
+            AddressSpace::Rom(index) | AddressSpace::Cart(CartRegion::Rom, index) => {
+                cartridge.rom[index]
+            }
+            AddressSpace::Io(reg) => self.peek_register(reg),
+            _ => OPEN_BUS,
+        }
+    }
+
+    #[cfg(feature = "debug")]
+    pub(crate) fn interrupt_enable(&self) -> Sa1InterruptBits {
+        self.interrupts.enable
+    }
+
+    #[cfg(feature = "debug")]
+    pub(crate) fn arithmetic_result(&self) -> u64 {
+        self.math.result()
+    }
+
+    #[cfg(feature = "debug")]
+    pub(crate) fn arithmetic_operands(&self) -> (u16, u16) {
+        self.math.operands()
+    }
+
+    #[cfg(feature = "debug")]
+    pub(crate) fn peek_register(&self, reg: u16) -> u8 {
+        if let Some(value) = self.math.peek(reg) {
+            return value;
+        }
+
+        match reg {
+            reg if reg == Sa1CpuControl::ADDRESS => self.ccnt.raw(),
+            regs::SIE => self.sie.raw(),
+            regs::SIC => 0,
+            VECTOR_START..=regs::VECTOR_END => self::vector_byte(&self.vectors, VECTOR_START, reg),
+            reg if reg == SnesCpuControl::ADDRESS => self.scnt.raw(),
+            CIE => self.interrupts.enable.raw(),
+            CIC => 0,
+            SNES_VECTOR_START..=SNES_VECTOR_END => {
+                self::vector_byte(&self.snes_vectors, SNES_VECTOR_START, reg)
+            }
+            ROM_BANK_START..=regs::ROM_BANK_END => self.memory.rom_bank_raw(reg),
+            regs::BMAPS => self.memory.bwram_snes_block_raw(),
+            BMAP => self.memory.bwram_sa1_mapping_raw(),
+            regs::SBWE => self.memory.bwram_snes_write_enable_raw(),
+            CBWE => self.memory.bwram_sa1_write_enable_raw(),
+            regs::BWPA => self.memory.bwram_protected_area_raw(),
+            regs::SIWP => self.siwp.raw(),
+            CIWP => self.ciwp.raw(),
+            reg if reg == CharacterConversionDmaParameters::ADDRESS => self.cdma.raw(),
+            reg if reg == SnesFlags::ADDRESS => self.sfr().raw(),
+            reg if reg == Sa1Flags::ADDRESS => {
+                self.interrupts.flags(self.ccnt.message_to_sa1()).raw()
+            }
+            _ => OPEN_BUS,
+        }
+    }
+
     pub(crate) fn set_ccnt(&mut self, value: u8, clocks: u64) {
         let reset = self.ccnt.reset();
         let control = Sa1CpuControl::from_raw(value);
@@ -608,7 +687,9 @@ impl CpuBus for Bus<'_> {
             ),
         }
     }
+}
 
+impl CpuPeek for Bus<'_> {
     fn peek8(&self, addr: Address) -> u8 {
         match self.space(addr) {
             AddressSpace::Iram(index) => self.iram[index],
@@ -622,49 +703,73 @@ impl CpuBus for Bus<'_> {
     }
 }
 
-pub(crate) fn run_until<M: MemoryMap>(snes: &mut crate::Bus<M>, target: u64) {
+fn halted(sa1: &Sa1) -> bool {
+    sa1.ccnt.reset() || sa1.ccnt.wait() || sa1.cpu.execution == crate::cpu::ExecutionState::Stopped
+}
+
+fn execute_instruction<M: MemoryMap>(snes: &mut crate::Bus<M>, master_clock_hz: u64) -> bool {
+    let interrupt_vector = snes.sa1.take_interrupt_vector();
+    let waiting =
+        interrupt_vector.is_none() && snes.sa1.cpu.execution == crate::cpu::ExecutionState::Waiting;
+    let irq_wakes_waiting_cpu = waiting && snes.sa1.interrupts.irq_delivery_pending();
+
+    if waiting && !irq_wakes_waiting_cpu {
+        return false;
+    }
+
+    let cycles = {
+        let (cpu, mut bus) = snes.sa1.cpu_and_bus(&mut snes.mmu.cartridge);
+        if let Some(vector) = interrupt_vector {
+            crate::cpu::service_interrupt_at(cpu, &mut bus, vector)
+        } else {
+            if irq_wakes_waiting_cpu {
+                cpu.execution = crate::cpu::ExecutionState::Running;
+            }
+            crate::cpu::step_on_bus(cpu, &mut bus)
+        }
+    };
+    snes.sa1.advance_clocks(cycles, master_clock_hz);
+    true
+}
+
+pub(crate) fn run_until_if<M: MemoryMap>(
+    snes: &mut crate::Bus<M>,
+    target: u64,
+    mut stop: impl FnMut(&Cpu) -> bool,
+) {
     if snes.mmu.cartridge.coprocessor() != Coprocessor::Sa1 {
         return;
     }
 
-    if snes.sa1.ccnt.reset()
-        || snes.sa1.ccnt.wait()
-        || snes.sa1.cpu.execution == crate::cpu::ExecutionState::Stopped
-    {
+    if self::halted(&snes.sa1) {
         snes.sa1.clocks = target;
         return;
     }
 
     let master_clock_hz = snes.scheduler.master_clock_hz();
     while snes.sa1.clocks < target {
-        let interrupt_vector = snes.sa1.take_interrupt_vector();
-        let irq_wakes_waiting_cpu = interrupt_vector.is_none()
-            && snes.sa1.cpu.execution == crate::cpu::ExecutionState::Waiting
-            && snes.sa1.interrupts.irq_delivery_pending();
-
-        if interrupt_vector.is_none()
-            && snes.sa1.cpu.execution == crate::cpu::ExecutionState::Waiting
-            && !irq_wakes_waiting_cpu
-        {
+        if !self::execute_instruction(snes, master_clock_hz) {
             snes.sa1.clocks = target;
             break;
         }
-
-        let cycles = {
-            let (cpu, mut bus) = snes.sa1.cpu_and_bus(&mut snes.mmu.cartridge);
-            if let Some(vector) = interrupt_vector {
-                crate::cpu::service_interrupt_at(cpu, &mut bus, vector)
-            } else {
-                if irq_wakes_waiting_cpu {
-                    cpu.execution = crate::cpu::ExecutionState::Running;
-                }
-                crate::cpu::step_on_bus(cpu, &mut bus)
-            }
-        };
-        snes.sa1.advance_clocks(cycles, master_clock_hz);
+        if stop(&snes.sa1.cpu) {
+            break;
+        }
     }
 
     self::update_snes_irq(snes);
+}
+
+#[cfg(feature = "debug")]
+pub(crate) fn debug_step<M: MemoryMap>(snes: &mut crate::Bus<M>) -> bool {
+    if snes.mmu.cartridge.coprocessor() != Coprocessor::Sa1 || self::halted(&snes.sa1) {
+        return false;
+    }
+
+    let master_clock_hz = snes.scheduler.master_clock_hz();
+    let stepped = self::execute_instruction(snes, master_clock_hz);
+    self::update_snes_irq(snes);
+    stepped
 }
 
 pub(crate) fn update_snes_irq<M: MemoryMap>(snes: &mut crate::Bus<M>) {

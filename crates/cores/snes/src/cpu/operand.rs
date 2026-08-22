@@ -1,5 +1,5 @@
 use super::decoder::{Form, Instruction, Mnemonic};
-use super::{CodeReader, CpuBus};
+use super::{CodeReader, CpuPeek};
 
 #[derive(Clone, Copy)]
 pub(crate) enum Arg {
@@ -22,7 +22,7 @@ impl Arg {
     }
 }
 
-pub(crate) fn fetch_arg<B: CpuBus>(
+pub(crate) fn fetch_arg<B: CpuPeek>(
     inst: Instruction,
     mnemonic: Mnemonic,
     form: Form,

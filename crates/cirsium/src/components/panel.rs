@@ -165,20 +165,36 @@ impl RenderOnce for Panel {
             icon::CHEVRON_DOWN
         };
 
-        let mut left = div().flex().items_center().gap_2();
+        let mut left = div()
+            .flex()
+            .flex_1()
+            .items_center()
+            .gap_2()
+            .min_w(px(0.))
+            .overflow_hidden();
         if let Some(glyph) = self.glyph.clone() {
-            left = left.child(svg().path(glyph).size(px(12.)).text_color(t.text_muted));
+            left = left.child(
+                svg()
+                    .flex_none()
+                    .path(glyph)
+                    .size(px(12.))
+                    .text_color(t.text_muted),
+            );
         }
 
         left = left.child(
             div()
+                .flex_1()
+                .min_w(px(0.))
                 .text_xs()
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(t.text_secondary)
+                .whitespace_nowrap()
+                .truncate()
                 .child(self.title.to_uppercase()),
         );
 
-        let mut right = div().flex().items_center().gap_2();
+        let mut right = div().flex().flex_none().items_center().gap_2();
         if let Some(action) = self.header_action {
             right = right.child(action);
         }

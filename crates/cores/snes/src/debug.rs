@@ -25,6 +25,7 @@ mod manifest;
 mod memory;
 mod registers;
 mod run;
+mod sa1;
 mod superfx;
 mod video;
 
@@ -183,12 +184,16 @@ impl DebugCore for SnesDebug {
         if self.has_gsu() {
             cpus.push(superfx::descriptor());
         }
+        if self.has_sa1() {
+            cpus.push(sa1::descriptor());
+        }
         cpus
     }
 
     fn pc(&self, cpu: &CpuId) -> u32 {
         match cpu.as_str() {
             CPU_SPC => self.core.apu.spc700.pc as u32,
+            sa1::CPU => self.core.sa1.cpu.pc as u32,
             superfx::CPU_GSU => superfx::pc(&self.core.superfx) as u32,
             _ => self.core.cpu.pc as u32,
         }
@@ -197,6 +202,7 @@ impl DebugCore for SnesDebug {
     fn set_pc(&mut self, cpu: &CpuId, addr: u32) {
         match cpu.as_str() {
             CPU_SPC => self.core.apu.spc700.pc = addr as u16,
+            sa1::CPU => self.core.sa1.cpu.pc = addr as u16,
             superfx::CPU_GSU => superfx::set_pc(&mut self.core, addr as u16),
             _ => self.core.cpu.pc = addr as u16,
         }
@@ -218,12 +224,16 @@ impl DebugCore for SnesDebug {
         if self.has_gsu() {
             targets.push(StepTarget::new("gsu", "GSU"));
         }
+        if self.has_sa1() {
+            targets.push(StepTarget::new("sa1", "SA-1"));
+        }
         targets
     }
 
     fn cpu_view(&self, cpu: &CpuId) -> CpuView {
         match cpu.as_str() {
             CPU_SPC => self::spc_cpu_view(&self.core.apu.spc700),
+            sa1::CPU => sa1::cpu_view(&self.core),
             superfx::CPU_GSU => superfx::cpu_view(&self.core.superfx),
             _ => self::cpu_view(&self.core.cpu),
         }
@@ -232,6 +242,7 @@ impl DebugCore for SnesDebug {
     fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> Vec<DisasmLine> {
         match cpu.as_str() {
             CPU_SPC => self::spc_disasm_view(&self.core.apu, base as u16, count),
+            sa1::CPU => sa1::disasm_view(&self.core, base as u16, count),
             superfx::CPU_GSU => superfx::disasm_view(&self.core, base as u16, count),
             _ => self::disasm_view(&self.core, base as u16, count),
         }
@@ -239,6 +250,9 @@ impl DebugCore for SnesDebug {
 
     fn disassemble_one(&self, cpu: &CpuId, addr: u32) -> Option<DisasmLine> {
         match cpu.as_str() {
+            sa1::CPU => sa1::disasm_view(&self.core, addr as u16, 1)
+                .into_iter()
+                .next(),
             superfx::CPU_GSU => superfx::disasm_view(&self.core, addr as u16, 1)
                 .into_iter()
                 .next(),
@@ -251,6 +265,12 @@ impl DebugCore for SnesDebug {
 
     fn call_stack(&self, cpu: &CpuId) -> CallStackView {
         match cpu.as_str() {
+            sa1::CPU => self::call_stack_view(
+                &self.core.sa1.cpu.call_stack,
+                Address::new(self.core.sa1.cpu.program_bank, self.core.sa1.cpu.pc).as_24bit(),
+                |a| self.format_address("sa1", a),
+                |_| String::new(),
+            ),
             superfx::CPU_GSU => CallStackView::default(),
             CPU_SPC => self::call_stack_view(
                 &self.core.apu.call_stack,
@@ -341,6 +361,7 @@ impl DebugCore for SnesDebug {
         match id {
             dsp::REGISTERS_ID => dsp::registers_view(dsp),
             dsp::INSPECTOR_ID => dsp::inspector_view(dsp, selection),
+            sa1::STATE_ID => sa1::state_view(&self.core),
             superfx::STATE_ID => superfx::state_view(&self.core),
             _ => StructuredView::default(),
         }

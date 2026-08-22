@@ -6,18 +6,23 @@ pub(super) fn mmio_component(addr: u16) -> (u8, &'static str) {
         0x2140..=0x2143 => (1, "APU"),
         0x420B..=0x420C | 0x4300..=0x43FF => (2, "DMA"),
         0x4200..=0x42FF => (3, "CPU"),
-        0x3000..=0x34FF => (4, "GSU"),
+        0x2200..=0x230E => (4, "SA-1"),
+        0x3000..=0x34FF => (5, "GSU"),
         _ => (9, "Other"),
     }
 }
 
-pub(super) fn read_mmio(core: &Snes, addr: u16, bits: u8) -> u32 {
-    let lo = core.peek_mmio(addr) as u32;
+fn widen(addr: u16, bits: u8, mut peek: impl FnMut(u16) -> u8) -> u32 {
+    let lo = peek(addr) as u32;
     if bits > 8 {
-        lo | (core.peek_mmio(addr.wrapping_add(1)) as u32) << 8
+        lo | (peek(addr.wrapping_add(1)) as u32) << 8
     } else {
         lo
     }
+}
+
+pub(super) fn read_mmio(core: &Snes, addr: u16, bits: u8) -> u32 {
+    self::widen(addr, bits, |addr| core.peek_mmio(addr))
 }
 
 pub(super) fn mmio_field_views(
@@ -179,16 +184,25 @@ pub(super) fn dma_view(core: &Snes) -> DmaView {
 
 pub(super) fn mmio_view(core: &Snes) -> MmioView {
     let has_gsu = core.mmu.cartridge.coprocessor() == crate::cartridge::Coprocessor::SuperFx;
+    let has_sa1 = core.mmu.cartridge.coprocessor() == crate::cartridge::Coprocessor::Sa1;
 
     let mut symbols: Vec<_> = crate::mmio::symbols()
-        .filter(|s| has_gsu || self::mmio_component(s.addr).1 != "GSU")
+        .map(|symbol| (self::mmio_component(symbol.addr), symbol))
+        .filter(|((_, component), _)| match *component {
+            "GSU" => has_gsu,
+            "SA-1" => has_sa1,
+            _ => true,
+        })
         .collect();
-    symbols.sort_by_key(|s| (self::mmio_component(s.addr).0, s.addr));
+    symbols.sort_unstable_by_key(|((order, _), symbol)| (*order, symbol.addr));
 
     let mut groups: Vec<MmioGroup> = Vec::new();
-    for sym in symbols {
-        let (_, component) = self::mmio_component(sym.addr);
-        let value = self::read_mmio(core, sym.addr, sym.bits);
+    for ((_, component), sym) in symbols {
+        let value = if component == "SA-1" {
+            self::widen(sym.addr, sym.bits, |addr| core.sa1.peek_register(addr))
+        } else {
+            self::read_mmio(core, sym.addr, sym.bits)
+        };
         let reg = self::mmio_register("mmio", 4, sym, value);
 
         match groups.last_mut() {

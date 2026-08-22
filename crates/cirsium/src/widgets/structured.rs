@@ -73,7 +73,7 @@ impl RenderOnce for StructuredPanel {
 
         self.chrome
             .panel()
-            .scrollable(true)
+            .grow(true)
             .meta_opt(view.meta.clone().map(Into::into))
             .child(body)
     }

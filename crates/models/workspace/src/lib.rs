@@ -278,6 +278,16 @@ impl ComponentManifest {
         }
     }
 
+    pub fn untag(&mut self, id: &str, workspace: &str) {
+        let Some(panel) = self.panels.iter_mut().find(|p| &*p.id == id) else {
+            return;
+        };
+
+        panel.workspaces.retain(|w| &**w != workspace);
+        self.compositions
+            .retain(|c| &*c.workspace != workspace || (&*c.host != id && &*c.companion != id));
+    }
+
     /// Move the panel with the given id to `location`, re-inserting it right
     /// after the first panel of `anchor` kind (or at the end if absent).
     pub fn relocate_after(&mut self, id: &str, anchor: PanelKind, location: DockLocation) {

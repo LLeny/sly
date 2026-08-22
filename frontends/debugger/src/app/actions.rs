@@ -192,7 +192,7 @@ impl Debugger {
     pub(super) fn bp_add(&mut self, cx: &mut Context<Self>) {
         let text = self.bp_input.read(cx).content().trim().to_string();
         if let Ok(addr) = u32::from_str_radix(&text, 16) {
-            let (cpu, region) = self.pane_space(0);
+            let (cpu, region) = self.pane_space(self.workspace_pane());
             self.breakpoints
                 .add(addr, cpu, region, self.target.as_ref());
             self.bp_input.update(cx, |input, cx| input.clear(cx));
@@ -227,7 +227,7 @@ impl Debugger {
         cx: &mut Context<Self>,
     ) {
         self.memory.close_menu();
-        let cpu = self.panes[0].id.clone();
+        let (cpu, _) = self.pane_space(self.workspace_pane());
         let region: Arc<str> = self.memory.region_id().into();
         let note = self.target.annotate(start).into();
         self.breakpoints.add_labeled(
@@ -245,9 +245,26 @@ impl Debugger {
     }
 
     /// A processor's id and address space, used to tag breakpoints raised from
-    /// that pane (or pane 0 for manually-typed and memory-panel breakpoints).
+    /// that pane.
     pub(super) fn pane_space(&self, pane: usize) -> (CpuId, Arc<str>) {
         (self.panes[pane].id.clone(), self.panes[pane].space.clone())
+    }
+
+    fn workspace_pane(&self) -> usize {
+        let cpu = self
+            .registry
+            .manifest()
+            .panels
+            .iter()
+            .find_map(|panel| match &panel.kind {
+                PanelKind::Registers { cpu } if panel.visible_in(&self.workspace) => {
+                    Some(cpu.as_ref())
+                }
+                _ => None,
+            });
+
+        cpu.and_then(|cpu| self.panes.iter().position(|pane| pane.id.as_str() == cpu))
+            .unwrap_or(0)
     }
 
     pub(super) fn bp_remove(&mut self, id: usize, cx: &mut Context<Self>) {
@@ -267,7 +284,7 @@ impl Debugger {
         for pane in &mut self.panes {
             pane.disasm.set_breakpoints(marks);
         }
-        let primary = &self.panes[0].id;
+        let primary = &self.panes[self.workspace_pane()].id;
         let mem_marks = marks
             .iter()
             .filter(|m| &m.cpu == primary)
