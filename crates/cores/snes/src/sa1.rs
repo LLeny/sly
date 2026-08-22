@@ -1,14 +1,17 @@
 pub(crate) mod io;
 pub(crate) mod map;
+mod math;
 pub(crate) mod regs;
 
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
+use self::math::Math;
 use self::regs::{
-    BMAP, BwramWriteEnable, BwramWriteProtectedArea, CBWE, CIWP, CharacterConversionDmaParameters,
-    IramWriteProtection, ROM_BANK_START, Sa1BwramMapping, Sa1CpuControl, SnesBwramMapping,
-    SnesFlags, SnesInterruptBits, SuperMmcBank, VECTOR_COUNT, VECTOR_START,
+    BMAP, BwramWriteEnable, BwramWriteProtectedArea, CBWE, CIC, CIE, CIWP,
+    CharacterConversionDmaParameters, IramWriteProtection, ROM_BANK_START, Sa1BwramMapping,
+    Sa1CpuControl, Sa1Flags, Sa1InterruptBits, SnesBwramMapping, SnesCpuControl, SnesFlags,
+    SnesInterruptBits, SuperMmcBank, VECTOR_COUNT, VECTOR_START,
 };
 use crate::Cartridge;
 use crate::cartridge::Coprocessor;
@@ -149,6 +152,115 @@ impl MemoryControl {
 }
 
 #[derive(Default, Serialize, Deserialize)]
+struct InterruptState {
+    enable: Sa1InterruptBits,
+    nmi_from_snes_pending: bool,
+    dma_irq_pending: bool,
+    timer_irq_pending: bool,
+    irq_from_snes_pending: bool,
+    nmi_from_snes_delivered: bool,
+    dma_irq_delivered: bool,
+    timer_irq_delivered: bool,
+    irq_from_snes_delivered: bool,
+}
+
+impl InterruptState {
+    fn set_enable(&mut self, value: u8) {
+        let enable = Sa1InterruptBits::from_raw(value & 0xF0);
+
+        if !self.enable.nmi_from_snes() && enable.nmi_from_snes() && self.nmi_from_snes_pending {
+            self.nmi_from_snes_delivered = false;
+        }
+        if !self.enable.dma_irq() && enable.dma_irq() && self.dma_irq_pending {
+            self.dma_irq_delivered = false;
+        }
+        if !self.enable.timer_irq() && enable.timer_irq() && self.timer_irq_pending {
+            self.timer_irq_delivered = false;
+        }
+        if !self.enable.irq_from_snes() && enable.irq_from_snes() && self.irq_from_snes_pending {
+            self.irq_from_snes_delivered = false;
+        }
+
+        self.enable = enable;
+    }
+
+    fn clear(&mut self, value: u8) {
+        let clear = Sa1InterruptBits::from_raw(value);
+        if clear.nmi_from_snes() {
+            self.nmi_from_snes_pending = false;
+        }
+        if clear.dma_irq() {
+            self.dma_irq_pending = false;
+        }
+        if clear.timer_irq() {
+            self.timer_irq_pending = false;
+        }
+        if clear.irq_from_snes() {
+            self.irq_from_snes_pending = false;
+        }
+    }
+
+    fn raise_nmi_from_snes(&mut self) {
+        self.nmi_from_snes_pending = true;
+        self.nmi_from_snes_delivered = false;
+    }
+
+    fn raise_irq_from_snes(&mut self) {
+        self.irq_from_snes_pending = true;
+        self.irq_from_snes_delivered = false;
+    }
+
+    fn take_nmi(&mut self) -> bool {
+        if !self.enable.nmi_from_snes()
+            || !self.nmi_from_snes_pending
+            || self.nmi_from_snes_delivered
+        {
+            return false;
+        }
+
+        self.nmi_from_snes_delivered = true;
+        true
+    }
+
+    fn irq_delivery_pending(&self) -> bool {
+        (self.enable.timer_irq() && self.timer_irq_pending && !self.timer_irq_delivered)
+            || (self.enable.dma_irq() && self.dma_irq_pending && !self.dma_irq_delivered)
+            || (self.enable.irq_from_snes()
+                && self.irq_from_snes_pending
+                && !self.irq_from_snes_delivered)
+    }
+
+    fn take_irq(&mut self) -> bool {
+        if self.enable.timer_irq() && self.timer_irq_pending && !self.timer_irq_delivered {
+            self.timer_irq_delivered = true;
+            return true;
+        }
+        if self.enable.dma_irq() && self.dma_irq_pending && !self.dma_irq_delivered {
+            self.dma_irq_delivered = true;
+            return true;
+        }
+        if self.enable.irq_from_snes()
+            && self.irq_from_snes_pending
+            && !self.irq_from_snes_delivered
+        {
+            self.irq_from_snes_delivered = true;
+            return true;
+        }
+
+        false
+    }
+
+    fn flags(&self, message_from_snes: u8) -> Sa1Flags {
+        Sa1Flags::default()
+            .with_message_from_snes(message_from_snes)
+            .with_nmi_from_snes(self.nmi_from_snes_pending)
+            .with_dma_irq(self.dma_irq_pending)
+            .with_timer_irq(self.timer_irq_pending)
+            .with_irq_from_snes(self.irq_from_snes_pending)
+    }
+}
+
+#[derive(Default, Serialize, Deserialize)]
 pub struct Sa1 {
     pub cpu: Cpu,
     clocks: u64,
@@ -159,24 +271,26 @@ pub struct Sa1 {
     pub(crate) ciwp: IramWriteProtection,
     pub(crate) ccnt: Sa1CpuControl,
     pub(crate) sie: SnesInterruptBits,
+    scnt: SnesCpuControl,
+    interrupts: InterruptState,
     vectors: [u16; VECTOR_COUNT],
     pub(crate) memory: MemoryControl,
     pub(crate) cdma: CharacterConversionDmaParameters,
-    message_from_sa1: u8,
-    snes_nmi_vector: bool,
-    snes_irq_vector: bool,
+    math: Math,
     character_conversion_dma_irq_pending: bool,
-    sa1_irq_pending: bool,
-    sa1_nmi_pending: bool,
-    snes_irq_to_sa1_pending: bool,
+    irq_from_sa1_pending: bool,
 }
 
 impl Sa1 {
     pub(crate) fn set_ccnt(&mut self, value: u8, clocks: u64) {
         let reset = self.ccnt.reset();
         let control = Sa1CpuControl::from_raw(value);
-        self.sa1_nmi_pending |= control.nmi_request();
-        self.snes_irq_to_sa1_pending |= control.irq_request();
+        if control.nmi_request() {
+            self.interrupts.raise_nmi_from_snes();
+        }
+        if control.irq_request() {
+            self.interrupts.raise_irq_from_snes();
+        }
         self.ccnt = control.with_nmi_request(false).with_irq_request(false);
 
         let cpu = if control.reset() {
@@ -198,13 +312,18 @@ impl Sa1 {
         self.sie = SnesInterruptBits::from_raw(value & 0xA0);
     }
 
+    fn snes_irq_active(&self) -> bool {
+        (self.sie.character_conversion_dma_irq() && self.character_conversion_dma_irq_pending)
+            || (self.sie.irq_from_sa1() && self.irq_from_sa1_pending)
+    }
+
     pub(crate) fn clear_snes_interrupts(&mut self, value: u8) {
         let clear = SnesInterruptBits::from_raw(value);
         if clear.character_conversion_dma_irq() {
             self.character_conversion_dma_irq_pending = false;
         }
-        if clear.sa1_irq() {
-            self.sa1_irq_pending = false;
+        if clear.irq_from_sa1() {
+            self.irq_from_sa1_pending = false;
         }
     }
 
@@ -231,25 +350,17 @@ impl Sa1 {
             .map_or(0, |vector| vector.to_le_bytes()[byte])
     }
 
-    pub(crate) fn set_cdma(&mut self, value: u8) {
-        self.cdma = CharacterConversionDmaParameters::from_raw(value & 0x9F);
-    }
-
     pub(crate) fn sfr(&self) -> SnesFlags {
         SnesFlags::default()
-            .with_message_from_sa1(self.message_from_sa1)
-            .with_nmi_vector_from_port(self.snes_nmi_vector)
+            .with_message_from_sa1(self.scnt.message_to_snes())
+            .with_nmi_vector_from_port(self.scnt.nmi_vector_from_port())
             .with_character_conversion_dma_irq(self.character_conversion_dma_irq_pending)
-            .with_irq_vector_from_port(self.snes_irq_vector)
-            .with_sa1_irq(self.sa1_irq_pending)
+            .with_irq_vector_from_port(self.scnt.irq_vector_from_port())
+            .with_irq_from_sa1(self.irq_from_sa1_pending)
     }
 
     pub(crate) fn set_siwp(&mut self, value: u8) {
         self.siwp = IramWriteProtection::from_raw(value);
-    }
-
-    pub(crate) fn set_ciwp(&mut self, value: u8) {
-        self.ciwp = IramWriteProtection::from_raw(value);
     }
 
     pub(crate) fn write_iram_from_snes(&mut self, index: usize, value: u8) {
@@ -268,6 +379,12 @@ impl Sa1 {
             iram,
             ciwp,
             memory,
+            ccnt,
+            scnt,
+            interrupts,
+            cdma,
+            math,
+            irq_from_sa1_pending,
             ..
         } = self;
         (
@@ -277,8 +394,25 @@ impl Sa1 {
                 iram,
                 ciwp,
                 memory,
+                ccnt,
+                scnt,
+                interrupts,
+                cdma,
+                math,
+                irq_from_sa1_pending,
             },
         )
+    }
+
+    fn take_interrupt_vector(&mut self) -> Option<u16> {
+        if self.interrupts.take_nmi() {
+            return Some(self.vectors[1]);
+        }
+        if !self.cpu.flags.irq_disable() && self.interrupts.take_irq() {
+            return Some(self.vectors[2]);
+        }
+
+        None
     }
 
     fn advance_clocks(&mut self, cycles: u64, master_clock_hz: u64) {
@@ -295,6 +429,12 @@ pub(crate) struct Bus<'a> {
     iram: &'a mut [u8; IRAM_SIZE],
     ciwp: &'a mut IramWriteProtection,
     memory: &'a mut MemoryControl,
+    ccnt: &'a mut Sa1CpuControl,
+    scnt: &'a mut SnesCpuControl,
+    interrupts: &'a mut InterruptState,
+    cdma: &'a mut CharacterConversionDmaParameters,
+    math: &'a mut Math,
+    irq_from_sa1_pending: &'a mut bool,
 }
 
 impl Bus<'_> {
@@ -303,8 +443,20 @@ impl Bus<'_> {
     }
 
     fn read_io(&self, reg: u16) -> u8 {
+        if let Some(value) = self.math.read(reg) {
+            return value;
+        }
+        if Math::is_write_only(reg) {
+            return OPEN_BUS;
+        }
+
         match reg {
-            BMAP | CBWE | CIWP => OPEN_BUS,
+            BMAP | CBWE | CIWP | CIE | CIC => OPEN_BUS,
+            reg if reg == SnesCpuControl::ADDRESS => OPEN_BUS,
+            reg if reg == CharacterConversionDmaParameters::ADDRESS => OPEN_BUS,
+            reg if reg == Sa1Flags::ADDRESS => {
+                self.interrupts.flags(self.ccnt.message_to_sa1()).raw()
+            }
             _ => {
                 tracing::error!(
                     cpu = "SA-1",
@@ -317,10 +469,26 @@ impl Bus<'_> {
     }
 
     fn write_io(&mut self, reg: u16, value: u8) {
+        if self.math.write(reg, value) {
+            return;
+        }
+
         match reg {
+            reg if reg == SnesCpuControl::ADDRESS => {
+                let control = SnesCpuControl::from_raw(value);
+                if control.irq_request() {
+                    *self.irq_from_sa1_pending = true;
+                }
+                *self.scnt = control.with_irq_request(false);
+            }
+            CIE => self.interrupts.set_enable(value),
+            CIC => self.interrupts.clear(value),
             BMAP => self.memory.set_bwram_sa1_mapping(value),
             CBWE => self.memory.set_bwram_sa1_write_enable(value),
             CIWP => *self.ciwp = IramWriteProtection::from_raw(value),
+            reg if reg == CharacterConversionDmaParameters::ADDRESS => {
+                *self.cdma = CharacterConversionDmaParameters::from_raw(value & 0x9F);
+            }
             _ => tracing::error!(
                 cpu = "SA-1",
                 reg = format!("{reg:04X}"),
@@ -331,10 +499,21 @@ impl Bus<'_> {
     }
 
     fn peek_io(&self, reg: u16) -> u8 {
+        if let Some(value) = self.math.peek(reg) {
+            return value;
+        }
+
         match reg {
+            reg if reg == SnesCpuControl::ADDRESS => self.scnt.raw(),
+            CIE => self.interrupts.enable.raw(),
+            CIC => 0,
             BMAP => self.memory.bwram_sa1_mapping_raw(),
             CBWE => self.memory.bwram_sa1_write_enable_raw(),
             CIWP => self.ciwp.raw(),
+            reg if reg == CharacterConversionDmaParameters::ADDRESS => self.cdma.raw(),
+            reg if reg == Sa1Flags::ADDRESS => {
+                self.interrupts.flags(self.ccnt.message_to_sa1()).raw()
+            }
             _ => OPEN_BUS,
         }
     }
@@ -406,7 +585,7 @@ pub(crate) fn run_until<M: MemoryMap>(snes: &mut crate::Bus<M>, target: u64) {
 
     if snes.sa1.ccnt.reset()
         || snes.sa1.ccnt.wait()
-        || snes.sa1.cpu.execution != crate::cpu::ExecutionState::Running
+        || snes.sa1.cpu.execution == crate::cpu::ExecutionState::Stopped
     {
         snes.sa1.clocks = target;
         return;
@@ -414,12 +593,38 @@ pub(crate) fn run_until<M: MemoryMap>(snes: &mut crate::Bus<M>, target: u64) {
 
     let master_clock_hz = snes.scheduler.master_clock_hz();
     while snes.sa1.clocks < target {
+        let interrupt_vector = snes.sa1.take_interrupt_vector();
+        let irq_wakes_waiting_cpu = interrupt_vector.is_none()
+            && snes.sa1.cpu.execution == crate::cpu::ExecutionState::Waiting
+            && snes.sa1.interrupts.irq_delivery_pending();
+
+        if interrupt_vector.is_none()
+            && snes.sa1.cpu.execution == crate::cpu::ExecutionState::Waiting
+            && !irq_wakes_waiting_cpu
+        {
+            snes.sa1.clocks = target;
+            break;
+        }
+
         let cycles = {
             let (cpu, mut bus) = snes.sa1.cpu_and_bus(&mut snes.mmu.cartridge);
-            crate::cpu::step_on_bus(cpu, &mut bus)
+            if let Some(vector) = interrupt_vector {
+                crate::cpu::service_interrupt_at(cpu, &mut bus, vector)
+            } else {
+                if irq_wakes_waiting_cpu {
+                    cpu.execution = crate::cpu::ExecutionState::Running;
+                }
+                crate::cpu::step_on_bus(cpu, &mut bus)
+            }
         };
         snes.sa1.advance_clocks(cycles, master_clock_hz);
     }
+
+    self::update_snes_irq(snes);
+}
+
+pub(crate) fn update_snes_irq<M: MemoryMap>(snes: &mut crate::Bus<M>) {
+    snes.irq.set_cart_irq(snes.sa1.snes_irq_active());
 }
 
 pub(crate) fn snes_cart_read<M: crate::mmio::MemoryMap>(

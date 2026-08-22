@@ -2,8 +2,8 @@ use crate::Bus;
 use crate::mmio::MemoryMap;
 use crate::mmio::device::{Access, IoRegister, RegEntry};
 use crate::sa1::regs::{
-    BMAPS, BWPA, CIWP, CharacterConversionDmaParameters, ROM_BANK_END, ROM_BANK_START, SBWE, SIC,
-    SIE, SIWP, Sa1CpuControl, SnesFlags, VECTOR_END, VECTOR_START,
+    BMAPS, BWPA, CharacterConversionDmaParameters, ROM_BANK_END, ROM_BANK_START, SBWE, SIC, SIE,
+    SIWP, Sa1CpuControl, SnesFlags, VECTOR_END, VECTOR_START,
 };
 
 pub fn registers<M: MemoryMap>() -> Vec<RegEntry<M>> {
@@ -17,7 +17,6 @@ pub fn registers<M: MemoryMap>() -> Vec<RegEntry<M>> {
         Sbwe::entry(),
         Bwpa::entry(),
         Siwp::entry(),
-        Ciwp::entry(),
         Cdma::entry(),
         Sfr::entry(),
     ]
@@ -107,6 +106,7 @@ impl IoRegister for Sie {
 
     fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         snes.sa1.set_sie(value);
+        crate::sa1::update_snes_irq(snes);
     }
 
     fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
@@ -122,6 +122,7 @@ impl IoRegister for Sic {
 
     fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         snes.sa1.clear_snes_interrupts(value);
+        crate::sa1::update_snes_irq(snes);
     }
 
     fn peek<M: MemoryMap>(_snes: &Bus<M>, _reg: u16) -> u8 {
@@ -160,21 +161,6 @@ impl IoRegister for Siwp {
     }
 }
 
-struct Ciwp;
-
-impl IoRegister for Ciwp {
-    const START: u16 = CIWP;
-    const READ: Access = Access::Ignored;
-
-    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
-        snes.sa1.set_ciwp(value);
-    }
-
-    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
-        snes.sa1.ciwp.raw()
-    }
-}
-
 struct Cdma;
 
 impl IoRegister for Cdma {
@@ -182,7 +168,7 @@ impl IoRegister for Cdma {
     const READ: Access = Access::Ignored;
 
     fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
-        snes.sa1.set_cdma(value);
+        snes.sa1.cdma = CharacterConversionDmaParameters::from_raw(value & 0x9F);
     }
 
     fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {

@@ -664,10 +664,25 @@ impl<'a, B: CpuBus> Interpreter<'a, B> {
     }
 
     pub(crate) fn service_interrupt(&mut self, native_vector: u16, emu_vector: u16) {
-        let (program_bank, return_pc) = self.next();
-        let emulation = self.cpu.emulation;
+        let return_address = self.begin_interrupt();
+        let vector = if self.cpu.emulation {
+            emu_vector
+        } else {
+            native_vector
+        };
+        let target = self.bus.read16(Address::new(0, vector));
+        self.finish_interrupt_at(return_address, target);
+    }
 
-        if !emulation {
+    pub(crate) fn service_interrupt_at(&mut self, target: u16) {
+        let return_address = self.begin_interrupt();
+        self.finish_interrupt_at(return_address, target);
+    }
+
+    fn begin_interrupt(&mut self) -> Address {
+        let (program_bank, return_pc) = self.next();
+
+        if !self.cpu.emulation {
             self.push(program_bank, StackWrap::Confined);
         }
 
@@ -678,14 +693,16 @@ impl<'a, B: CpuBus> Interpreter<'a, B> {
         self.cpu.flags.set_decimal(false);
         self.cpu.program_bank = 0;
 
-        let vector = if emulation { emu_vector } else { native_vector };
-        let target = self.bus.read16(Address::new(0, vector));
+        Address::new(program_bank, return_pc)
+    }
+
+    fn finish_interrupt_at(&mut self, _return_address: Address, target: u16) {
         self.set_pc_long(0, target);
 
         #[cfg(feature = "debug")]
         self.enter_call(
             CallKind::Interrupt,
-            Address::new(program_bank, return_pc).as_24bit(),
+            _return_address.as_24bit(),
             Address::new(0, target).as_24bit(),
         );
     }

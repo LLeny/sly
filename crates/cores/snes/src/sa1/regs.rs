@@ -2,6 +2,8 @@ use crate::macros::{register_mmio, register_mmio_family, register_mmio_raw};
 
 pub(crate) const SIE: u16 = 0x2201;
 pub(crate) const SIC: u16 = 0x2202;
+pub(crate) const CIE: u16 = 0x220A;
+pub(crate) const CIC: u16 = 0x220B;
 pub(crate) const VECTOR_COUNT: usize = 3;
 pub(crate) const VECTOR_START: u16 = 0x2203;
 pub(crate) const VECTOR_END: u16 = 0x2208;
@@ -14,6 +16,13 @@ pub(crate) const CBWE: u16 = 0x2227;
 pub(crate) const BWPA: u16 = 0x2228;
 pub(crate) const SIWP: u16 = 0x2229;
 pub(crate) const CIWP: u16 = 0x222A;
+pub(crate) const ARITHMETIC_PARAMETER_A_START: u16 = 0x2251;
+pub(crate) const ARITHMETIC_PARAMETER_A_END: u16 = 0x2252;
+pub(crate) const ARITHMETIC_PARAMETER_B_START: u16 = 0x2253;
+pub(crate) const ARITHMETIC_PARAMETER_B_END: u16 = 0x2254;
+pub(crate) const ARITHMETIC_RESULT_START: u16 = 0x2306;
+pub(crate) const ARITHMETIC_RESULT_END: u16 = 0x230A;
+pub(crate) const ARITHMETIC_OVERFLOW: u16 = 0x230B;
 
 register_mmio! {
     /// CCNT
@@ -35,6 +44,27 @@ register_mmio! {
     }
 }
 
+register_mmio! {
+    /// MCNT
+    pub struct ArithmeticControl @ 0x2250 {
+        #[bits(0..=1)]
+        pub mode: u8,
+    }
+}
+
+register_mmio_raw! {
+    ARITHMETIC_PARAMETER_A_START => "MAL",
+    ARITHMETIC_PARAMETER_A_END => "MAH",
+    ARITHMETIC_PARAMETER_B_START => "MBL",
+    ARITHMETIC_PARAMETER_B_END => "MBH",
+    ARITHMETIC_RESULT_START => "MR0",
+    ARITHMETIC_RESULT_START + 1 => "MR1",
+    ARITHMETIC_RESULT_START + 2 => "MR2",
+    ARITHMETIC_RESULT_START + 3 => "MR3",
+    ARITHMETIC_RESULT_END => "MR4",
+    ARITHMETIC_OVERFLOW => "OF",
+}
+
 register_mmio_family! {
     #[derive(Default)]
     pub struct SnesInterruptBits {
@@ -42,11 +72,49 @@ register_mmio_family! {
         pub character_conversion_dma_irq: bool,
 
         #[bits(7)]
-        pub sa1_irq: bool,
+        pub irq_from_sa1: bool,
     }
     symbols {
         0x2201 => "SIE",
         0x2202 => "SIC",
+    }
+}
+
+register_mmio! {
+    /// SCNT
+    pub struct SnesCpuControl @ 0x2209 {
+        #[bits(0..=3)]
+        pub message_to_snes: u8,
+
+        #[bits(4)]
+        pub nmi_vector_from_port: bool,
+
+        #[bits(6)]
+        pub irq_vector_from_port: bool,
+
+        #[bits(7)]
+        pub irq_request: bool,
+    }
+}
+
+register_mmio_family! {
+    #[derive(Default)]
+    pub struct Sa1InterruptBits {
+        #[bits(4)]
+        pub nmi_from_snes: bool,
+
+        #[bits(5)]
+        pub dma_irq: bool,
+
+        #[bits(6)]
+        pub timer_irq: bool,
+
+        #[bits(7)]
+        pub irq_from_snes: bool,
+    }
+    symbols {
+        0x220A => "CIE",
+        0x220B => "CIC",
     }
 }
 
@@ -144,6 +212,26 @@ register_mmio! {
 }
 
 register_mmio! {
+    /// CFR
+    pub struct Sa1Flags @ 0x2301 {
+        #[bits(0..=3)]
+        pub message_from_snes: u8,
+
+        #[bits(4)]
+        pub nmi_from_snes: bool,
+
+        #[bits(5)]
+        pub dma_irq: bool,
+
+        #[bits(6)]
+        pub timer_irq: bool,
+
+        #[bits(7)]
+        pub irq_from_snes: bool,
+    }
+}
+
+register_mmio! {
     /// SFR
     pub struct SnesFlags @ 0x2300 {
         #[bits(0..=3)]
@@ -159,7 +247,7 @@ register_mmio! {
         pub irq_vector_from_port: bool,
 
         #[bits(7)]
-        pub sa1_irq: bool,
+        pub irq_from_sa1: bool,
     }
 }
 

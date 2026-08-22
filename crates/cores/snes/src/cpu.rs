@@ -405,6 +405,15 @@ pub(crate) fn service_vectored<B: CpuBus>(cpu: &mut Cpu, bus: &mut B, native: u1
     vm.commit();
 }
 
+pub(crate) fn service_interrupt_at<B: CpuBus>(cpu: &mut Cpu, bus: &mut B, target: u16) -> u64 {
+    cpu.execution = ExecutionState::Running;
+    let cycles = timing::interrupt_cycles(cpu);
+    let mut vm = Interpreter::new(cpu, bus, 0);
+    vm.service_interrupt_at(target);
+    vm.commit();
+    cycles
+}
+
 #[chapa::bitfield(u8, order = lsb0)]
 #[derive(Debug)]
 pub struct Flags {
