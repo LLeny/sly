@@ -4,7 +4,7 @@ use crate::System;
 
 const MAGIC: [u8; 4] = *b"SLYS";
 
-pub const ENVELOPE_VERSION: u16 = 5;
+pub const ENVELOPE_VERSION: u16 = 6;
 pub const HEADER_LENGTH: usize = 24;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

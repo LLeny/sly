@@ -10,7 +10,7 @@ pub use disasm::disassemble_at;
 #[cfg(feature = "debug")]
 use crate::callstack::CallFrame;
 use crate::mmio::{Address, MemoryMap, map};
-use crate::{Snes, SnesBus};
+use crate::{Bus, Snes};
 use interpreter::Interpreter;
 use serde::{Deserialize, Serialize};
 
@@ -44,17 +44,17 @@ pub(crate) trait CpuBus {
     }
 }
 
-impl<M: MemoryMap> CpuBus for SnesBus<M> {
+impl<M: MemoryMap> CpuBus for Bus<M> {
     fn read8(&mut self, addr: Address) -> u8 {
-        SnesBus::read8(self, addr)
+        Bus::read8(self, addr)
     }
 
     fn write8(&mut self, addr: Address, value: u8) {
-        SnesBus::write8(self, addr, value);
+        Bus::write8(self, addr, value);
     }
 
     fn peek8(&self, addr: Address) -> u8 {
-        SnesBus::peek8(self, addr)
+        Bus::peek8(self, addr)
     }
 }
 
@@ -87,6 +87,12 @@ pub struct Cpu {
     #[cfg(feature = "debug")]
     #[serde(skip)]
     pub interrupts: InterruptCounters,
+}
+
+impl Default for Cpu {
+    fn default() -> Self {
+        Self::new(0)
+    }
 }
 
 #[cfg(feature = "debug")]
@@ -195,6 +201,13 @@ pub(crate) struct Decoded {
     pub form: decoder::Form,
 }
 
+struct Fetched {
+    mnemonic: decoder::Mnemonic,
+    form: decoder::Form,
+    arg: operand::Arg,
+    len: u8,
+}
+
 /// Whether a branch with `mnemonic` redirects under the given flags.
 pub(crate) fn branch_taken(flags: &Flags, mnemonic: decoder::Mnemonic) -> bool {
     use decoder::Mnemonic as M;
@@ -258,7 +271,7 @@ pub fn step<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
     self::step_main(cpu, bus)
 }
 
-fn step_main<M: MemoryMap>(cpu: &mut Cpu, snes: &mut SnesBus<M>) -> u64 {
+fn step_main<M: MemoryMap>(cpu: &mut Cpu, snes: &mut Bus<M>) -> u64 {
     match cpu.execution {
         ExecutionState::Stopped => self::idle(snes),
         _ if snes.irq.take_nmi() => self::service_interrupt(cpu, snes, 0xFFEA, 0xFFFA),
@@ -274,19 +287,19 @@ fn step_main<M: MemoryMap>(cpu: &mut Cpu, snes: &mut SnesBus<M>) -> u64 {
     }
 }
 
-fn charge<M: MemoryMap>(snes: &mut SnesBus<M>, cycles: u64) -> u64 {
+fn charge<M: MemoryMap>(snes: &mut Bus<M>, cycles: u64) -> u64 {
     snes.mmu.clocks += map::WAITSTATES_FAST * cycles;
     cycles
 }
 
-fn idle<M: MemoryMap>(snes: &mut SnesBus<M>) -> u64 {
+fn idle<M: MemoryMap>(snes: &mut Bus<M>) -> u64 {
     let cycles = self::idle_cycles(snes);
     self::charge(snes, cycles)
 }
 
 fn service_interrupt<M: MemoryMap>(
     cpu: &mut Cpu,
-    snes: &mut SnesBus<M>,
+    snes: &mut Bus<M>,
     native: u16,
     emulation: u16,
 ) -> u64 {
@@ -303,17 +316,50 @@ fn service_interrupt<M: MemoryMap>(
     self::charge(snes, cycles)
 }
 
-fn idle_cycles<M: MemoryMap>(snes: &SnesBus<M>) -> u64 {
+fn idle_cycles<M: MemoryMap>(snes: &Bus<M>) -> u64 {
     let clocks = snes.scheduler.next_deadline().map_or(0, |deadline| {
         deadline.saturating_sub(snes.scheduler.cycles())
     });
     clocks.div_ceil(map::WAITSTATES_FAST).max(1)
 }
 
-fn execute_instruction<M: MemoryMap>(cpu: &mut Cpu, snes: &mut SnesBus<M>) -> u64 {
-    let (bank, pc, combo) = { (cpu.program_bank, cpu.pc, self::mode_selectors(cpu)) };
+fn execute_instruction<M: MemoryMap>(cpu: &mut Cpu, snes: &mut Bus<M>) -> u64 {
+    let bank = cpu.program_bank;
+    let pc = cpu.pc;
+    let fetched = self::fetch(cpu, snes);
 
-    let opcode = snes.read8(Address::new(bank, pc));
+    for i in 1..fetched.len as u16 {
+        let addr = Address::new(bank, pc.wrapping_add(i));
+        snes.mmu.clocks += snes.mmu.waitstates(addr);
+    }
+
+    if let Some((ptr, bytes)) = addressing::pointer_fetch(cpu, fetched.form, fetched.arg) {
+        for i in 0..bytes as u16 {
+            snes.mmu.clocks += snes.mmu.waitstates(ptr.wrapping_add(i));
+        }
+    }
+
+    let cycles = self::charge(
+        snes,
+        timing::cycles(cpu, snes, fetched.mnemonic, fetched.form, fetched.arg),
+    );
+
+    #[cfg(feature = "debug")]
+    snes.mmu.access.resume();
+
+    self::execute_fetched(cpu, snes, fetched);
+
+    #[cfg(feature = "debug")]
+    snes.mmu.access.pause();
+
+    cycles
+}
+
+fn fetch<B: CpuBus>(cpu: &Cpu, bus: &mut B) -> Fetched {
+    let bank = cpu.program_bank;
+    let pc = cpu.pc;
+    let combo = self::mode_selectors(cpu);
+    let opcode = bus.read8(Address::new(bank, pc));
     let Decoded {
         inst,
         id,
@@ -321,39 +367,35 @@ fn execute_instruction<M: MemoryMap>(cpu: &mut Cpu, snes: &mut SnesBus<M>) -> u6
         form,
     } = self::decode(opcode, combo);
     let len = decoder::stream_len_of(combo, id);
-
-    let arg = {
-        let reader = CodeReader {
-            cpu,
-            bus: &*snes,
-            bank,
-        };
-        operand::fetch_arg(inst, mnemonic, form, pc as u64, &reader)
+    let reader = CodeReader {
+        cpu,
+        bus: &*bus,
+        bank,
     };
+    let arg = operand::fetch_arg(inst, mnemonic, form, pc as u64, &reader);
 
-    for i in 1..len as u16 {
-        let addr = Address::new(bank, pc.wrapping_add(i));
-        snes.mmu.clocks += snes.mmu.waitstates(addr);
+    Fetched {
+        mnemonic,
+        form,
+        arg,
+        len,
     }
+}
 
-    if let Some((ptr, bytes)) = addressing::pointer_fetch(cpu, form, arg) {
-        for i in 0..bytes as u16 {
-            snes.mmu.clocks += snes.mmu.waitstates(ptr.wrapping_add(i));
-        }
-    }
-
-    let cycles = self::charge(snes, timing::cycles(cpu, snes, mnemonic, form, arg));
-
-    #[cfg(feature = "debug")]
-    snes.mmu.access.resume();
-
-    let mut vm = Interpreter::new(cpu, &mut *snes, len);
-    vm.exec(mnemonic, form, arg);
+fn execute_fetched<B: CpuBus>(cpu: &mut Cpu, bus: &mut B, fetched: Fetched) {
+    let mut vm = Interpreter::new(cpu, bus, fetched.len);
+    vm.exec(fetched.mnemonic, fetched.form, fetched.arg);
     vm.commit();
+}
 
-    #[cfg(feature = "debug")]
-    snes.mmu.access.pause();
+pub(crate) fn step_on_bus<B: CpuBus>(cpu: &mut Cpu, bus: &mut B) -> u64 {
+    if cpu.execution != ExecutionState::Running {
+        return 1;
+    }
 
+    let fetched = self::fetch(cpu, bus);
+    let cycles = timing::cycles(cpu, bus, fetched.mnemonic, fetched.form, fetched.arg);
+    self::execute_fetched(cpu, bus, fetched);
     cycles
 }
 

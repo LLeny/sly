@@ -1,7 +1,7 @@
 use crate::mmio::device::{Access, IoRegister};
 use chapa::bitenum;
 
-use crate::SnesBus;
+use crate::Bus;
 use crate::macros::{register_mmio, register_mmio_family, register_mmio_raw};
 use crate::mmio::MemoryMap;
 use crate::scheduler::VBLANK_START_SCANLINE;
@@ -88,7 +88,7 @@ impl BgScrollOffset {
     pub(crate) const START: u16 = 0x210D; // BG1HOFS
     pub(crate) const END: u16 = 0x2114; // BG4VOFS
 
-    pub(crate) fn write<M: MemoryMap>(snes: &mut SnesBus<M>, reg: u16, value: u8) {
+    pub(crate) fn write<M: MemoryMap>(snes: &mut Bus<M>, reg: u16, value: u8) {
         snes.ppu.matrix.write_scroll(reg, value);
 
         let index = (reg - Self::START) as usize;
@@ -169,7 +169,7 @@ register_mmio! {
 impl IoRegister for DisplayControl {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         let control = Self::from_raw(value);
         let was_blanked = snes.ppu.force_blank;
         snes.ppu.set_display_control(control);
@@ -182,7 +182,7 @@ impl IoRegister for DisplayControl {
         }
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         Self::default()
             .with_brightness(snes.ppu.brightness)
             .with_force_blank(snes.ppu.force_blank)
@@ -216,13 +216,13 @@ register_mmio! {
 impl IoRegister for DisplayControl2 {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         let control = Self::from_raw(value);
         snes.ppu.pseudo_hires = control.pseudo_hires();
         snes.ppu.extbg = control.extbg();
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         Self::default()
             .with_pseudo_hires(snes.ppu.pseudo_hires)
             .with_extbg(snes.ppu.extbg)
@@ -245,7 +245,7 @@ impl IoRegister for Ppu2Status {
     const START: u16 = Self::ADDRESS;
     const WRITE: Access = Access::Ignored;
 
-    fn read<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16) -> u8 {
+    fn read<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16) -> u8 {
         let value = Self::peek(snes, _reg);
         snes.ppu.reset_counter_reads();
         if snes.mmu.latch_pin_high() {
@@ -254,7 +254,7 @@ impl IoRegister for Ppu2Status {
         value
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         let mut status = Self::default();
         status.set_pal(snes.mmu.cartridge.region().tv_system() == crate::cartridge::TvSystem::Pal);
         status.set_counter_latch(!snes.mmu.latch_pin_high() || snes.ppu.counter_latch);
@@ -433,7 +433,7 @@ impl TilemapAddrAndSize {
     pub(crate) const START: u16 = 0x2107;
     pub(crate) const END: u16 = 0x210A;
 
-    pub(crate) fn write<M: MemoryMap>(snes: &mut SnesBus<M>, addr: u16, value: u8) {
+    pub(crate) fn write<M: MemoryMap>(snes: &mut Bus<M>, addr: u16, value: u8) {
         let reg = Self::from_raw(value);
         let layer = &mut snes.ppu.bg_layers[(addr - Self::START) as usize];
         layer.tilemap_addr = reg.address();
@@ -441,7 +441,7 @@ impl TilemapAddrAndSize {
         layer.vertical_tilemap_count = reg.vertical_tilemap_count();
     }
 
-    pub(crate) fn peek<M: MemoryMap>(snes: &SnesBus<M>, addr: u16) -> u8 {
+    pub(crate) fn peek<M: MemoryMap>(snes: &Bus<M>, addr: u16) -> u8 {
         let layer = &snes.ppu.bg_layers[(addr - Self::START) as usize];
         let mut reg = Self::zeroed();
         reg.set_tilemap_addr((layer.tilemap_addr >> 10) as u8);
@@ -515,11 +515,11 @@ impl WindowMaskSettings {
     pub(crate) const START: u16 = W12SEL;
     pub(crate) const END: u16 = WOBJSEL;
 
-    pub(crate) fn write<M: MemoryMap>(snes: &mut SnesBus<M>, addr: u16, value: u8) {
+    pub(crate) fn write<M: MemoryMap>(snes: &mut Bus<M>, addr: u16, value: u8) {
         snes.ppu.windows.write_selector(addr, Self::from_raw(value));
     }
 
-    pub(crate) fn peek<M: MemoryMap>(snes: &SnesBus<M>, addr: u16) -> u8 {
+    pub(crate) fn peek<M: MemoryMap>(snes: &Bus<M>, addr: u16) -> u8 {
         snes.ppu.windows.selector(addr).raw()
     }
 }
@@ -539,7 +539,7 @@ impl LayerWindowEnable {
         }
     }
 
-    pub(crate) fn write<M: MemoryMap>(snes: &mut SnesBus<M>, addr: u16, value: u8) {
+    pub(crate) fn write<M: MemoryMap>(snes: &mut Bus<M>, addr: u16, value: u8) {
         let reg = Self::from_raw(value & 0x1F);
         match addr {
             TMW => snes.ppu.main_screen_window = reg,
@@ -548,7 +548,7 @@ impl LayerWindowEnable {
         }
     }
 
-    pub(crate) fn peek<M: MemoryMap>(snes: &SnesBus<M>, addr: u16) -> u8 {
+    pub(crate) fn peek<M: MemoryMap>(snes: &Bus<M>, addr: u16) -> u8 {
         match addr {
             TMW => snes.ppu.main_screen_window.raw(),
             TSW => snes.ppu.sub_screen_window.raw(),
@@ -711,7 +711,7 @@ register_mmio! {
 impl IoRegister for ColorMathSelect {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         let reg = Self::from_raw(value);
         let math = &mut snes.ppu.color_math;
         math.color_source = reg.color_source();
@@ -720,7 +720,7 @@ impl IoRegister for ColorMathSelect {
         math.main_screen_region = reg.main_screen_region();
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         let math = &snes.ppu.color_math;
         let mut reg = Self::default();
         reg.set_color_source(math.color_source);
@@ -748,7 +748,7 @@ register_mmio! {
 impl IoRegister for ColorMathControl {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         let reg = Self::from_raw(value);
         let math = &mut snes.ppu.color_math;
         math.layers = LayerMask::from_bits(reg.layers());
@@ -756,7 +756,7 @@ impl IoRegister for ColorMathControl {
         math.operation = reg.operation();
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         let math = &snes.ppu.color_math;
         let mut reg = Self::default();
         reg.set_layers(math.layers.raw());
@@ -832,7 +832,7 @@ impl SpriteSizeAndTileBase {
 impl IoRegister for SpriteSizeAndTileBase {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         let reg = Self::from_raw(value);
         let obj = &mut snes.ppu.obj;
         obj.tileset_addr = reg.base_address();
@@ -840,7 +840,7 @@ impl IoRegister for SpriteSizeAndTileBase {
         obj.sprite_size = reg.sprite_size();
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         let obj = &snes.ppu.obj;
         let mut reg = Self::default();
         reg.set_name_base_addr((obj.tileset_addr >> 13) as u8);
@@ -853,7 +853,7 @@ impl IoRegister for SpriteSizeAndTileBase {
 impl IoRegister for BgMode {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         let reg = Self::from_raw(value);
         snes.ppu.bg_mode = reg.mode();
         snes.ppu.bg3_priority = reg.mode1_bg3_priority();
@@ -863,7 +863,7 @@ impl IoRegister for BgMode {
         snes.ppu.bg_layers[3].tile_size = reg.bg4_tile_size();
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         let mut reg = Self::default();
         reg.set_mode(snes.ppu.bg_mode);
         reg.set_mode1_bg3_priority(snes.ppu.bg3_priority);
@@ -878,13 +878,13 @@ impl IoRegister for BgMode {
 impl IoRegister for Bg12ChrBase {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         let reg = Self::from_raw(value);
         snes.ppu.bg_layers[0].tileset_addr = (reg.bg1() as u32) << 12;
         snes.ppu.bg_layers[1].tileset_addr = (reg.bg2() as u32) << 12;
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         let mut reg = Self::default();
         reg.set_bg1((snes.ppu.bg_layers[0].tileset_addr >> 12) as u8);
         reg.set_bg2((snes.ppu.bg_layers[1].tileset_addr >> 12) as u8);
@@ -895,13 +895,13 @@ impl IoRegister for Bg12ChrBase {
 impl IoRegister for Bg34ChrBase {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         let reg = Self::from_raw(value);
         snes.ppu.bg_layers[2].tileset_addr = (reg.bg3() as u32) << 12;
         snes.ppu.bg_layers[3].tileset_addr = (reg.bg4() as u32) << 12;
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         let mut reg = Self::default();
         reg.set_bg3((snes.ppu.bg_layers[2].tileset_addr >> 12) as u8);
         reg.set_bg4((snes.ppu.bg_layers[3].tileset_addr >> 12) as u8);

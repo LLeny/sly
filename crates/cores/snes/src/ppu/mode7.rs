@@ -1,4 +1,4 @@
-use crate::SnesBus;
+use crate::Bus;
 use crate::macros::{register_mmio, register_mmio_raw};
 use crate::mmio::MemoryMap;
 use crate::mmio::device::IoRegister;
@@ -151,11 +151,11 @@ pub(crate) fn mode7_character_pixel(vram: &Vram, tile: u8, x: u16, y: u16) -> u8
 impl IoRegister for Mode7Settings {
     const START: u16 = Self::ADDRESS;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         snes.ppu.matrix.settings = value;
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         snes.ppu.matrix.settings
     }
 }
@@ -166,7 +166,7 @@ impl Mode7Registers {
     pub(crate) const START: u16 = MATRIX_A;
     pub(crate) const END: u16 = CENTER_Y;
 
-    pub(crate) fn write<M: MemoryMap>(snes: &mut SnesBus<M>, register: u16, value: u8) {
+    pub(crate) fn write<M: MemoryMap>(snes: &mut Bus<M>, register: u16, value: u8) {
         let matrix = &mut snes.ppu.matrix;
         let word = matrix.latch(value);
 

@@ -16,7 +16,7 @@ pub use access::{AccessTracker, MemoryAccess, TrackMode};
 use crate::cartridge::Coprocessor;
 use crate::mmio::wram::WramPort;
 use crate::sa1::Sa1;
-use crate::{Cartridge, SnesBus};
+use crate::{Bus, Cartridge};
 use serde::{Deserialize, Serialize};
 
 pub use addr::Address;
@@ -180,7 +180,7 @@ impl<M: MemoryMap> Mmio<M> {
     }
 }
 
-impl<M: MemoryMap> SnesBus<M> {
+impl<M: MemoryMap> Bus<M> {
     pub(crate) fn rebuild_devices(&mut self) {
         self.mmu.devices = DeviceTable::for_cartridge(&self.mmu.cartridge);
     }

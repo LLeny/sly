@@ -5,7 +5,7 @@ pub mod io;
 pub mod map;
 pub mod regs;
 
-use crate::SnesBus;
+use crate::Bus;
 use crate::mmio::{Address, CartRegion, MemoryMap, OPEN_BUS};
 use crate::scheduler::EventKind;
 use regs::{Cfgr, Clsr, Colr, Por, Scmr, Sfr};
@@ -145,7 +145,7 @@ impl SuperFx {
 }
 
 pub(crate) fn snes_cart_read<M: MemoryMap>(
-    snes: &SnesBus<M>,
+    snes: &Bus<M>,
     region: CartRegion,
     index: usize,
     addr: Address,
@@ -158,7 +158,7 @@ pub(crate) fn snes_cart_read<M: MemoryMap>(
 }
 
 pub(crate) fn snes_cart_write<M: MemoryMap>(
-    snes: &mut SnesBus<M>,
+    snes: &mut Bus<M>,
     region: CartRegion,
     index: usize,
     value: u8,
@@ -210,7 +210,7 @@ impl CodeCache {
 }
 
 #[cfg(feature = "debug")]
-pub(crate) fn debug_step<M: MemoryMap>(snes: &mut SnesBus<M>) -> bool {
+pub(crate) fn debug_step<M: MemoryMap>(snes: &mut Bus<M>) -> bool {
     if stalled(&snes.superfx) {
         return false;
     }
@@ -218,17 +218,17 @@ pub(crate) fn debug_step<M: MemoryMap>(snes: &mut SnesBus<M>) -> bool {
     true
 }
 
-pub(crate) fn start<M: MemoryMap>(snes: &mut SnesBus<M>) {
+pub(crate) fn start<M: MemoryMap>(snes: &mut Bus<M>) {
     snes.superfx.sfr.set_go(true);
     resume(snes);
 }
 
-fn resume<M: MemoryMap>(snes: &mut SnesBus<M>) {
+fn resume<M: MemoryMap>(snes: &mut Bus<M>) {
     let now = snes.scheduler.cycles();
     schedule_tick(snes, now + 1);
 }
 
-fn schedule_tick<M: MemoryMap>(snes: &mut SnesBus<M>, deadline: u64) {
+fn schedule_tick<M: MemoryMap>(snes: &mut Bus<M>, deadline: u64) {
     if !snes.superfx.tick_scheduled {
         snes.superfx.tick_scheduled = true;
         snes.scheduler.schedule_event(deadline, EventKind::GsuTick);
@@ -241,7 +241,7 @@ fn stalled(fx: &SuperFx) -> bool {
     !fx.sfr.go() || fx.wait_rom || fx.wait_ram
 }
 
-pub(crate) fn gsu_tick<M: MemoryMap>(snes: &mut SnesBus<M>, deadline: u64) {
+pub(crate) fn gsu_tick<M: MemoryMap>(snes: &mut Bus<M>, deadline: u64) {
     snes.superfx.tick_scheduled = false;
 
     #[cfg(not(feature = "debug"))]
@@ -260,7 +260,7 @@ pub(crate) fn gsu_tick<M: MemoryMap>(snes: &mut SnesBus<M>, deadline: u64) {
     }
 }
 
-pub(crate) fn bus_grants_updated<M: MemoryMap>(snes: &mut SnesBus<M>) {
+pub(crate) fn bus_grants_updated<M: MemoryMap>(snes: &mut Bus<M>) {
     let fx = &mut snes.superfx;
     if fx.scmr.rom_to_gsu() {
         fx.wait_rom = false;

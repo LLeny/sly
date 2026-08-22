@@ -3,7 +3,7 @@ use std::collections::BinaryHeap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::SnesBus;
+use crate::Bus;
 use crate::apu::SPC700_CLOCK;
 use crate::cartridge::TvSystem;
 use crate::mmio::MemoryMap;
@@ -42,7 +42,7 @@ pub enum EventKind {
 }
 
 impl EventKind {
-    pub(crate) fn dispatch<M: MemoryMap>(self, snes: &mut SnesBus<M>, deadline: u64) {
+    pub(crate) fn dispatch<M: MemoryMap>(self, snes: &mut Bus<M>, deadline: u64) {
         match self {
             EventKind::Spc700Tick => self::spc700_tick(snes, deadline),
             EventKind::VblankStart => crate::ppu::vblank_start(snes, deadline),
@@ -269,14 +269,14 @@ impl Scheduler {
     }
 }
 
-pub(crate) fn spc700_tick<M: MemoryMap>(snes: &mut SnesBus<M>, deadline: u64) {
+pub(crate) fn spc700_tick<M: MemoryMap>(snes: &mut Bus<M>, deadline: u64) {
     let cycles = crate::apu::spc700::step(&mut snes.apu);
     let delay = snes.scheduler.spc_master_clocks(cycles);
     snes.scheduler
         .schedule_event(deadline + delay, EventKind::Spc700Tick);
 }
 
-pub(crate) fn dram_refresh<M: MemoryMap>(snes: &mut SnesBus<M>, _deadline: u64) {
+pub(crate) fn dram_refresh<M: MemoryMap>(snes: &mut Bus<M>, _deadline: u64) {
     snes.mmu.clocks += REFRESH_MASTER_CLOCKS;
     snes.scheduler.advance_by(REFRESH_MASTER_CLOCKS);
 }

@@ -8,7 +8,9 @@ pub(crate) const VECTOR_END: u16 = 0x2208;
 pub(crate) const ROM_BANK_START: u16 = 0x2220;
 pub(crate) const ROM_BANK_END: u16 = 0x2223;
 pub(crate) const BMAPS: u16 = 0x2224;
+pub(crate) const BMAP: u16 = 0x2225;
 pub(crate) const SBWE: u16 = 0x2226;
+pub(crate) const CBWE: u16 = 0x2227;
 pub(crate) const BWPA: u16 = 0x2228;
 pub(crate) const SIWP: u16 = 0x2229;
 pub(crate) const CIWP: u16 = 0x222A;
@@ -87,12 +89,27 @@ register_mmio_family! {
 
 register_mmio_family! {
     #[derive(Default)]
-    pub struct SnesBwramWriteEnable {
+    pub struct Sa1BwramMapping {
+        #[bits(0..=6)]
+        pub bwram_block: u8,
+
+        #[bits(7)]
+        pub bitmap: bool,
+    }
+    symbols {
+        0x2225 => "BMAP",
+    }
+}
+
+register_mmio_family! {
+    #[derive(Default)]
+    pub struct BwramWriteEnable {
         #[bits(7)]
         pub write_enable: bool,
     }
     symbols {
         0x2226 => "SBWE",
+        0x2227 => "CBWE",
     }
 }
 

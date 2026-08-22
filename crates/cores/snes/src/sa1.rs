@@ -6,10 +6,14 @@ use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
 use self::regs::{
-    BwramWriteProtectedArea, CharacterConversionDmaParameters, IramWriteProtection, ROM_BANK_START,
-    Sa1CpuControl, SnesBwramMapping, SnesBwramWriteEnable, SnesFlags, SnesInterruptBits,
-    SuperMmcBank, VECTOR_COUNT, VECTOR_START,
+    BMAP, BwramWriteEnable, BwramWriteProtectedArea, CBWE, CIWP, CharacterConversionDmaParameters,
+    IramWriteProtection, ROM_BANK_START, Sa1BwramMapping, Sa1CpuControl, SnesBwramMapping,
+    SnesFlags, SnesInterruptBits, SuperMmcBank, VECTOR_COUNT, VECTOR_START,
 };
+use crate::Cartridge;
+use crate::cartridge::Coprocessor;
+use crate::cpu::{Cpu, CpuBus};
+use crate::mmio::{Address, AddressSpace, CartRegion, MemoryMap, OPEN_BUS};
 
 pub const IRAM_SIZE: usize = 0x800;
 pub(crate) const SNES_IRAM_START: u16 = 0x3000;
@@ -26,7 +30,9 @@ fn vector_slot(reg: u16) -> Option<(usize, usize)> {
 pub(crate) struct MemoryControl {
     rom_banks: [SuperMmcBank; 4],
     bwram_snes_mapping: SnesBwramMapping,
-    bwram_snes_write_enable: SnesBwramWriteEnable,
+    bwram_sa1_mapping: Sa1BwramMapping,
+    bwram_snes_write_enable: BwramWriteEnable,
+    bwram_sa1_write_enable: BwramWriteEnable,
     bwram_protected_area: BwramWriteProtectedArea,
 }
 
@@ -40,7 +46,9 @@ impl Default for MemoryControl {
                 SuperMmcBank::from_raw(3),
             ],
             bwram_snes_mapping: SnesBwramMapping::default(),
-            bwram_snes_write_enable: SnesBwramWriteEnable::default(),
+            bwram_sa1_mapping: Sa1BwramMapping::default(),
+            bwram_snes_write_enable: BwramWriteEnable::default(),
+            bwram_sa1_write_enable: BwramWriteEnable::default(),
             bwram_protected_area: BwramWriteProtectedArea::default(),
         }
     }
@@ -89,12 +97,36 @@ impl MemoryControl {
         self.bwram_snes_mapping.raw()
     }
 
+    pub(crate) fn bwram_sa1_block(&self) -> usize {
+        usize::from(self.bwram_sa1_mapping.bwram_block() & 0x1F)
+    }
+
+    pub(crate) fn bwram_sa1_bitmap(&self) -> bool {
+        self.bwram_sa1_mapping.bitmap()
+    }
+
+    fn set_bwram_sa1_mapping(&mut self, value: u8) {
+        self.bwram_sa1_mapping = Sa1BwramMapping::from_raw(value);
+    }
+
+    fn bwram_sa1_mapping_raw(&self) -> u8 {
+        self.bwram_sa1_mapping.raw()
+    }
+
     fn set_bwram_snes_write_enable(&mut self, value: u8) {
-        self.bwram_snes_write_enable = SnesBwramWriteEnable::from_raw(value & 0x80);
+        self.bwram_snes_write_enable = BwramWriteEnable::from_raw(value & 0x80);
     }
 
     fn bwram_snes_write_enable_raw(&self) -> u8 {
         self.bwram_snes_write_enable.raw()
+    }
+
+    fn set_bwram_sa1_write_enable(&mut self, value: u8) {
+        self.bwram_sa1_write_enable = BwramWriteEnable::from_raw(value & 0x80);
+    }
+
+    fn bwram_sa1_write_enable_raw(&self) -> u8 {
+        self.bwram_sa1_write_enable.raw()
     }
 
     fn set_bwram_protected_area(&mut self, value: u8) {
@@ -105,14 +137,22 @@ impl MemoryControl {
         self.bwram_protected_area.raw()
     }
 
-    pub(crate) fn bwram_write_allowed(&self, offset: usize) -> bool {
+    pub(crate) fn bwram_snes_write_allowed(&self, offset: usize) -> bool {
         self.bwram_snes_write_enable.write_enable()
+            || offset >= 0x100usize << self.bwram_protected_area.protected_size_exponent()
+    }
+
+    fn bwram_sa1_write_allowed(&self, offset: usize) -> bool {
+        self.bwram_sa1_write_enable.write_enable()
             || offset >= 0x100usize << self.bwram_protected_area.protected_size_exponent()
     }
 }
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct Sa1 {
+    pub cpu: Cpu,
+    clocks: u64,
+    clock_remainder: u64,
     #[serde(with = "BigArray")]
     pub iram: [u8; IRAM_SIZE] = IRAM_ZEROED,
     pub(crate) siwp: IramWriteProtection,
@@ -132,11 +172,26 @@ pub struct Sa1 {
 }
 
 impl Sa1 {
-    pub(crate) fn set_ccnt(&mut self, value: u8) {
+    pub(crate) fn set_ccnt(&mut self, value: u8, clocks: u64) {
+        let reset = self.ccnt.reset();
         let control = Sa1CpuControl::from_raw(value);
         self.sa1_nmi_pending |= control.nmi_request();
         self.snes_irq_to_sa1_pending |= control.irq_request();
         self.ccnt = control.with_nmi_request(false).with_irq_request(false);
+
+        let cpu = if control.reset() {
+            Some(Cpu::default())
+        } else if reset {
+            Some(Cpu::new(self.vectors[0]))
+        } else {
+            None
+        };
+
+        if let Some(cpu) = cpu {
+            self.cpu = cpu;
+            self.clocks = clocks;
+            self.clock_remainder = 0;
+        }
     }
 
     pub(crate) fn set_sie(&mut self, value: u8) {
@@ -203,10 +258,172 @@ impl Sa1 {
             self.iram[index] = value;
         }
     }
+
+    pub(crate) fn cpu_and_bus<'a>(
+        &'a mut self,
+        cartridge: &'a mut Cartridge,
+    ) -> (&'a mut Cpu, Bus<'a>) {
+        let Self {
+            cpu,
+            iram,
+            ciwp,
+            memory,
+            ..
+        } = self;
+        (
+            cpu,
+            Bus {
+                cartridge,
+                iram,
+                ciwp,
+                memory,
+            },
+        )
+    }
+
+    fn advance_clocks(&mut self, cycles: u64, master_clock_hz: u64) {
+        const SA1_CLOCK_HZ: u64 = crate::scheduler::MASTER_CLOCK_HZ_NTSC / 2;
+
+        let scaled = cycles * master_clock_hz + self.clock_remainder;
+        self.clocks += scaled / SA1_CLOCK_HZ;
+        self.clock_remainder = scaled % SA1_CLOCK_HZ;
+    }
+}
+
+pub(crate) struct Bus<'a> {
+    cartridge: &'a mut Cartridge,
+    iram: &'a mut [u8; IRAM_SIZE],
+    ciwp: &'a mut IramWriteProtection,
+    memory: &'a mut MemoryControl,
+}
+
+impl Bus<'_> {
+    fn space(&self, addr: Address) -> AddressSpace {
+        map::cpu_space(self.cartridge, self.memory, addr.bank(), addr.address())
+    }
+
+    fn read_io(&self, reg: u16) -> u8 {
+        match reg {
+            BMAP | CBWE | CIWP => OPEN_BUS,
+            _ => {
+                tracing::error!(
+                    cpu = "SA-1",
+                    reg = format!("{reg:04X}"),
+                    "Read from unmapped I/O register"
+                );
+                OPEN_BUS
+            }
+        }
+    }
+
+    fn write_io(&mut self, reg: u16, value: u8) {
+        match reg {
+            BMAP => self.memory.set_bwram_sa1_mapping(value),
+            CBWE => self.memory.set_bwram_sa1_write_enable(value),
+            CIWP => *self.ciwp = IramWriteProtection::from_raw(value),
+            _ => tracing::error!(
+                cpu = "SA-1",
+                reg = format!("{reg:04X}"),
+                value = format!("{value:02X}"),
+                "Write to unmapped I/O register"
+            ),
+        }
+    }
+
+    fn peek_io(&self, reg: u16) -> u8 {
+        match reg {
+            BMAP => self.memory.bwram_sa1_mapping_raw(),
+            CBWE => self.memory.bwram_sa1_write_enable_raw(),
+            CIWP => self.ciwp.raw(),
+            _ => OPEN_BUS,
+        }
+    }
+}
+
+impl CpuBus for Bus<'_> {
+    fn read8(&mut self, addr: Address) -> u8 {
+        match self.space(addr) {
+            AddressSpace::Iram(index) => self.iram[index],
+            AddressSpace::Cart(CartRegion::Ram, index) => self.cartridge.sram_read(index),
+            AddressSpace::Rom(index) => self.cartridge.rom[index],
+            AddressSpace::Io(reg) => self.read_io(reg),
+            _ => {
+                tracing::error!(
+                    cpu = "SA-1",
+                    addr = format!("{addr:?}"),
+                    "Read from unmapped address"
+                );
+                OPEN_BUS
+            }
+        }
+    }
+
+    fn write8(&mut self, addr: Address, value: u8) {
+        match self.space(addr) {
+            AddressSpace::Iram(index) => {
+                let block = index / IRAM_BLOCK_SIZE;
+                if self.ciwp.write_enabled(block) {
+                    self.iram[index] = value;
+                }
+            }
+            AddressSpace::Cart(CartRegion::Ram, index)
+                if self.memory.bwram_sa1_write_allowed(index) =>
+            {
+                self.cartridge.sram_write(index, value);
+            }
+            AddressSpace::Cart(CartRegion::Ram, _) => {}
+            AddressSpace::Rom(_) => tracing::warn!(
+                cpu = "SA-1",
+                addr = format!("{addr:?}"),
+                value = format!("{value:02X}"),
+                "Write to ROM"
+            ),
+            AddressSpace::Io(reg) => self.write_io(reg, value),
+            _ => tracing::error!(
+                cpu = "SA-1",
+                addr = format!("{addr:?}"),
+                value = format!("{value:02X}"),
+                "Write to unmapped address"
+            ),
+        }
+    }
+
+    fn peek8(&self, addr: Address) -> u8 {
+        match self.space(addr) {
+            AddressSpace::Iram(index) => self.iram[index],
+            AddressSpace::Cart(CartRegion::Ram, index) => self.cartridge.sram_read(index),
+            AddressSpace::Rom(index) => self.cartridge.rom[index],
+            AddressSpace::Io(reg) => self.peek_io(reg),
+            _ => OPEN_BUS,
+        }
+    }
+}
+
+pub(crate) fn run_until<M: MemoryMap>(snes: &mut crate::Bus<M>, target: u64) {
+    if snes.mmu.cartridge.coprocessor() != Coprocessor::Sa1 {
+        return;
+    }
+
+    if snes.sa1.ccnt.reset()
+        || snes.sa1.ccnt.wait()
+        || snes.sa1.cpu.execution != crate::cpu::ExecutionState::Running
+    {
+        snes.sa1.clocks = target;
+        return;
+    }
+
+    let master_clock_hz = snes.scheduler.master_clock_hz();
+    while snes.sa1.clocks < target {
+        let cycles = {
+            let (cpu, mut bus) = snes.sa1.cpu_and_bus(&mut snes.mmu.cartridge);
+            crate::cpu::step_on_bus(cpu, &mut bus)
+        };
+        snes.sa1.advance_clocks(cycles, master_clock_hz);
+    }
 }
 
 pub(crate) fn snes_cart_read<M: crate::mmio::MemoryMap>(
-    snes: &crate::SnesBus<M>,
+    snes: &crate::Bus<M>,
     region: crate::mmio::CartRegion,
     index: usize,
 ) -> u8 {
@@ -217,13 +434,13 @@ pub(crate) fn snes_cart_read<M: crate::mmio::MemoryMap>(
 }
 
 pub(crate) fn snes_cart_write<M: crate::mmio::MemoryMap>(
-    snes: &mut crate::SnesBus<M>,
+    snes: &mut crate::Bus<M>,
     region: crate::mmio::CartRegion,
     index: usize,
     value: u8,
 ) {
     match region {
-        crate::mmio::CartRegion::Ram if snes.sa1.memory.bwram_write_allowed(index) => {
+        crate::mmio::CartRegion::Ram if snes.sa1.memory.bwram_snes_write_allowed(index) => {
             snes.mmu.cartridge.sram_write(index, value);
         }
         crate::mmio::CartRegion::Ram => {}

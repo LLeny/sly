@@ -41,10 +41,10 @@ use std::ops::{Deref, DerefMut};
 
 pub struct Snes<M: MemoryMap = CartridgeMap> {
     pub cpu: Cpu,
-    bus: SnesBus<M>,
+    bus: Bus<M>,
 }
 
-pub struct SnesBus<M: MemoryMap = CartridgeMap> {
+pub struct Bus<M: MemoryMap = CartridgeMap> {
     pub mmu: Mmio<M>,
     pub irq: Irq,
     pub dma: Dma,
@@ -97,7 +97,7 @@ impl<'de, M: MemoryMap> Deserialize<'de> for Snes<M> {
         let state = SerializedSnes::deserialize(deserializer)?;
         Ok(Self {
             cpu: state.cpu,
-            bus: SnesBus {
+            bus: Bus {
                 mmu: state.mmu,
                 irq: state.irq,
                 dma: state.dma,
@@ -114,7 +114,7 @@ impl<'de, M: MemoryMap> Deserialize<'de> for Snes<M> {
 }
 
 impl<M: MemoryMap> Deref for Snes<M> {
-    type Target = SnesBus<M>;
+    type Target = Bus<M>;
 
     fn deref(&self) -> &Self::Target {
         &self.bus
@@ -138,7 +138,7 @@ impl<M: MemoryMap> Snes<M> {
         let tv_system = mmu.cartridge.region().tv_system();
         let mut snes = Self {
             cpu: Cpu::new(0),
-            bus: SnesBus {
+            bus: Bus {
                 mmu,
                 irq: Irq::default(),
                 dma: Dma::default(),
@@ -228,6 +228,8 @@ impl<M: MemoryMap> Snes<M> {
     pub fn step(&mut self) {
         cpu::step(self);
         self.bus.sync();
+        let clocks = self.mmu.clocks;
+        sa1::run_until(&mut self.bus, clocks);
     }
 
     pub fn run_frame(&mut self) {
@@ -238,7 +240,7 @@ impl<M: MemoryMap> Snes<M> {
     }
 }
 
-impl<M: MemoryMap> SnesBus<M> {
+impl<M: MemoryMap> Bus<M> {
     #[inline]
     pub(crate) fn sync(&mut self) {
         let clocks = self.mmu.clocks;

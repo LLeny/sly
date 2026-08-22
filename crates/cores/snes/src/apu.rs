@@ -1,7 +1,7 @@
 use crate::apu::regs::Control;
 #[cfg(feature = "debug")]
 use crate::mmio::{AccessTracker, MemKind};
-use crate::{MemoryMap, SnesBus};
+use crate::{Bus, MemoryMap};
 use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
@@ -253,7 +253,7 @@ fn tick_timer(apu: &mut Apu<impl ApuMap>, index: usize) {
     }
 }
 
-pub(crate) fn timer01_tick<M: MemoryMap>(snes: &mut SnesBus<M>, _deadline: u64) {
+pub(crate) fn timer01_tick<M: MemoryMap>(snes: &mut Bus<M>, _deadline: u64) {
     if snes.apu.control.enable_timer0() {
         tick_timer(&mut snes.apu, 0);
     }
@@ -263,12 +263,12 @@ pub(crate) fn timer01_tick<M: MemoryMap>(snes: &mut SnesBus<M>, _deadline: u64) 
     }
 }
 
-pub(crate) fn timer2_tick<M: MemoryMap>(snes: &mut SnesBus<M>, _deadline: u64) {
+pub(crate) fn timer2_tick<M: MemoryMap>(snes: &mut Bus<M>, _deadline: u64) {
     if snes.apu.control.enable_timer2() {
         tick_timer(&mut snes.apu, 2);
     }
 }
 
-pub(crate) fn dsp_tick<M: MemoryMap>(snes: &mut SnesBus<M>, _deadline: u64) {
+pub(crate) fn dsp_tick<M: MemoryMap>(snes: &mut Bus<M>, _deadline: u64) {
     snes.apu.dsp_tick();
 }

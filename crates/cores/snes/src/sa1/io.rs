@@ -1,4 +1,4 @@
-use crate::SnesBus;
+use crate::Bus;
 use crate::mmio::MemoryMap;
 use crate::mmio::device::{Access, IoRegister, RegEntry};
 use crate::sa1::regs::{
@@ -30,11 +30,11 @@ impl IoRegister for RomBanks {
     const END: u16 = ROM_BANK_END;
     const READ: Access = Access::Ignored;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, reg: u16, value: u8) {
         snes.sa1.memory.set_rom_bank(reg, value);
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, reg: u16) -> u8 {
         snes.sa1.memory.rom_bank_raw(reg)
     }
 }
@@ -45,11 +45,11 @@ impl IoRegister for Bmaps {
     const START: u16 = BMAPS;
     const READ: Access = Access::Ignored;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         snes.sa1.memory.set_bwram_snes_block(value);
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         snes.sa1.memory.bwram_snes_block_raw()
     }
 }
@@ -60,11 +60,11 @@ impl IoRegister for Sbwe {
     const START: u16 = SBWE;
     const READ: Access = Access::Ignored;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         snes.sa1.memory.set_bwram_snes_write_enable(value);
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         snes.sa1.memory.bwram_snes_write_enable_raw()
     }
 }
@@ -75,11 +75,11 @@ impl IoRegister for Bwpa {
     const START: u16 = BWPA;
     const READ: Access = Access::Ignored;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         snes.sa1.memory.set_bwram_protected_area(value);
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         snes.sa1.memory.bwram_protected_area_raw()
     }
 }
@@ -90,11 +90,11 @@ impl IoRegister for Ccnt {
     const START: u16 = Sa1CpuControl::ADDRESS;
     const READ: Access = Access::Ignored;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
-        snes.sa1.set_ccnt(value);
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
+        snes.sa1.set_ccnt(value, snes.mmu.clocks);
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         snes.sa1.ccnt.raw()
     }
 }
@@ -105,11 +105,11 @@ impl IoRegister for Sie {
     const START: u16 = SIE;
     const READ: Access = Access::Ignored;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         snes.sa1.set_sie(value);
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         snes.sa1.sie.raw()
     }
 }
@@ -120,11 +120,11 @@ impl IoRegister for Sic {
     const START: u16 = SIC;
     const READ: Access = Access::Ignored;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         snes.sa1.clear_snes_interrupts(value);
     }
 
-    fn peek<M: MemoryMap>(_snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(_snes: &Bus<M>, _reg: u16) -> u8 {
         0
     }
 }
@@ -136,11 +136,11 @@ impl IoRegister for Vectors {
     const END: u16 = VECTOR_END;
     const READ: Access = Access::Ignored;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, reg: u16, value: u8) {
         snes.sa1.set_vector_byte(reg, value);
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, reg: u16) -> u8 {
         snes.sa1.vector_byte(reg)
     }
 }
@@ -151,11 +151,11 @@ impl IoRegister for Siwp {
     const START: u16 = SIWP;
     const READ: Access = Access::Ignored;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         snes.sa1.set_siwp(value);
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         snes.sa1.siwp.raw()
     }
 }
@@ -166,11 +166,11 @@ impl IoRegister for Ciwp {
     const START: u16 = CIWP;
     const READ: Access = Access::Ignored;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         snes.sa1.set_ciwp(value);
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         snes.sa1.ciwp.raw()
     }
 }
@@ -181,11 +181,11 @@ impl IoRegister for Cdma {
     const START: u16 = CharacterConversionDmaParameters::ADDRESS;
     const READ: Access = Access::Ignored;
 
-    fn write<M: MemoryMap>(snes: &mut SnesBus<M>, _reg: u16, value: u8) {
+    fn write<M: MemoryMap>(snes: &mut Bus<M>, _reg: u16, value: u8) {
         snes.sa1.set_cdma(value);
     }
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         snes.sa1.cdma.raw()
     }
 }
@@ -196,7 +196,7 @@ impl IoRegister for Sfr {
     const START: u16 = SnesFlags::ADDRESS;
     const WRITE: Access = Access::Unmapped;
 
-    fn peek<M: MemoryMap>(snes: &SnesBus<M>, _reg: u16) -> u8 {
+    fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         snes.sa1.sfr().raw()
     }
 }

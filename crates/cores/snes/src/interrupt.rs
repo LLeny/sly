@@ -1,4 +1,4 @@
-use crate::SnesBus;
+use crate::Bus;
 use crate::mmio::MemoryMap;
 use crate::mmio::regs::{NmiTimerEnable, VblankFlagCpuVersion};
 use serde::{Deserialize, Serialize};
@@ -136,7 +136,7 @@ impl Irq {
     }
 }
 
-pub(crate) fn hv_targets_updated<M: MemoryMap>(snes: &mut SnesBus<M>) {
+pub(crate) fn hv_targets_updated<M: MemoryMap>(snes: &mut Bus<M>) {
     let condition = snes.irq.hv_timer_condition();
     if condition & 1 == 0 {
         return;
@@ -160,7 +160,7 @@ pub(crate) fn hv_targets_updated<M: MemoryMap>(snes: &mut SnesBus<M>) {
     }
 }
 
-pub(crate) fn hv_timer_line<M: MemoryMap>(snes: &mut SnesBus<M>, deadline: u64) {
+pub(crate) fn hv_timer_line<M: MemoryMap>(snes: &mut Bus<M>, deadline: u64) {
     let condition = snes.irq.hv_timer_condition();
     if condition == 0 {
         return;
@@ -181,7 +181,7 @@ pub(crate) fn hv_timer_line<M: MemoryMap>(snes: &mut SnesBus<M>, deadline: u64) 
     }
 }
 
-fn schedule_h_fire<M: MemoryMap>(snes: &mut SnesBus<M>, line_start: u64, htime: u64) {
+fn schedule_h_fire<M: MemoryMap>(snes: &mut Bus<M>, line_start: u64, htime: u64) {
     if let Some(deadline) = h_timer_irq_deadline(line_start, htime) {
         snes.scheduler
             .schedule_event(deadline, crate::scheduler::EventKind::HvTimerFire);
@@ -193,7 +193,7 @@ fn h_timer_irq_deadline(line_start: u64, htime: u64) -> Option<u64> {
         .then(|| line_start + htime * MASTER_CLOCKS_PER_DOT + H_TIMER_IRQ_OFFSET)
 }
 
-pub(crate) fn hv_timer_fire<M: MemoryMap>(snes: &mut SnesBus<M>, _deadline: u64) {
+pub(crate) fn hv_timer_fire<M: MemoryMap>(snes: &mut Bus<M>, _deadline: u64) {
     if snes.irq.hv_timer_condition() & 1 != 0 {
         snes.irq.raise_timer();
     }

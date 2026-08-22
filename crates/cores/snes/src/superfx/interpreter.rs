@@ -1,4 +1,4 @@
-use crate::SnesBus;
+use crate::Bus;
 use crate::mmio::{Address, MemoryMap};
 use crate::superfx::bitmap::{self, PixelCache, Screen};
 use crate::superfx::decoder::{
@@ -8,16 +8,16 @@ use crate::superfx::decoder::{
 };
 
 struct Interpreter<'a, M: MemoryMap> {
-    snes: &'a mut SnesBus<M>,
+    snes: &'a mut Bus<M>,
     r15_changed: bool,
     cycles: u64,
 }
 
-pub(super) fn step<M: MemoryMap>(snes: &mut SnesBus<M>) -> u64 {
+pub(super) fn step<M: MemoryMap>(snes: &mut Bus<M>) -> u64 {
     Interpreter::new(snes).step()
 }
 
-pub(super) fn drain_buffers<M: MemoryMap>(snes: &mut SnesBus<M>) {
+pub(super) fn drain_buffers<M: MemoryMap>(snes: &mut Bus<M>) {
     let pending = snes
         .superfx
         .rom_buffer
@@ -30,7 +30,7 @@ pub(super) fn drain_buffers<M: MemoryMap>(snes: &mut SnesBus<M>) {
 }
 
 impl<'a, M: MemoryMap> Interpreter<'a, M> {
-    fn new(snes: &'a mut SnesBus<M>) -> Self {
+    fn new(snes: &'a mut Bus<M>) -> Self {
         Self {
             snes,
             r15_changed: false,
