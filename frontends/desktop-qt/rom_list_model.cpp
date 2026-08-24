@@ -1,5 +1,7 @@
 #include "rom_list_model.h"
 
+#include "sly/sly.hpp"
+
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
@@ -15,9 +17,9 @@
 #include <exception>
 #include <limits>
 #include <optional>
+#include <span>
+#include <string_view>
 #include <utility>
-
-#include "sly-cxx/src/lib.rs.h"
 
 namespace {
 constexpr double KIBIBYTE = 1024.0;
@@ -29,10 +31,6 @@ QString format_size(quint64 bytes) {
     }
 
     return QStringLiteral("%1 KiB").arg(static_cast<double>(bytes) / KIBIBYTE, 0, 'f', 0);
-}
-
-QString from_rust_string(const rust::String& text) {
-    return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
 }
 
 QImage fit_wheel(QImage image) {
@@ -76,20 +74,21 @@ QImage fit_wheel(QImage image) {
     return banner;
 }
 
-std::optional<sly::CartridgeInfo> read_cartridge_info(sly::System system, const QString& path) {
+std::optional<sly::CartridgeInfo>
+read_cartridge_info(const sly::SystemDescriptor system, const QString& path) {
     QFile rom(path);
     if (!rom.open(QIODevice::ReadOnly)) {
         return std::nullopt;
     }
 
     const auto bytes = rom.readAll();
-    const auto rom_bytes = rust::Slice<const std::uint8_t>(
+    const auto rom_bytes = std::span<const std::uint8_t>(
         reinterpret_cast<const std::uint8_t*>(bytes.constData()),
         static_cast<std::size_t>(bytes.size())
     );
 
     try {
-        return sly::inspect_cartridge(system, rom_bytes);
+        return system.inspect(rom_bytes);
     } catch (const std::exception&) {
         return std::nullopt;
     }
@@ -102,14 +101,14 @@ QImage fetch_wheel(std::size_t system_index, const QString& path) {
     }
 
     const auto bytes = rom.readAll();
-    const auto rom_bytes = rust::Slice<const std::uint8_t>(
+    const auto rom_bytes = std::span<const std::uint8_t>(
         reinterpret_cast<const std::uint8_t*>(bytes.constData()),
         static_cast<std::size_t>(bytes.size())
     );
 
     try {
-        const auto system = sly::system_at(system_index);
-        const auto wheel = sly::fetch_wheel_artwork(system, rom_bytes);
+        const auto system = sly::systems().at(system_index);
+        const auto wheel = system.fetch_wheel_artwork(rom_bytes);
         if (wheel.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
             return {};
         }
@@ -127,7 +126,7 @@ int RomListModel::rowCount(const QModelIndex& parent) const {
 }
 
 int RomListModel::columnCount(const QModelIndex& parent) const {
-    return parent.isValid() ? 0 : static_cast<int>(std::to_underlying(Column::Size)) + 1;
+    return parent.isValid() ? 0 : static_cast<int>(Column::Size) + 1;
 }
 
 QVariant RomListModel::data(const QModelIndex& index, const int role) const {
@@ -234,7 +233,7 @@ void RomListModel::load_banners() {
             }
 
             entries_[row].banner = QPixmap::fromImage(image);
-            const auto column = static_cast<int>(std::to_underlying(Column::Banner));
+            const auto column = static_cast<int>(Column::Banner);
             const auto banner = index(row, column);
             emit dataChanged(banner, banner, {Qt::DecorationRole});
         });
@@ -252,13 +251,12 @@ QVector<RomEntry> RomListModel::entries_from_directory(const QString& root_path)
     }
 
     QVector<RomEntry> entries;
-    for (std::size_t index = 0; index < sly::system_count(); ++index) {
-        const sly::System system = sly::system_at(index);
-        const auto slug = from_rust_string(sly::system_slug(system));
+    for (const auto system : sly::systems()) {
+        const auto slug = QString::fromStdString(system.slug());
 
         QSet<QString> extensions;
-        for (const rust::String& extension : sly::system_extensions(system)) {
-            extensions.insert(from_rust_string(extension).toLower());
+        for (const auto& extension : system.extensions()) {
+            extensions.insert(QString::fromStdString(extension).toLower());
         }
 
         QDirIterator files(
@@ -275,16 +273,16 @@ QVector<RomEntry> RomListModel::entries_from_directory(const QString& root_path)
                 continue;
             }
 
-            const auto cartridge_title = from_rust_string(cartridge->title);
+            const auto cartridge_title = QString::fromStdString(cartridge->title);
             const auto title =
                 cartridge_title.isEmpty() ? file.completeBaseName() : cartridge_title;
 
             entries.append({
-                .system_index = index,
+                .system_index = system.index(),
                 .title = title,
                 .file_name = file.fileName(),
                 .path = file.absoluteFilePath(),
-                .region_name = from_rust_string(cartridge->region_name),
+                .region_name = QString::fromStdString(cartridge->region_name),
                 .file_size = static_cast<quint64>(file.size()),
                 .banner = {},
             });

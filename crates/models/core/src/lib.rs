@@ -25,6 +25,18 @@ impl System {
         }
     }
 
+    pub const fn name(self) -> &'static str {
+        match self {
+            System::Snes => "SNES",
+        }
+    }
+
+    pub const fn qualified_name(self) -> &'static str {
+        match self {
+            System::Snes => "Super Nintendo Entertainment System",
+        }
+    }
+
     pub const fn rom_extensions(self) -> &'static [&'static str] {
         match self {
             System::Snes => &["sfc", "smc"],

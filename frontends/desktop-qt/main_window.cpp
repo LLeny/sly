@@ -2,13 +2,16 @@
 
 #include "rom_list_model.h"
 
+#include "sly/sly.hpp"
+
 #include <QDir>
 #include <QHeaderView>
+#include <QMenuBar>
 #include <QSortFilterProxyModel>
 #include <QStyledItemDelegate>
 #include <QTableView>
 
-#include <utility>
+#include <print>
 
 namespace {
 class RowDelegate final : public QStyledItemDelegate {
@@ -19,16 +22,14 @@ protected:
     void initStyleOption(QStyleOptionViewItem* option, const QModelIndex& index) const override {
         QStyledItemDelegate::initStyleOption(option, index);
         option->state &= ~QStyle::State_HasFocus;
-        if (index.column() == static_cast<int>(std::to_underlying(RomListModel::Column::Banner))) {
+        if (index.column() == static_cast<int>(RomListModel::Column::Banner)) {
             option->decorationAlignment = Qt::AlignCenter;
         }
     }
 };
 
 void configure_table(QTableView& table) {
-    const auto column_index = [](RomListModel::Column column) {
-        return static_cast<int>(std::to_underlying(column));
-    };
+    const auto column_index = [](RomListModel::Column column) { return static_cast<int>(column); };
 
     table.setAlternatingRowColors(true);
     table.setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -74,6 +75,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle(tr("Sly Desktop"));
     setMinimumSize(900, 500);
     resize(1180, 720);
+
+    QMenuBar* menu_bar = new QMenuBar(this);
+    setMenuBar(menu_bar);
+
+    auto* file_menu = menu_bar->addMenu(tr("&File"));
+    auto* cores_menu = menu_bar->addMenu(tr("&Cores"));
+
+    file_menu->addAction(tr("&Load ROM"), this, [] {
+        std::println("load rom stub");
+    });
+    file_menu->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
+
+    for (const auto system : sly::systems()) {
+        const auto core_name = QString::fromStdString(system.name());
+
+        cores_menu->addAction(core_name, this, [core_name]() {
+            std::println("load core stub: {}", core_name.toStdString());
+        });
+    }
 
     auto* model = new RomListModel(this);
     auto* proxy = new QSortFilterProxyModel(this);

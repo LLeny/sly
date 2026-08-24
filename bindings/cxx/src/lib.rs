@@ -3,7 +3,7 @@ use sly::runtime::{
     Runtime, button_from_index, inspect_cartridge as inspect_runtime_cartridge, system_from_index,
 };
 
-#[cxx::bridge(namespace = "sly")]
+#[cxx::bridge(namespace = "sly::ffi")]
 mod ffi {
     /// `channels == 0` means the core has no audio output.
     #[derive(Clone, Copy, Debug)]
@@ -58,6 +58,8 @@ mod ffi {
         fn system_count() -> usize;
         fn system_at(index: usize) -> Result<System>;
         fn system_slug(system: System) -> Result<String>;
+        fn system_name(system: System) -> Result<String>;
+        fn system_qualified_name(system: System) -> Result<String>;
         fn system_extensions(system: System) -> Result<Vec<String>>;
         fn inspect_cartridge(system: System, rom: &[u8]) -> Result<CartridgeInfo>;
         fn fetch_wheel_artwork(system: System, rom: &[u8]) -> Result<Vec<u8>>;
@@ -128,6 +130,14 @@ fn system_at(index: usize) -> Result<ffi::System, String> {
 
 fn system_slug(system: ffi::System) -> Result<String, String> {
     Ok(core_system(system)?.slug().to_owned())
+}
+
+fn system_name(system: ffi::System) -> Result<String, String> {
+    Ok(core_system(system)?.name().to_owned())
+}
+
+fn system_qualified_name(system: ffi::System) -> Result<String, String> {
+    Ok(core_system(system)?.qualified_name().to_owned())
 }
 
 fn system_extensions(system: ffi::System) -> Result<Vec<String>, String> {

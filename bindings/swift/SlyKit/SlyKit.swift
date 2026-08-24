@@ -23,12 +23,13 @@ public enum System: Hashable, Sendable {
     }
 
     public var displayName: String {
-        switch self {
-        case .snes:
-            "Super Nintendo Entertainment System"
-        }
+        nativeString(sly_system_name(native))
     }
-    
+
+    public var qualifiedName: String {
+        nativeString(sly_system_qualified_name(native))
+    }
+
     var native: SlySystem {
         switch self {
         case .snes: SLY_SYSTEM_SNES

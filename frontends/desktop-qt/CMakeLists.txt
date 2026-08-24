@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 4.3)
 project(desktop_qt LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -46,8 +46,9 @@ add_custom_target(sly_cxx_cargo
 add_library(sly_cxx STATIC IMPORTED GLOBAL)
 set_target_properties(sly_cxx PROPERTIES
         IMPORTED_LOCATION "${SLY_CXX_LIB}"
-        INTERFACE_INCLUDE_DIRECTORIES "${SLY_TARGET_DIR}/cxxbridge"
+        INTERFACE_INCLUDE_DIRECTORIES "${SLY_ROOT}/bindings/cxx/include;${SLY_TARGET_DIR}/cxxbridge"
 )
+target_compile_features(sly_cxx INTERFACE cxx_std_20)
 add_dependencies(sly_cxx sly_cxx_cargo)
 add_library(sly::cxx ALIAS sly_cxx)
 

@@ -101,6 +101,8 @@ pub struct SlyCartridgeInfo {
 
 struct SystemMetadata {
     slug: CString,
+    name: CString,
+    qualified_name: CString,
     extensions: Vec<CString>,
 }
 
@@ -150,6 +152,8 @@ fn system_metadata() -> &'static [SystemMetadata] {
             .iter()
             .map(|system| SystemMetadata {
                 slug: cstring_lossy(system.slug()),
+                name: cstring_lossy(system.name()),
+                qualified_name: cstring_lossy(system.qualified_name()),
                 extensions: system
                     .rom_extensions()
                     .iter()
@@ -192,6 +196,24 @@ pub extern "C" fn sly_system_slug(system: SlySystem) -> *const c_char {
     system_metadata()
         .get(system as usize)
         .map_or(std::ptr::null(), |metadata| metadata.slug.as_ptr())
+}
+
+/// Never NULL for a valid system. Static UTF-8; do not free.
+#[unsafe(no_mangle)]
+pub extern "C" fn sly_system_name(system: SlySystem) -> *const c_char {
+    system_metadata()
+        .get(system as usize)
+        .map_or(std::ptr::null(), |metadata| metadata.name.as_ptr())
+}
+
+/// Never NULL for a valid system. Static UTF-8; do not free.
+#[unsafe(no_mangle)]
+pub extern "C" fn sly_system_qualified_name(system: SlySystem) -> *const c_char {
+    system_metadata()
+        .get(system as usize)
+        .map_or(std::ptr::null(), |metadata| {
+            metadata.qualified_name.as_ptr()
+        })
 }
 
 #[unsafe(no_mangle)]

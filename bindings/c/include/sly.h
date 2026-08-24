@@ -158,6 +158,12 @@ bool sly_system_at(size_t index, enum SlySystem *out_system);
 // Never NULL for a valid system. Static UTF-8; do not free.
 const char *sly_system_slug(enum SlySystem system);
 
+// Never NULL for a valid system. Static UTF-8; do not free.
+const char *sly_system_name(enum SlySystem system);
+
+// Never NULL for a valid system. Static UTF-8; do not free.
+const char *sly_system_qualified_name(enum SlySystem system);
+
 size_t sly_system_extension_count(enum SlySystem system);
 
 // Never NULL for a valid system and extension index. Static UTF-8; do not free.
