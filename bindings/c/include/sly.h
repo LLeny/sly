@@ -52,6 +52,11 @@ typedef enum SlyRegion {
   SLY_REGION_OTHER,
 } SlyRegion;
 
+typedef enum SlyTvSystem {
+  SLY_TV_SYSTEM_NTSC = 0,
+  SLY_TV_SYSTEM_PAL,
+} SlyTvSystem;
+
 typedef enum SlyButton {
   SLY_BUTTON_UP = 0,
   SLY_BUTTON_DOWN,
@@ -66,11 +71,6 @@ typedef enum SlyButton {
   SLY_BUTTON_START,
   SLY_BUTTON_SELECT,
 } SlyButton;
-
-typedef enum SlyTvSystem {
-  SLY_TV_SYSTEM_NTSC = 0,
-  SLY_TV_SYSTEM_PAL,
-} SlyTvSystem;
 
 typedef struct SlyCore SlyCore;
 
@@ -97,6 +97,18 @@ typedef struct SlyArtworkManifest {
   struct SlyBuffer spine_url;
   struct SlyBuffer label_url;
 } SlyArtworkManifest;
+
+// Rust-allocated cartridge metadata. Free exactly once with
+// `sly_cartridge_info_free`.
+typedef struct SlyCartridgeInfo {
+  struct SlyBuffer title;
+  struct SlyBuffer system;
+  struct SlyBuffer region_name;
+  enum SlyTvSystem tv_system;
+  uint32_t rom_crc32;
+  bool has_battery;
+  size_t sram_size;
+} SlyCartridgeInfo;
 
 typedef struct SlyAudioSpec {
   uint32_t sample_rate;
@@ -138,6 +150,26 @@ void sly_artwork_query_free(struct SlyArtworkQuery *query);
 void sly_artwork_manifest_free(struct SlyArtworkManifest *manifest);
 
 uint32_t sly_abi_version(void);
+
+size_t sly_system_count(void);
+
+bool sly_system_at(size_t index, enum SlySystem *out_system);
+
+// Never NULL for a valid system. Static UTF-8; do not free.
+const char *sly_system_slug(enum SlySystem system);
+
+size_t sly_system_extension_count(enum SlySystem system);
+
+// Never NULL for a valid system and extension index. Static UTF-8; do not free.
+const char *sly_system_extension(enum SlySystem system, size_t index);
+
+enum SlyStatus sly_cartridge_inspect(enum SlySystem system,
+                                     const uint8_t *rom,
+                                     size_t rom_len,
+                                     struct SlyCartridgeInfo *out_info);
+
+// NULL is a no-op.
+void sly_cartridge_info_free(struct SlyCartridgeInfo *info);
 
 // Never NULL; empty when no error has occurred. Valid until the next failing
 // `sly_*` call on the same thread. Do not free.

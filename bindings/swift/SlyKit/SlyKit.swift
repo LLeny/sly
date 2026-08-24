@@ -10,6 +10,18 @@ public enum SlyError: Error, Equatable {
 public enum System: Hashable, Sendable {
     case snes
 
+    public static let all: [System] = [.snes]
+
+    public var slug: String {
+        nativeString(sly_system_slug(native))
+    }
+
+    public var romExtensions: [String] {
+        (0..<sly_system_extension_count(native)).map {
+            nativeString(sly_system_extension(native, $0))
+        }
+    }
+
     public var displayName: String {
         switch self {
         case .snes:
@@ -71,6 +83,43 @@ public struct Cartridge {
     public let romCRC32: UInt32
     public let hasBattery: Bool
     public let saveRAMSize: Int
+
+    public static func inspect(
+        system: System = .snes,
+        rom: Data
+    ) throws -> Cartridge {
+        try checkABI()
+
+        var info = SlyCartridgeInfo(
+            title: SlyBuffer(data: nil, len: 0),
+            system: SlyBuffer(data: nil, len: 0),
+            region_name: SlyBuffer(data: nil, len: 0),
+            tv_system: SLY_TV_SYSTEM_NTSC,
+            rom_crc32: 0,
+            has_battery: false,
+            sram_size: 0
+        )
+        let status = rom.withUnsafeBytes { bytes in
+            sly_cartridge_inspect(
+                system.native,
+                bytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                bytes.count,
+                &info
+            )
+        }
+        try checkNativeStatus(status)
+        defer { sly_cartridge_info_free(&info) }
+
+        return Cartridge(
+            title: nativeString(info.title),
+            system: nativeString(info.system),
+            region: nativeString(info.region_name),
+            televisionSystem: info.tv_system == SLY_TV_SYSTEM_PAL ? .pal : .ntsc,
+            romCRC32: info.rom_crc32,
+            hasBattery: info.has_battery,
+            saveRAMSize: info.sram_size
+        )
+    }
 }
 
 /// Owns one native emulator instance. Use it from one execution context at a
@@ -81,13 +130,7 @@ public final class EmulatorCore {
     private let handle: OpaquePointer
 
     public init(system: System = .snes, rom: Data) throws {
-        let actualABI = sly_abi_version()
-        guard actualABI == Self.expectedABIVersion else {
-            throw SlyError.incompatibleABI(
-                expected: Self.expectedABIVersion,
-                actual: actualABI
-            )
-        }
+        try checkABI()
 
         var core: OpaquePointer?
         let status = rom.withUnsafeBytes { bytes in
@@ -223,6 +266,21 @@ public final class EmulatorCore {
 
 func nativeString(_ pointer: UnsafePointer<CChar>?) -> String {
     pointer.map(String.init(cString:)) ?? ""
+}
+
+func nativeString(_ buffer: SlyBuffer) -> String {
+    guard let data = buffer.data else { return "" }
+    return String(decoding: UnsafeBufferPointer(start: data, count: buffer.len), as: UTF8.self)
+}
+
+func checkABI() throws {
+    let actualABI = sly_abi_version()
+    guard actualABI == EmulatorCore.expectedABIVersion else {
+        throw SlyError.incompatibleABI(
+            expected: EmulatorCore.expectedABIVersion,
+            actual: actualABI
+        )
+    }
 }
 
 func checkNativeStatus(_ status: SlyStatus) throws {

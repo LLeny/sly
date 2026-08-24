@@ -1,17 +1,7 @@
-use core_model::{AudioSpec, Core, StateError, System, TvSystem};
+use core_model::{AudioSpec, CartridgeInfo, Core, StateError, System};
 use snes::{Cartridge, Snes, SnesError};
 
 pub use core_model::Button;
-
-/// Captured at load time, before the `Cartridge` is consumed by the core.
-pub struct CoreMeta {
-    pub title: String,
-    pub region_name: String,
-    pub tv_system: TvSystem,
-    pub rom_crc32: u32,
-    pub has_battery: bool,
-    pub sram_size: usize,
-}
 
 /// The stable index shared by the C and C++ APIs.
 pub fn button_from_index(index: usize) -> Option<Button> {
@@ -20,10 +10,21 @@ pub fn button_from_index(index: usize) -> Option<Button> {
 
 /// The stable index shared by the C and C++ APIs.
 pub fn system_from_index(index: usize) -> Option<System> {
-    match index {
-        0 => Some(System::Snes),
-        _ => None,
+    System::ALL.get(index).copied()
+}
+
+pub fn inspect_cartridge(system: System, rom: Vec<u8>) -> Result<CartridgeInfo, String> {
+    match system {
+        System::Snes => Cartridge::new(rom)
+            .map(|cartridge| cartridge.info())
+            .map_err(|error| error.to_string()),
     }
+}
+
+fn load_snes(rom: Vec<u8>) -> Result<(Box<dyn Core + Send>, CartridgeInfo), SnesError> {
+    let cartridge = Cartridge::new(rom)?;
+    let info = cartridge.info();
+    Ok((Box::new(Snes::new(cartridge)), info))
 }
 
 /// Assert at compile time that a binding's button enum matches the index
@@ -64,20 +65,18 @@ macro_rules! assert_button_order {
 /// Not thread-safe: use a handle from one thread at a time. The handle itself
 /// may be moved between threads.
 pub struct Runtime {
-    system: System,
     core: Box<dyn Core + Send>,
     audio_scratch: Vec<i16>,
     audio_cursor: usize,
-    meta: CoreMeta,
+    meta: CartridgeInfo,
 }
 
 impl Runtime {
     pub fn new(system: System, rom: Vec<u8>) -> Result<Self, String> {
         let (core, meta) = match system {
-            System::Snes => Self::load_snes(rom).map_err(|error| error.to_string())?,
+            System::Snes => load_snes(rom).map_err(|error| error.to_string())?,
         };
         Ok(Self {
-            system,
             core,
             audio_scratch: Vec::new(),
             audio_cursor: 0,
@@ -85,25 +84,7 @@ impl Runtime {
         })
     }
 
-    fn load_snes(rom: Vec<u8>) -> Result<(Box<dyn Core + Send>, CoreMeta), SnesError> {
-        let cartridge = Cartridge::new(rom)?;
-        let region = cartridge.region();
-        let meta = CoreMeta {
-            title: cartridge.title(),
-            region_name: region.to_string(),
-            tv_system: region.tv_system(),
-            rom_crc32: cartridge.rom_crc32(),
-            has_battery: cartridge.has_battery(),
-            sram_size: cartridge.sram_size(),
-        };
-        Ok((Box::new(Snes::new(cartridge)), meta))
-    }
-
-    pub fn system_slug(&self) -> &'static str {
-        self.system.slug()
-    }
-
-    pub fn meta(&self) -> &CoreMeta {
+    pub fn meta(&self) -> &CartridgeInfo {
         &self.meta
     }
 

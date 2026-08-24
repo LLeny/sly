@@ -17,9 +17,17 @@ pub enum System {
 }
 
 impl System {
+    pub const ALL: [System; 1] = [System::Snes];
+
     pub const fn slug(self) -> &'static str {
         match self {
             System::Snes => "snes",
+        }
+    }
+
+    pub const fn rom_extensions(self) -> &'static [&'static str] {
+        match self {
+            System::Snes => &["sfc", "smc"],
         }
     }
 }
@@ -148,6 +156,16 @@ impl std::fmt::Display for Region {
         };
         write!(f, "{name} ({})", self.tv_system())
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CartridgeInfo {
+    pub system: System,
+    pub title: String,
+    pub region: Region,
+    pub rom_crc32: u32,
+    pub has_battery: bool,
+    pub sram_size: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

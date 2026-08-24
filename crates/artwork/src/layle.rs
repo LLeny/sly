@@ -101,7 +101,7 @@ fn art_variants(region: Region) -> &'static [&'static str] {
 }
 
 #[cfg(all(feature = "fetch", not(target_family = "wasm")))]
-pub use fetch::{ArtworkBundle, fetch_bundle};
+pub use fetch::{ArtworkBundle, fetch_bundle, fetch_wheel};
 
 #[cfg(all(feature = "fetch", not(target_family = "wasm")))]
 mod fetch {
@@ -135,11 +135,7 @@ mod fetch {
             return Ok(cached);
         }
 
-        let metadata: Metadata = get(&super::metadata_url(sha1))
-            .map_err(|err| format!("metadata unavailable: {err}"))?
-            .body_mut()
-            .read_json()
-            .map_err(|err| format!("invalid artwork metadata: {err}"))?;
+        let metadata = fetch_metadata(sha1)?;
 
         let bundle = ArtworkBundle {
             title: metadata.title,
@@ -153,6 +149,21 @@ mod fetch {
             write_cached_bundle(sha1, &bundle);
         }
         Ok(bundle)
+    }
+
+    pub fn fetch_wheel(sha1: &str, region: Region) -> Result<Option<Vec<u8>>, String> {
+        let cache_name = format!("wheel-{}", super::art_variants(region).join("-"));
+        let path = bundle_cache_dir(sha1).join(&cache_name);
+        if let Some(cached) = read_cache_bytes(&path) {
+            return Ok(Some(cached));
+        }
+
+        let metadata = fetch_metadata(sha1)?;
+        let wheel = fetch_kind(sha1, &metadata.art, "wheel", region);
+        if let Some(bytes) = &wheel {
+            write_cache_bytes(sha1, &cache_name, bytes);
+        }
+        Ok(wheel)
     }
 
     fn cache_root() -> PathBuf {
@@ -183,6 +194,25 @@ mod fetch {
 
     fn read_cache_bytes(path: &std::path::Path) -> Option<Vec<u8>> {
         std::fs::read(path).ok().filter(|bytes| !bytes.is_empty())
+    }
+
+    fn fetch_metadata(sha1: &str) -> Result<Metadata, String> {
+        get(&super::metadata_url(sha1))
+            .map_err(|err| format!("metadata unavailable: {err}"))?
+            .body_mut()
+            .read_json()
+            .map_err(|err| format!("invalid artwork metadata: {err}"))
+    }
+
+    fn write_cache_bytes(sha1: &str, name: &str, bytes: &[u8]) {
+        let dir = bundle_cache_dir(sha1);
+        if let Err(err) = std::fs::create_dir_all(&dir) {
+            eprintln!("artwork cache: failed to create {}: {err}", dir.display());
+            return;
+        }
+        if let Err(err) = std::fs::write(dir.join(name), bytes) {
+            eprintln!("artwork cache: failed to write {name} for {sha1}: {err}");
+        }
     }
 
     fn write_cached_bundle(sha1: &str, bundle: &ArtworkBundle) {

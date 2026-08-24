@@ -5,6 +5,7 @@
 /screenshotdb
 /roms
 /.vscode/
+/.zed/
 /builds/
 /bindings/swift/build/
 
@@ -13,3 +14,6 @@
 **/xcuserdata/
 *.xcuserstate
 DerivedData/
+
+/build/
+/.cache/

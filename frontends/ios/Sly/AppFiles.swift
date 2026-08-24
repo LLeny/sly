@@ -20,12 +20,11 @@ struct AppFiles {
         documentsFolder.appendingPathComponent("saves", isDirectory: true)
     }
     
-    static var extensionsBySystem: [System: [String]] = [
-        .snes: ["sfc", "smc"],
-    ]
-    
     static func prepare() throws {
-        for folder in [romsFolder, statesFolder, savesFolder] {
+        let systemFolders = System.all.map {
+            romsFolder.appendingPathComponent($0.slug, isDirectory: true)
+        }
+        for folder in [romsFolder, statesFolder, savesFolder] + systemFolders {
             try FileManager.default.createDirectory(
                 at: folder,
                 withIntermediateDirectories: true
@@ -34,24 +33,27 @@ struct AppFiles {
     }
 
     static func roms() throws -> [System: [URL]] {
-        guard let files = FileManager.default.enumerator(
-            at: romsFolder,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else {
-            return [:]
-        }
-
         var result: [System: [URL]] = [:]
-        
-        for case let url as URL in files {
-            guard let system = extensionsBySystem.first(
-                where: { $0.value.contains(url.pathExtension.lowercased()) }
-            )?.key else {
+
+        for system in System.all {
+            let folder = romsFolder.appendingPathComponent(
+                system.slug,
+                isDirectory: true
+            )
+            guard let files = FileManager.default.enumerator(
+                at: folder,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else {
                 continue
             }
-            
-            result[system, default: []].append(url)
+
+            let extensions = Set(system.romExtensions)
+            for case let url as URL in files where
+                extensions.contains(url.pathExtension.lowercased())
+            {
+                result[system, default: []].append(url)
+            }
         }
         
         return result.mapValues { files in

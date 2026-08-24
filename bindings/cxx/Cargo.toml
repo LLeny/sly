@@ -8,6 +8,7 @@ name = "sly_cxx"
 crate-type = ["lib", "staticlib"]
 
 [dependencies]
+artwork = { path = "../../crates/artwork", features = ["fetch"] }
 core-model = { path = "../../crates/models/core" }
 sly-ffi = { path = "../c" }
 cxx = "1.0.198"

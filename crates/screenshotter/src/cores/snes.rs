@@ -1,15 +1,14 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use core_model::Core;
+use core_model::{Core, System as CoreSystem};
 use snes::{Cartridge, Snes};
 
 use crate::capture::{CaptureConfig, Frame, ScreenshotCore};
 use crate::cores::System;
 
 pub const SYSTEM: System = System {
-    name: "snes",
-    extensions: &["sfc", "smc"],
+    core: CoreSystem::Snes,
     config: CaptureConfig {
         warmup_frames: 60,
         every_frames: 60,

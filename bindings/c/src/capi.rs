@@ -2,10 +2,11 @@
 
 use std::cell::RefCell;
 use std::ffi::{CString, c_char};
+use std::sync::OnceLock;
 
-use core_model::{StateError, TvSystem};
+use core_model::{StateError, System, TvSystem};
 
-use crate::runtime::{Runtime, button_from_index, system_from_index};
+use crate::runtime::{Runtime, button_from_index, inspect_cartridge, system_from_index};
 
 pub const SLY_ABI_VERSION: u32 = 1;
 
@@ -84,6 +85,27 @@ pub struct SlyBuffer {
     pub len: usize,
 }
 
+/// Rust-allocated cartridge metadata. Free exactly once with
+/// `sly_cartridge_info_free`.
+#[repr(C)]
+#[derive(Debug)]
+pub struct SlyCartridgeInfo {
+    pub title: SlyBuffer,
+    pub system: SlyBuffer,
+    pub region_name: SlyBuffer,
+    pub tv_system: SlyTvSystem,
+    pub rom_crc32: u32,
+    pub has_battery: bool,
+    pub sram_size: usize,
+}
+
+struct SystemMetadata {
+    slug: CString,
+    extensions: Vec<CString>,
+}
+
+static SYSTEM_METADATA: OnceLock<Vec<SystemMetadata>> = OnceLock::new();
+
 pub struct SlyCore {
     rt: Runtime,
     title: CString,
@@ -116,6 +138,28 @@ fn cstring_lossy(text: &str) -> CString {
     CString::new(text.replace('\0', " ")).unwrap_or_default()
 }
 
+fn binding_system(system: System) -> SlySystem {
+    match system {
+        System::Snes => SlySystem::Snes,
+    }
+}
+
+fn system_metadata() -> &'static [SystemMetadata] {
+    SYSTEM_METADATA.get_or_init(|| {
+        System::ALL
+            .iter()
+            .map(|system| SystemMetadata {
+                slug: cstring_lossy(system.slug()),
+                extensions: system
+                    .rom_extensions()
+                    .iter()
+                    .map(|extension| cstring_lossy(extension))
+                    .collect(),
+            })
+            .collect()
+    })
+}
+
 unsafe fn write_out<T>(out: *mut T, value: Option<T>) -> bool {
     match value {
         Some(value) if !out.is_null() => {
@@ -129,6 +173,100 @@ unsafe fn write_out<T>(out: *mut T, value: Option<T>) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn sly_abi_version() -> u32 {
     SLY_ABI_VERSION
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sly_system_count() -> usize {
+    System::ALL.len()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_system_at(index: usize, out_system: *mut SlySystem) -> bool {
+    let system = system_from_index(index).map(binding_system);
+    unsafe { write_out(out_system, system) }
+}
+
+/// Never NULL for a valid system. Static UTF-8; do not free.
+#[unsafe(no_mangle)]
+pub extern "C" fn sly_system_slug(system: SlySystem) -> *const c_char {
+    system_metadata()
+        .get(system as usize)
+        .map_or(std::ptr::null(), |metadata| metadata.slug.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sly_system_extension_count(system: SlySystem) -> usize {
+    system_metadata()
+        .get(system as usize)
+        .map_or(0, |metadata| metadata.extensions.len())
+}
+
+/// Never NULL for a valid system and extension index. Static UTF-8; do not free.
+#[unsafe(no_mangle)]
+pub extern "C" fn sly_system_extension(system: SlySystem, index: usize) -> *const c_char {
+    system_metadata()
+        .get(system as usize)
+        .and_then(|metadata| metadata.extensions.get(index))
+        .map_or(std::ptr::null(), |extension| extension.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_cartridge_inspect(
+    system: SlySystem,
+    rom: *const u8,
+    rom_len: usize,
+    out_info: *mut SlyCartridgeInfo,
+) -> SlyStatus {
+    if out_info.is_null() || (rom.is_null() && rom_len > 0) {
+        set_last_error("NULL argument to sly_cartridge_inspect");
+        return SlyStatus::InvalidArg;
+    }
+
+    let Some(core_system) = system_from_index(system as usize) else {
+        set_last_error("unknown core system");
+        return SlyStatus::InvalidArg;
+    };
+    let bytes = unsafe { slice_from_raw(rom, rom_len) }.to_vec();
+
+    match inspect_cartridge(core_system, bytes) {
+        Ok(meta) => {
+            let system = meta.system.slug().as_bytes().to_vec();
+            let region_name = meta.region.to_string().into_bytes();
+            let tv_system = match meta.region.tv_system() {
+                TvSystem::Ntsc => SlyTvSystem::Ntsc,
+                TvSystem::Pal => SlyTvSystem::Pal,
+            };
+            unsafe {
+                out_info.write(SlyCartridgeInfo {
+                    title: buffer_from_vec(meta.title.into_bytes()),
+                    system: buffer_from_vec(system),
+                    region_name: buffer_from_vec(region_name),
+                    tv_system,
+                    rom_crc32: meta.rom_crc32,
+                    has_battery: meta.has_battery,
+                    sram_size: meta.sram_size,
+                });
+            }
+            SlyStatus::Ok
+        }
+        Err(error) => {
+            set_last_error(&error);
+            SlyStatus::BadRom
+        }
+    }
+}
+
+/// NULL is a no-op.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_cartridge_info_free(info: *mut SlyCartridgeInfo) {
+    let Some(info) = (unsafe { info.as_mut() }) else {
+        return;
+    };
+    unsafe {
+        sly_buffer_free(&mut info.title);
+        sly_buffer_free(&mut info.system);
+        sly_buffer_free(&mut info.region_name);
+    }
 }
 
 /// Never NULL; empty when no error has occurred. Valid until the next failing
@@ -162,8 +300,8 @@ pub unsafe extern "C" fn sly_core_create(
             let meta = rt.meta();
             let core = Box::new(SlyCore {
                 title: cstring_lossy(&meta.title),
-                system: cstring_lossy(rt.system_slug()),
-                region_name: cstring_lossy(&meta.region_name),
+                system: cstring_lossy(rt.meta().system.slug()),
+                region_name: cstring_lossy(&meta.region.to_string()),
                 rt,
             });
             unsafe { out_core.write(Box::into_raw(core)) };
@@ -419,7 +557,7 @@ pub unsafe extern "C" fn sly_core_region_name(core: *const SlyCore) -> *const c_
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sly_core_tv_system(core: *const SlyCore) -> SlyTvSystem {
-    match unsafe { core.as_ref() }.map(|core| core.rt.meta().tv_system) {
+    match unsafe { core.as_ref() }.map(|core| core.rt.meta().region.tv_system()) {
         Some(TvSystem::Pal) => SlyTvSystem::Pal,
         _ => SlyTvSystem::Ntsc,
     }

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use core_model::{Region, TvSystem};
+use core_model::{Region, System, TvSystem};
 use snes::Cartridge;
 use walkdir::WalkDir;
 
@@ -141,5 +141,10 @@ fn read_entry(path: &Path) -> Result<LibraryEntry, String> {
 fn is_snes_rom(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "sfc" | "smc"))
+        .is_some_and(|extension| {
+            System::Snes
+                .rom_extensions()
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
+        })
 }

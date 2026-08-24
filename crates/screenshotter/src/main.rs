@@ -60,7 +60,7 @@ const KEY_FRAMES_RUN: &str = "frames_run";
 const KEY_ERROR: &str = "error";
 
 fn system_dir(out: &Path, system: &System) -> PathBuf {
-    out.join(system.name)
+    out.join(system.slug())
 }
 
 fn main() -> ExitCode {
@@ -94,11 +94,11 @@ fn run(args: &Args) -> Result<bool> {
 
     let config = &system.config;
 
-    let roms = roms::scan(&args.roms, system.extensions)?;
+    let roms = roms::scan(&args.roms, system.rom_extensions())?;
     if roms.is_empty() {
         bail!(
             "no {} ROMs (or zips) found in {}",
-            system.name,
+            system.slug(),
             args.roms.display()
         );
     }
@@ -115,7 +115,7 @@ fn run(args: &Args) -> Result<bool> {
     println!(
         "{} {} {}",
         "▶".cyan().bold(),
-        system.name.bold(),
+        system.slug().bold(),
         format!(
             "({} ROMs, {} threads, shot every {} frames, {} frames max)",
             roms.len(),
@@ -185,7 +185,7 @@ fn run_rom(rom: &RomFile, system: &System, args: &Args) -> RomResult {
 
     let mut command = Command::new(exe);
     command
-        .arg(system.name)
+        .arg(system.slug())
         .arg(&rom.path)
         .arg("--worker")
         .arg("--out")
@@ -274,7 +274,7 @@ fn run_worker(args: &Args) -> Result<()> {
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
 
-    let bytes = match roms::load(&args.roms, system.extensions) {
+    let bytes = match roms::load(&args.roms, system.rom_extensions()) {
         Ok(bytes) => bytes,
         Err(e) => return self::emit_error(&mut out, &format!("{e:#}")),
     };

@@ -13,10 +13,20 @@ use crate::scene_textures::{BoxTextures, CartLabelTexture};
 use crate::shelf::{RowRoot, spawn_box};
 use crate::state::{LauncherMode, LauncherState};
 
-#[cfg(target_os = "ios")]
-const EMPTY_LIBRARY: &str = "Copy .sfc or .smc files into the Sly folder in Files";
-#[cfg(not(target_os = "ios"))]
-const EMPTY_LIBRARY: &str = "No valid .sfc or .smc files found";
+fn empty_library_message() -> String {
+    let extensions = core_model::System::Snes
+        .rom_extensions()
+        .iter()
+        .map(|extension| format!(".{extension}"))
+        .collect::<Vec<_>>()
+        .join(" or ");
+
+    #[cfg(target_os = "ios")]
+    return format!("Copy {extensions} files into the Sly folder in Files");
+
+    #[cfg(not(target_os = "ios"))]
+    format!("No valid {extensions} files found")
+}
 
 #[derive(Resource, Default)]
 pub struct Library {
@@ -104,7 +114,7 @@ pub fn poll_discovery(
                 spawn_detail_cart(&mut commands, 0, library, &models);
                 state.status = format!("{} games indexed", library.entries.len());
             }
-            Ok(_) => state.status = EMPTY_LIBRARY.into(),
+            Ok(_) => state.status = empty_library_message(),
             Err(err) => state.status = err,
         }
     }

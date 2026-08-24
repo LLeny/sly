@@ -1,4 +1,7 @@
-use sly::runtime::{Runtime, button_from_index, system_from_index};
+use core_model::System as CoreSystem;
+use sly::runtime::{
+    Runtime, button_from_index, inspect_cartridge as inspect_runtime_cartridge, system_from_index,
+};
 
 #[cxx::bridge(namespace = "sly")]
 mod ffi {
@@ -52,6 +55,13 @@ mod ffi {
     extern "Rust" {
         type SlyCore;
 
+        fn system_count() -> usize;
+        fn system_at(index: usize) -> Result<System>;
+        fn system_slug(system: System) -> Result<String>;
+        fn system_extensions(system: System) -> Result<Vec<String>>;
+        fn inspect_cartridge(system: System, rom: &[u8]) -> Result<CartridgeInfo>;
+        fn fetch_wheel_artwork(system: System, rom: &[u8]) -> Result<Vec<u8>>;
+
         fn create_core(system: System, rom: &[u8]) -> Result<Box<SlyCore>>;
 
         fn reset(self: &mut SlyCore);
@@ -93,6 +103,64 @@ sly::assert_button_order!(ffi::Button, |button| button.repr as usize);
 
 pub struct SlyCore {
     rt: Runtime,
+}
+
+fn binding_system(system: CoreSystem) -> ffi::System {
+    match system {
+        CoreSystem::Snes => ffi::System::Snes,
+    }
+}
+
+fn core_system(system: ffi::System) -> Result<CoreSystem, String> {
+    system_from_index(system.repr as usize)
+        .ok_or_else(|| format!("unknown core system {}", system.repr))
+}
+
+fn system_count() -> usize {
+    CoreSystem::ALL.len()
+}
+
+fn system_at(index: usize) -> Result<ffi::System, String> {
+    system_from_index(index)
+        .map(binding_system)
+        .ok_or_else(|| format!("unknown core system index {index}"))
+}
+
+fn system_slug(system: ffi::System) -> Result<String, String> {
+    Ok(core_system(system)?.slug().to_owned())
+}
+
+fn system_extensions(system: ffi::System) -> Result<Vec<String>, String> {
+    Ok(core_system(system)?
+        .rom_extensions()
+        .iter()
+        .map(|extension| (*extension).to_owned())
+        .collect())
+}
+
+fn binding_cartridge_info(meta: &core_model::CartridgeInfo) -> ffi::CartridgeInfo {
+    ffi::CartridgeInfo {
+        title: meta.title.clone(),
+        system: meta.system.slug().to_owned(),
+        region_name: meta.region.to_string(),
+        pal: matches!(meta.region.tv_system(), core_model::TvSystem::Pal),
+        rom_crc32: meta.rom_crc32,
+        has_battery: meta.has_battery,
+        sram_size: meta.sram_size,
+    }
+}
+
+fn inspect_cartridge(system: ffi::System, rom: &[u8]) -> Result<ffi::CartridgeInfo, String> {
+    let system = core_system(system)?;
+    let meta = inspect_runtime_cartridge(system, rom.to_vec())?;
+    Ok(binding_cartridge_info(&meta))
+}
+
+fn fetch_wheel_artwork(system: ffi::System, rom: &[u8]) -> Result<Vec<u8>, String> {
+    let system = core_system(system)?;
+    let meta = inspect_runtime_cartridge(system, rom.to_vec())?;
+    let sha1 = artwork::rom_sha1(system, rom);
+    Ok(artwork::layle::fetch_wheel(&sha1, meta.region)?.unwrap_or_default())
 }
 
 fn create_core(system: ffi::System, rom: &[u8]) -> Result<Box<SlyCore>, String> {
@@ -183,15 +251,6 @@ impl SlyCore {
     }
 
     fn cartridge_info(&self) -> ffi::CartridgeInfo {
-        let meta = self.rt.meta();
-        ffi::CartridgeInfo {
-            title: meta.title.clone(),
-            system: self.rt.system_slug().to_owned(),
-            region_name: meta.region_name.clone(),
-            pal: matches!(meta.tv_system, core_model::TvSystem::Pal),
-            rom_crc32: meta.rom_crc32,
-            has_battery: meta.has_battery,
-            sram_size: meta.sram_size,
-        }
+        binding_cartridge_info(self.rt.meta())
     }
 }

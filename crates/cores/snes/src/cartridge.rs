@@ -1,5 +1,6 @@
 use chapa::{BitField, bitenum};
-pub use core_model::{Region, TvSystem};
+use core_model::System;
+pub use core_model::{CartridgeInfo, Region, TvSystem};
 use serde::{Deserialize, Serialize};
 
 use crate::error::SnesError;
@@ -91,6 +92,17 @@ impl Cartridge {
 
     pub fn rom_crc32(&self) -> u32 {
         crc32fast::hash(&self.rom)
+    }
+
+    pub fn info(&self) -> CartridgeInfo {
+        CartridgeInfo {
+            system: System::Snes,
+            title: self.title(),
+            region: self.region(),
+            rom_crc32: self.rom_crc32(),
+            has_battery: self.has_battery(),
+            sram_size: self.sram_size(),
+        }
     }
 
     pub fn title(&self) -> String {
