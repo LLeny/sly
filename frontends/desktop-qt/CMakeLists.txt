@@ -62,6 +62,8 @@ add_executable(desktop_qt
         main.cpp
         main_window.cpp
         main_window.h
+        player_window.cpp
+        player_window.h
         rom_list_model.cpp
         rom_list_model.h
 )

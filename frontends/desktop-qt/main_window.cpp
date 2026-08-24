@@ -1,5 +1,6 @@
 #include "main_window.h"
 
+#include "player_window.h"
 #include "rom_list_model.h"
 
 #include "sly/sly.hpp"
@@ -9,11 +10,13 @@
 #include <QHeaderView>
 #include <QIcon>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QSortFilterProxyModel>
 #include <QStyle>
 #include <QStyledItemDelegate>
 #include <QTableView>
 
+#include <exception>
 #include <print>
 
 #define THEMED_ICON(name, fallback)                                                                \
@@ -111,7 +114,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         action->setCheckable(true);
         action->setChecked(system.index() == 0);
         core_actions->addAction(action);
-        
+
         connect(action, &QAction::triggered, this, [core_name]() {
             std::println("load core stub: {}", core_name.toStdString());
         });
@@ -127,6 +130,28 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     table->setModel(proxy);
     configure_table(*table);
     setCentralWidget(table);
+
+    connect(
+        table, &QTableView::doubleClicked, this, [this, proxy, model](const QModelIndex& index) {
+            const auto source_index = proxy->mapToSource(index);
+            const auto* entry = model->entry_at(source_index.row());
+            if (entry == nullptr) {
+                return;
+            }
+
+            try {
+                auto* player_window = new PlayerWindow(
+                    sly::systems().at(entry->system_index), entry->path, entry->title, this
+                );
+                player_window->setAttribute(Qt::WA_DeleteOnClose);
+                player_window->show();
+            } catch (const std::exception& error) {
+                QMessageBox::critical(
+                    this, tr("Unable to Load ROM"), QString::fromUtf8(error.what())
+                );
+            }
+        }
+    );
 
     model->set_entries(
         RomListModel::entries_from_directory(QDir::current().filePath(QStringLiteral("roms")))

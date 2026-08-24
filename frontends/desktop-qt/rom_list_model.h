@@ -39,6 +39,7 @@ public:
     QVariant data(const QModelIndex& index, int role) const override;
     QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
     void set_entries(QVector<RomEntry> entries);
+    [[nodiscard]] const RomEntry* entry_at(int row) const noexcept;
 
     static QVector<RomEntry> entries_from_directory(const QString& root_path);
 

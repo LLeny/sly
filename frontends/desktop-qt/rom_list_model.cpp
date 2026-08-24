@@ -217,6 +217,13 @@ void RomListModel::set_entries(QVector<RomEntry> entries) {
     load_banners();
 }
 
+const RomEntry* RomListModel::entry_at(const int row) const noexcept {
+    if (row < 0 || row >= entries_.size()) {
+        return nullptr;
+    }
+    return &entries_.at(row);
+}
+
 void RomListModel::load_banners() {
     for (int row = 0; row < entries_.size(); ++row) {
         const auto system_index = entries_.at(row).system_index;
