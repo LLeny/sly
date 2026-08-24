@@ -82,9 +82,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     auto* file_menu = menu_bar->addMenu(tr("&File"));
     auto* cores_menu = menu_bar->addMenu(tr("&Cores"));
 
-    file_menu->addAction(tr("&Load ROM"), this, [] {
-        std::println("load rom stub");
-    });
+    file_menu->addAction(tr("&Load ROM"), this, [] { std::println("load rom stub"); });
     file_menu->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
 
     for (const auto system : sly::systems()) {
