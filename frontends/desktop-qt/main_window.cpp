@@ -4,14 +4,20 @@
 
 #include "sly/sly.hpp"
 
+#include <QActionGroup>
 #include <QDir>
 #include <QHeaderView>
+#include <QIcon>
 #include <QMenuBar>
 #include <QSortFilterProxyModel>
+#include <QStyle>
 #include <QStyledItemDelegate>
 #include <QTableView>
 
 #include <print>
+
+#define THEMED_ICON(name, fallback)                                                                \
+    QIcon::fromTheme(QStringLiteral(name), style()->standardIcon(QStyle::fallback))
 
 namespace {
 class RowDelegate final : public QStyledItemDelegate {
@@ -82,13 +88,31 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     auto* file_menu = menu_bar->addMenu(tr("&File"));
     auto* cores_menu = menu_bar->addMenu(tr("&Cores"));
 
-    file_menu->addAction(tr("&Load ROM"), this, [] { std::println("load rom stub"); });
-    file_menu->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
+    file_menu->addAction(
+        THEMED_ICON("document-open", SP_DialogOpenButton), tr("&Load ROM"), this, [] {
+            std::println("load rom stub");
+        }
+    );
+    file_menu->addAction(
+        THEMED_ICON("application-exit", SP_DialogCloseButton),
+        tr("&Quit"),
+        QKeySequence::Quit,
+        this,
+        &QWidget::close
+    );
+
+    auto* core_actions = new QActionGroup(cores_menu);
+    core_actions->setExclusive(true);
 
     for (const auto system : sly::systems()) {
         const auto core_name = QString::fromStdString(system.name());
 
-        cores_menu->addAction(core_name, this, [core_name]() {
+        auto* action = cores_menu->addAction(core_name);
+        action->setCheckable(true);
+        action->setChecked(system.index() == 0);
+        core_actions->addAction(action);
+        
+        connect(action, &QAction::triggered, this, [core_name]() {
             std::println("load core stub: {}", core_name.toStdString());
         });
     }
