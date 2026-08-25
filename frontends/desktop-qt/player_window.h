@@ -2,7 +2,10 @@
 
 #include <QMainWindow>
 #include <QString>
+
 #include <sly/sly.hpp>
+
+#include "video_widget.h"
 
 class PlayerWindow final : public QMainWindow {
 public:
@@ -15,4 +18,5 @@ private:
     QString rom_path_;
     QString title_;
     sly::Core core_;
+    VideoWidget* video_widget_ = nullptr;
 };

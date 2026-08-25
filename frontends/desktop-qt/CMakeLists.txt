@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Concurrent Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Concurrent GuiPrivate ShaderTools Widgets)
 find_package(Threads REQUIRED)
 
 if (WIN32)
@@ -16,6 +16,8 @@ endif ()
 find_program(CARGO_EXECUTABLE cargo HINTS ${SLY_CARGO_HINTS} REQUIRED)
 
 get_filename_component(SLY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+include("${SLY_ROOT}/cmake/SlyWgslShaders.cmake")
+
 set(SLY_TARGET_DIR "${SLY_ROOT}/target")
 set(SLY_CARGO_PROFILE "debug" CACHE STRING "Cargo profile for sly-cxx (debug or release)")
 set_property(CACHE SLY_CARGO_PROFILE PROPERTY STRINGS debug release)
@@ -66,10 +68,25 @@ add_executable(desktop_qt
         player_window.h
         rom_list_model.cpp
         rom_list_model.h
+        video_widget.cpp
+        video_widget.h
 )
+
+file(GLOB_RECURSE DESKTOP_QT_WGSL_SHADERS CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.vert.wgsl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.frag.wgsl"
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.comp.wgsl"
+)
+sly_target_wgsl_shaders(desktop_qt
+        BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+        PREFIX "/shaders"
+        FILES ${DESKTOP_QT_WGSL_SHADERS}
+)
+
 set_target_properties(desktop_qt PROPERTIES CXX_SCAN_FOR_MODULES OFF)
 target_link_libraries(desktop_qt
         Qt::Concurrent
+        Qt::GuiPrivate
         Qt::Widgets
         sly::cxx
 )
