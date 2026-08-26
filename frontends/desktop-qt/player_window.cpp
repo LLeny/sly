@@ -3,15 +3,12 @@
 #include <QFile>
 #include <QMenuBar>
 
-#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <span>
 #include <utility>
 
 namespace {
-constexpr std::size_t SCALE = 4;
-
 sly::Core load_core(const sly::SystemDescriptor system, const QString& rom_path) {
     QFile rom(rom_path);
     if (!rom.open(QIODevice::ReadOnly)) {
@@ -19,10 +16,8 @@ sly::Core load_core(const sly::SystemDescriptor system, const QString& rom_path)
     }
 
     const auto bytes = rom.readAll();
-    const auto rom_bytes = std::span<const std::uint8_t>(
-        reinterpret_cast<const std::uint8_t*>(bytes.constData()),
-        static_cast<std::size_t>(bytes.size())
-    );
+    const auto rom_bytes =
+        std::span(reinterpret_cast<const std::uint8_t*>(bytes.constData()), bytes.size());
     return system.create(rom_bytes);
 }
 } // namespace
@@ -46,5 +41,14 @@ PlayerWindow::PlayerWindow(
     // action->setChecked(system.index() == 0);
 
     const auto frame = core_.frame();
-    setMinimumSize(static_cast<int>(frame.width * SCALE), static_cast<int>(frame.height * SCALE));
+    setMinimumSize(static_cast<int>(frame.width), static_cast<int>(frame.height));
+    video_widget_->set_frame(frame);
+
+    frame_timer_ = new QChronoTimer(core_.frame_interval(), this);
+    frame_timer_->setTimerType(Qt::PreciseTimer);
+    connect(frame_timer_, &QChronoTimer::timeout, this, [this] {
+        core_.run_frame();
+        video_widget_->set_frame(core_.frame());
+    });
+    frame_timer_->start();
 }

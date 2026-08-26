@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QChronoTimer>
 #include <QMainWindow>
 #include <QString>
 
@@ -19,4 +20,5 @@ private:
     QString title_;
     sly::Core core_;
     VideoWidget* video_widget_ = nullptr;
+    QChronoTimer* frame_timer_ = nullptr;
 };
