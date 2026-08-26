@@ -1,10 +1,12 @@
 #include "player_window.h"
 
 #include <QFile>
+#include <QMediaDevices>
 #include <QMenuBar>
 
 #include <cstdint>
 #include <format>
+#include <print>
 #include <span>
 #include <utility>
 
@@ -44,11 +46,46 @@ PlayerWindow::PlayerWindow(
     setMinimumSize(static_cast<int>(frame.width), static_cast<int>(frame.height));
     video_widget_->set_frame(frame);
 
+    initialize_audio();
+
     frame_timer_ = new QChronoTimer(core_.frame_interval(), this);
     frame_timer_->setTimerType(Qt::PreciseTimer);
     connect(frame_timer_, &QChronoTimer::timeout, this, [this] {
         core_.run_frame();
         video_widget_->set_frame(core_.frame());
+        drain_audio();
     });
     frame_timer_->start();
+}
+
+void PlayerWindow::initialize_audio() {
+    const auto spec = core_.audio_spec();
+    if (!spec) {
+        std::println("No audio spec available, skipping audio initialization");
+        return;
+    }
+
+    QAudioFormat format;
+    format.setSampleRate(spec->sample_rate);
+    format.setChannelCount(spec->channels);
+    format.setSampleFormat(QAudioFormat::Int16);
+
+    const auto device = QMediaDevices::defaultAudioOutput();
+    if (!device.isFormatSupported(format)) {
+        throw new std::runtime_error("Audio format not supported");
+    }
+
+    audio_sink_ = new QAudioSink(device, format, this);
+    audio_device_ = audio_sink_->start();
+}
+
+void PlayerWindow::drain_audio() {
+    const auto samples = core_.drain_audio();
+    if (!audio_device_ || samples.empty()) {
+        return;
+    }
+
+    audio_device_->write(
+        reinterpret_cast<const char*>(samples.data()), samples.size() * sizeof(std::int16_t)
+    );
 }
