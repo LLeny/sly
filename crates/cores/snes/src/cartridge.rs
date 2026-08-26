@@ -101,7 +101,7 @@ impl Cartridge {
             region: self.region(),
             rom_crc32: self.rom_crc32(),
             has_battery: self.has_battery(),
-            sram_size: self.sram_size(),
+            sram_size: self.sram.len(),
         }
     }
 

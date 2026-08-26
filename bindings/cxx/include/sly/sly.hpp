@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -31,6 +32,14 @@ enum class Button : std::uint8_t {
     Start = 10,
     Select = 11,
 };
+
+inline constexpr std::size_t BUTTON_COUNT = 12;
+static_assert(
+    static_cast<std::size_t>(Button::Select) + 1 == BUTTON_COUNT,
+    "BUTTON_COUNT must cover every Button variant"
+);
+
+using ButtonState = std::array<bool, BUTTON_COUNT>;
 
 struct AudioSpec {
     std::uint32_t sample_rate{};

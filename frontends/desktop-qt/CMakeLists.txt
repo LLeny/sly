@@ -8,6 +8,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Qt6 REQUIRED COMPONENTS Concurrent GuiPrivate Multimedia ShaderTools Widgets)
 find_package(Threads REQUIRED)
 
+option(SLY_ENABLE_GAMEPAD "Enable gamepad support via SDL3" ON)
+if (SLY_ENABLE_GAMEPAD)
+    find_package(SDL3 3.2 REQUIRED)
+endif ()
+
 if (WIN32)
     set(SLY_CARGO_HINTS "$ENV{USERPROFILE}/.cargo/bin")
 else ()
@@ -61,6 +66,8 @@ elseif (NOT APPLE)
 endif ()
 
 add_executable(desktop_qt
+        gamepad_input.cpp
+        gamepad_input.h
         main.cpp
         main_window.cpp
         main_window.h
@@ -91,3 +98,8 @@ target_link_libraries(desktop_qt
         Qt::Widgets
         sly::cxx
 )
+
+if (SLY_ENABLE_GAMEPAD)
+    target_link_libraries(desktop_qt SDL3::SDL3)
+endif ()
+target_compile_definitions(desktop_qt PRIVATE SLY_HAS_SDL3=$<BOOL:${SLY_ENABLE_GAMEPAD}>)
