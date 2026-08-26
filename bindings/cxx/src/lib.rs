@@ -61,6 +61,7 @@ mod ffi {
         fn system_name(system: System) -> Result<String>;
         fn system_qualified_name(system: System) -> Result<String>;
         fn system_extensions(system: System) -> Result<Vec<String>>;
+        fn rom_sha1(system: System, rom: &[u8]) -> Result<String>;
         fn inspect_cartridge(system: System, rom: &[u8]) -> Result<CartridgeInfo>;
         fn fetch_wheel_artwork(system: System, rom: &[u8]) -> Result<Vec<u8>>;
 
@@ -146,6 +147,10 @@ fn system_extensions(system: ffi::System) -> Result<Vec<String>, String> {
         .iter()
         .map(|extension| (*extension).to_owned())
         .collect())
+}
+
+fn rom_sha1(system: ffi::System, rom: &[u8]) -> Result<String, String> {
+    Ok(artwork::rom_sha1(core_system(system)?, rom))
 }
 
 fn binding_cartridge_info(meta: &core_model::CartridgeInfo) -> ffi::CartridgeInfo {

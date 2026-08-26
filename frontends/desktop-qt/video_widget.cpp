@@ -2,6 +2,7 @@
 
 #include <QFile>
 
+#include <algorithm>
 #include <cstring>
 #include <format>
 #include <stdexcept>
@@ -17,6 +18,24 @@ QShader load_shader(const QString& path) {
 
     const auto bytes = file.readAll();
     return QShader::fromSerialized(bytes);
+}
+
+QRhiViewport letterboxed_viewport(const QSize output_size, const QSize frame_size) {
+    const float output_width = static_cast<float>(output_size.width());
+    const float output_height = static_cast<float>(output_size.height());
+    const float frame_width = static_cast<float>(frame_size.width());
+    const float frame_height = static_cast<float>(frame_size.height());
+
+    const float scale = std::min(output_width / frame_width, output_height / frame_height);
+    const float width = frame_width * scale;
+    const float height = frame_height * scale;
+
+    return {
+        (output_width - width) * 0.5f,
+        (output_height - height) * 0.5f,
+        width,
+        height,
+    };
 }
 } // namespace
 
@@ -130,13 +149,11 @@ void VideoWidget::render(QRhiCommandBuffer* command_buffer) {
 
     command_buffer->beginPass(renderTarget(), Qt::black, {1.0f, 0}, updates);
 
-    if (pipeline_) {
+    const QSize output_size = renderTarget()->pixelSize();
+    if (pipeline_ && !frame_size_.isEmpty() && !output_size.isEmpty()) {
         command_buffer->setGraphicsPipeline(pipeline_.get());
 
-        const QSize output_size = renderTarget()->pixelSize();
-        command_buffer->setViewport(QRhiViewport(
-            0, 0, static_cast<float>(output_size.width()), static_cast<float>(output_size.height())
-        ));
+        command_buffer->setViewport(letterboxed_viewport(output_size, frame_size_));
 
         command_buffer->setShaderResources(bindings_.get());
         command_buffer->draw(3);

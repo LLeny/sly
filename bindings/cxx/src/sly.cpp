@@ -125,6 +125,16 @@ std::vector<std::string> SystemDescriptor::extensions() const {
     }
 }
 
+std::string SystemDescriptor::rom_sha1(const std::span<const std::uint8_t> rom) const {
+    try {
+        return to_string(ffi::rom_sha1(raw_system(*this), to_slice(rom)));
+    } catch (const Error&) {
+        throw;
+    } catch (const std::exception& error) {
+        throw Error(error.what());
+    }
+}
+
 CartridgeInfo SystemDescriptor::inspect(const std::span<const std::uint8_t> rom) const {
     try {
         return to_cartridge_info(ffi::inspect_cartridge(raw_system(*this), to_slice(rom)));

@@ -76,6 +76,7 @@ public:
     [[nodiscard]] std::string name() const;
     [[nodiscard]] std::string qualified_name() const;
     [[nodiscard]] std::vector<std::string> extensions() const;
+    [[nodiscard]] std::string rom_sha1(std::span<const std::uint8_t> rom) const;
     [[nodiscard]] CartridgeInfo inspect(std::span<const std::uint8_t> rom) const;
     [[nodiscard]] std::vector<std::uint8_t>
     fetch_wheel_artwork(std::span<const std::uint8_t> rom) const;
