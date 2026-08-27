@@ -67,7 +67,7 @@ jobs:
             launcher_archive: sly-launcher-macos-aarch64.tar.gz
             qt_archive: sly-desktop-qt-macos-aarch64.tar.gz
           - platform: windows-x86_64
-            runner: windows-2025
+            runner: windows-2022
             debugger_archive: sly-debugger-windows-x86_64.zip
             launcher_archive: sly-launcher-windows-x86_64.zip
             qt_archive: sly-desktop-qt-windows-x86_64.zip
