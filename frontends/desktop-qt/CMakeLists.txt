@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 4.3)
+
+if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "")
+endif ()
+
 project(desktop_qt LANGUAGES CXX)
 
 include(GNUInstallDirs)

@@ -86,7 +86,7 @@ jobs:
       matrix:
         include:
           - platform: linux-x86_64
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
             debugger_archive: sly-debugger-linux-x86_64.tar.gz
             qt_archive: sly-desktop-qt-linux-x86_64.tar.gz
           - platform: macos-aarch64
@@ -117,6 +117,13 @@ jobs:
             libx11-dev libxi-dev libxrandr-dev libxcursor-dev \
             libxext-dev libxfixes-dev \
             libegl-dev libgl1-mesa-dev
+
+      - name: Select Linux C++23 compiler
+        if: runner.os == 'Linux'
+        run: |
+          echo "CC=gcc-14" >> "$GITHUB_ENV"
+          echo "CXX=g++-14" >> "$GITHUB_ENV"
+          g++-14 --version
 
       - name: Install Qt
         if: runner.os != 'Windows'
@@ -189,12 +196,26 @@ jobs:
         run: cargo build --release --locked -p debugger
 
       - name: Configure Qt client
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           qt-cmake -S frontends/desktop-qt -B build/desktop-qt -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/stage/desktop-qt" \
             -DSDL3_ROOT="${{ steps.sdl.outputs.prefix }}" \
+            -DSLY_CARGO_PROFILE=release
+
+      - name: Configure Qt client
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "$env:QT_ROOT_DIR/bin/qt-cmake.bat" `
+            -S frontends/desktop-qt `
+            -B build/desktop-qt `
+            -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            "-DCMAKE_INSTALL_PREFIX=$env:GITHUB_WORKSPACE/stage/desktop-qt" `
+            "-DSDL3_ROOT=${{ steps.sdl.outputs.prefix }}" `
             -DSLY_CARGO_PROFILE=release
 
       - name: Build and deploy Qt client
