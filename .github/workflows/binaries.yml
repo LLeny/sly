@@ -18,37 +18,14 @@ env:
 
 jobs:
   checks:
-    name: Workspace checks
+    name: Source checks
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-
       - uses: actions/checkout@v4
 
       - name: Initialize build submodules
         run: git submodule update --init --depth 1 submodules/chipi-spec submodules/libretro-database
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build pkg-config \
-            libasound2-dev libudev-dev \
-            libfontconfig1-dev libfreetype6-dev \
-            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
-            libx11-dev libxi-dev libxrandr-dev libxcursor-dev \
-            libxext-dev libxfixes-dev \
-            libegl-dev libgl1-mesa-dev
 
       - name: Install Rust toolchain
         run: rustup toolchain install
@@ -64,14 +41,8 @@ jobs:
         if: github.event_name == 'pull_request'
         run: cargo build --locked -p debugger --target wasm32-unknown-unknown
 
-      - name: Install Naga CLI
-        run: cargo install naga-cli --version "$NAGA_CLI_VERSION" --locked
-
-      - name: Build launcher
-        run: cargo build --locked -p sly-launcher
-
-      - name: Build C and C++ bindings
-        run: cargo build --locked -p sly-ffi -p sly-cxx
+      - name: Build C binding
+        run: cargo build --locked -p sly-ffi
 
       - name: Check committed C header
         run: |
@@ -88,14 +59,17 @@ jobs:
           - platform: linux-x86_64
             runner: ubuntu-24.04
             debugger_archive: sly-debugger-linux-x86_64.tar.gz
+            launcher_archive: sly-launcher-linux-x86_64.tar.gz
             qt_archive: sly-desktop-qt-linux-x86_64.tar.gz
           - platform: macos-aarch64
             runner: macos-15
             debugger_archive: sly-debugger-macos-aarch64.tar.gz
+            launcher_archive: sly-launcher-macos-aarch64.tar.gz
             qt_archive: sly-desktop-qt-macos-aarch64.tar.gz
           - platform: windows-x86_64
             runner: windows-2025
             debugger_archive: sly-debugger-windows-x86_64.zip
+            launcher_archive: sly-launcher-windows-x86_64.zip
             qt_archive: sly-desktop-qt-windows-x86_64.zip
     runs-on: ${{ matrix.runner }}
 
@@ -168,6 +142,21 @@ jobs:
           "QT_ROOT_DIR=$qtRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "$qtRoot/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+          vsversion: 2022
+
+      - name: Select Windows compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "CC=cl.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CXX=cl.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          where.exe cl.exe
+
       - name: Install CMake and Ninja
         run: python -m pip install "cmake>=4.3,<4.4" ninja
 
@@ -178,7 +167,9 @@ jobs:
           version: 3.4.12
           build-type: Release
           cmake-generator: Ninja
-          cmake-arguments: -DSDL_SHARED=OFF -DSDL_STATIC=ON
+          cmake-arguments: >-
+            -DSDL_SHARED=OFF -DSDL_STATIC=ON
+            ${{ runner.os == 'Windows' && '-DCMAKE_C_COMPILER=cl.exe -DCMAKE_CXX_COMPILER=cl.exe' || '' }}
           install-linux-dependencies: true
 
       - name: Install Rust toolchain
@@ -194,6 +185,9 @@ jobs:
 
       - name: Build debugger
         run: cargo build --release --locked -p debugger
+
+      - name: Build launcher
+        run: cargo build --release --locked -p sly-launcher
 
       - name: Configure Qt client
         if: runner.os != 'Windows'
@@ -213,6 +207,7 @@ jobs:
             -S frontends/desktop-qt `
             -B build/desktop-qt `
             -G Ninja `
+            -DCMAKE_CXX_COMPILER=cl.exe `
             -DCMAKE_BUILD_TYPE=Release `
             "-DCMAKE_INSTALL_PREFIX=$env:GITHUB_WORKSPACE/stage/desktop-qt" `
             "-DSDL3_ROOT=${{ steps.sdl.outputs.prefix }}" `
@@ -227,22 +222,30 @@ jobs:
         if: github.event_name == 'push' && runner.os != 'Windows'
         shell: bash
         run: |
-          mkdir -p stage/debugger dist
+          mkdir -p stage/debugger stage/launcher dist
           install -m 755 target/release/debugger stage/debugger/sly-debugger
+          install -m 755 target/release/sly-launcher stage/launcher/sly-launcher
+          install -m 644 configs/sly-launcher.toml stage/launcher/sly-launcher.toml
           install -m 644 LICENSE stage/debugger/LICENSE
+          install -m 644 LICENSE stage/launcher/LICENSE
           install -m 644 LICENSE stage/desktop-qt/LICENSE
           tar -czf "dist/${{ matrix.debugger_archive }}" -C stage/debugger .
+          tar -czf "dist/${{ matrix.launcher_archive }}" -C stage/launcher .
           tar -czf "dist/${{ matrix.qt_archive }}" -C stage/desktop-qt .
 
       - name: Package Windows applications
         if: github.event_name == 'push' && runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path stage/debugger, dist | Out-Null
+          New-Item -ItemType Directory -Force -Path stage/debugger, stage/launcher, dist | Out-Null
           Copy-Item target/release/debugger.exe stage/debugger/sly-debugger.exe
+          Copy-Item target/release/sly-launcher.exe stage/launcher/sly-launcher.exe
+          Copy-Item configs/sly-launcher.toml stage/launcher/sly-launcher.toml
           Copy-Item LICENSE stage/debugger/LICENSE
+          Copy-Item LICENSE stage/launcher/LICENSE
           Copy-Item LICENSE stage/desktop-qt/LICENSE
           Compress-Archive -Path stage/debugger/* -DestinationPath "dist/${{ matrix.debugger_archive }}"
+          Compress-Archive -Path stage/launcher/* -DestinationPath "dist/${{ matrix.launcher_archive }}"
           Compress-Archive -Path stage/desktop-qt/* -DestinationPath "dist/${{ matrix.qt_archive }}"
 
       - name: Upload desktop archives
