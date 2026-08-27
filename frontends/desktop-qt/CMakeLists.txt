@@ -1,12 +1,15 @@
 cmake_minimum_required(VERSION 4.3)
 project(desktop_qt LANGUAGES CXX)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Qt6 REQUIRED COMPONENTS Concurrent GuiPrivate Multimedia ShaderTools Widgets)
 find_package(Threads REQUIRED)
+qt_standard_project_setup()
 
 option(SLY_ENABLE_GAMEPAD "Enable gamepad support via SDL3" ON)
 if (SLY_ENABLE_GAMEPAD)
@@ -65,7 +68,9 @@ elseif (NOT APPLE)
     target_link_libraries(sly_cxx INTERFACE Threads::Threads ${CMAKE_DL_LIBS} m)
 endif ()
 
-add_executable(desktop_qt
+qt_add_executable(desktop_qt
+        WIN32
+        MACOSX_BUNDLE
         gamepad_input.cpp
         gamepad_input.h
         main.cpp
@@ -103,3 +108,15 @@ if (SLY_ENABLE_GAMEPAD)
     target_link_libraries(desktop_qt SDL3::SDL3)
 endif ()
 target_compile_definitions(desktop_qt PRIVATE SLY_HAS_SDL3=$<BOOL:${SLY_ENABLE_GAMEPAD}>)
+
+install(TARGETS desktop_qt
+        BUNDLE DESTINATION .
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+)
+
+qt_generate_deploy_app_script(
+        TARGET desktop_qt
+        OUTPUT_SCRIPT deploy_script
+        NO_UNSUPPORTED_PLATFORM_ERROR
+)
+install(SCRIPT "${deploy_script}")

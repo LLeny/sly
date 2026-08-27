@@ -1,0 +1,247 @@
+name: Binaries
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: native-binaries-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  NAGA_CLI_VERSION: "29.0.4"
+  QT_VERSION: "6.11.2"
+
+jobs:
+  checks:
+    name: Workspace checks
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - uses: actions/checkout@v4
+
+      - name: Initialize build submodules
+        run: git submodule update --init --depth 1 submodules/chipi-spec submodules/libretro-database
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config \
+            libasound2-dev libudev-dev \
+            libfontconfig1-dev libfreetype6-dev \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libxi-dev libxrandr-dev libxcursor-dev \
+            libxext-dev libxfixes-dev \
+            libegl-dev libgl1-mesa-dev
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: workspace-checks
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Build debugger (WASM)
+        if: github.event_name == 'pull_request'
+        run: cargo build --locked -p debugger --target wasm32-unknown-unknown
+
+      - name: Install Naga CLI
+        run: cargo install naga-cli --version "$NAGA_CLI_VERSION" --locked
+
+      - name: Build launcher
+        run: cargo build --locked -p sly-launcher
+
+      - name: Build C and C++ bindings
+        run: cargo build --locked -p sly-ffi -p sly-cxx
+
+      - name: Check committed C header
+        run: |
+          gcc -fsyntax-only -std=c11 -x c bindings/c/include/sly.h
+          g++ -fsyntax-only -std=c++17 -x c++ bindings/c/include/sly.h
+          git diff --exit-code -- bindings/c/include/sly.h
+
+  desktop:
+    name: Desktop (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-22.04
+            debugger_archive: sly-debugger-linux-x86_64.tar.gz
+            qt_archive: sly-desktop-qt-linux-x86_64.tar.gz
+          - platform: macos-aarch64
+            runner: macos-15
+            debugger_archive: sly-debugger-macos-aarch64.tar.gz
+            qt_archive: sly-desktop-qt-macos-aarch64.tar.gz
+          - platform: windows-x86_64
+            runner: windows-2025
+            debugger_archive: sly-debugger-windows-x86_64.zip
+            qt_archive: sly-desktop-qt-windows-x86_64.zip
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize build submodules
+        shell: bash
+        run: git submodule update --init --depth 1 submodules/chipi-spec submodules/libretro-database
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libudev-dev \
+            libfontconfig1-dev libfreetype6-dev \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libxi-dev libxrandr-dev libxcursor-dev \
+            libxext-dev libxfixes-dev \
+            libegl-dev libgl1-mesa-dev
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: qtmultimedia qtshadertools
+          cache: true
+
+      - name: Install CMake and Ninja
+        run: python -m pip install "cmake>=4.3,<4.4" ninja
+
+      - name: Install SDL3
+        id: sdl
+        uses: libsdl-org/setup-sdl@main
+        with:
+          version: 3.4.12
+          build-type: Release
+          cmake-generator: Ninja
+          cmake-arguments: -DSDL_SHARED=OFF -DSDL_STATIC=ON
+          install-linux-dependencies: true
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: native-binaries-${{ matrix.platform }}
+
+      - name: Install Naga CLI
+        run: cargo install naga-cli --version "$NAGA_CLI_VERSION" --locked
+        shell: bash
+
+      - name: Build debugger
+        run: cargo build --release --locked -p debugger
+
+      - name: Configure Qt client
+        shell: bash
+        run: |
+          qt-cmake -S frontends/desktop-qt -B build/desktop-qt -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/stage/desktop-qt" \
+            -DSDL3_ROOT="${{ steps.sdl.outputs.prefix }}" \
+            -DSLY_CARGO_PROFILE=release
+
+      - name: Build and deploy Qt client
+        run: |
+          cmake --build build/desktop-qt --config Release
+          cmake --install build/desktop-qt --config Release
+
+      - name: Package Unix applications
+        if: github.event_name == 'push' && runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p stage/debugger dist
+          install -m 755 target/release/debugger stage/debugger/sly-debugger
+          install -m 644 LICENSE stage/debugger/LICENSE
+          install -m 644 LICENSE stage/desktop-qt/LICENSE
+          tar -czf "dist/${{ matrix.debugger_archive }}" -C stage/debugger .
+          tar -czf "dist/${{ matrix.qt_archive }}" -C stage/desktop-qt .
+
+      - name: Package Windows applications
+        if: github.event_name == 'push' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path stage/debugger, dist | Out-Null
+          Copy-Item target/release/debugger.exe stage/debugger/sly-debugger.exe
+          Copy-Item LICENSE stage/debugger/LICENSE
+          Copy-Item LICENSE stage/desktop-qt/LICENSE
+          Compress-Archive -Path stage/debugger/* -DestinationPath "dist/${{ matrix.debugger_archive }}"
+          Compress-Archive -Path stage/desktop-qt/* -DestinationPath "dist/${{ matrix.qt_archive }}"
+
+      - name: Upload desktop archives
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: dist/sly-*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  ios:
+    name: iOS (arm64, unsigned)
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize build submodule
+        run: git submodule update --init --depth 1 submodules/chipi-spec
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-release
+
+      - name: Build unsigned iOS application
+        run: |
+          xcodebuild \
+            -project frontends/ios/Sly.xcodeproj \
+            -scheme Sly \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$PWD/build/ios" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Package unsigned IPA
+        if: github.event_name == 'push'
+        run: |
+          mkdir -p dist/Payload
+          cp -R build/ios/Build/Products/Release-iphoneos/Sly.app dist/Payload/
+          cd dist
+          zip -qry sly-ios-arm64-unsigned.ipa Payload
+
+      - name: Upload iOS archive
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-arm64-unsigned
+          path: dist/sly-ios-arm64-unsigned.ipa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
