@@ -180,8 +180,7 @@ jobs:
           key: native-binaries-${{ matrix.platform }}
 
       - name: Install Naga CLI
-        run: cargo install naga-cli --version "$NAGA_CLI_VERSION" --locked
-        shell: bash
+        run: cargo install naga-cli --version "${{ env.NAGA_CLI_VERSION }}" --locked
 
       - name: Build debugger
         run: cargo build --release --locked -p debugger
