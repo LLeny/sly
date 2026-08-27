@@ -2,20 +2,20 @@ import SwiftUI
 import SlyKit
 import UIKit
 
-private struct ControlButtonConfiguration {
+private struct ControlButtonConfiguration: Sendable {
     let label: String
     let button: SlyKit.Button
     var color: Color? = nil
 }
 
-private struct FaceButtonConfiguration {
+private struct FaceButtonConfiguration: Sendable {
     let top: ControlButtonConfiguration
     let trailing: ControlButtonConfiguration
     let bottom: ControlButtonConfiguration
     let leading: ControlButtonConfiguration
 }
 
-private struct CoreControlConfiguration {
+private struct CoreControlConfiguration: Sendable {
     let leftShoulder: ControlButtonConfiguration
     let rightShoulder: ControlButtonConfiguration
     let centerButtons: [ControlButtonConfiguration]

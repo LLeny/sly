@@ -4,8 +4,6 @@ import SwiftUI
 import SlyKit
 
 struct MetalPlayerView: UIViewRepresentable {
-    private static let bufferedFrameCount = 3
-
     let player: Player
     let framesPerSecond: Int
     let isPaused: Bool
@@ -25,7 +23,7 @@ struct MetalPlayerView: UIViewRepresentable {
         view.colorPixelFormat = .bgra8Unorm
         view.framebufferOnly = false
         (view.layer as? CAMetalLayer)?.maximumDrawableCount =
-            Self.bufferedFrameCount
+            context.coordinator.bufferedFrameCount
         view.enableSetNeedsDisplay = false
         return view
     }
@@ -52,6 +50,7 @@ struct MetalPlayerView: UIViewRepresentable {
         private var framesPerSecond: Int
         private var imageFiltering: ImageFiltering
 
+        let bufferedFrameCount = 3
         let device: MTLDevice
 
         private let commandQueue: MTLCommandQueue
@@ -217,7 +216,7 @@ struct MetalPlayerView: UIViewRepresentable {
                 )
                 descriptor.storageMode = .shared
                 descriptor.usage = .shaderRead
-                frameTextures = (0..<MetalPlayerView.bufferedFrameCount)
+                frameTextures = (0..<bufferedFrameCount)
                     .compactMap { _ in
                         guard let texture = device.makeTexture(
                             descriptor: descriptor
@@ -247,14 +246,14 @@ struct MetalPlayerView: UIViewRepresentable {
                 nextFrameTexture = 0
             }
 
-            guard frameTextures.count == MetalPlayerView.bufferedFrameCount
+            guard frameTextures.count == bufferedFrameCount
             else {
                 return nil
             }
 
             let frameTexture = frameTextures[nextFrameTexture]
             nextFrameTexture =
-                (nextFrameTexture + 1) % MetalPlayerView.bufferedFrameCount
+                (nextFrameTexture + 1) % bufferedFrameCount
 
             frame.rgba.withUnsafeBytes { bytes in
                 guard let address = bytes.baseAddress else { return }

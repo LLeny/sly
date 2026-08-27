@@ -14,7 +14,7 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
   NAGA_CLI_VERSION: "29.0.4"
-  QT_VERSION: "6.11.2"
+  QT_VERSION: "6.11.1"
 
 jobs:
   checks:
@@ -201,6 +201,8 @@ jobs:
   ios:
     name: iOS (arm64, unsigned)
     runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
 
     steps:
       - uses: actions/checkout@v4
@@ -214,6 +216,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ios-release
+
+      - name: Check Xcode version
+        run: xcodebuild -version
 
       - name: Build unsigned iOS application
         run: |

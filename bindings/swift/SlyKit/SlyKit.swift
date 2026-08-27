@@ -37,7 +37,7 @@ public enum System: Hashable, Sendable {
     }
 }
 
-public enum Button {
+public enum Button: Hashable, Sendable {
     case up, down, left, right
     case a, b, x, y
     case l, r, start, select

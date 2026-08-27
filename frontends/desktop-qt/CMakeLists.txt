@@ -97,6 +97,7 @@ sly_target_wgsl_shaders(desktop_qt
 
 set_target_properties(desktop_qt PROPERTIES CXX_SCAN_FOR_MODULES OFF)
 target_link_libraries(desktop_qt
+        PRIVATE
         Qt::Concurrent
         Qt::GuiPrivate
         Qt::Multimedia
@@ -105,7 +106,7 @@ target_link_libraries(desktop_qt
 )
 
 if (SLY_ENABLE_GAMEPAD)
-    target_link_libraries(desktop_qt SDL3::SDL3)
+    target_link_libraries(desktop_qt PRIVATE SDL3::SDL3)
 endif ()
 target_compile_definitions(desktop_qt PRIVATE SLY_HAS_SDL3=$<BOOL:${SLY_ENABLE_GAMEPAD}>)
 
