@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
-from aqt import main
+from multiprocessing import freeze_support
+
+from aqt import main as aqt_main
 from aqt.archives import QtArchives
 from aqt.metadata import Version
 
@@ -23,6 +25,11 @@ def _get_archives(self: QtArchives) -> None:
     _original_get_archives(self)
 
 
-QtArchives._get_archives = _get_archives
+def main() -> int:
+    QtArchives._get_archives = _get_archives
+    return aqt_main()
 
-raise SystemExit(main())
+
+if __name__ == "__main__":
+    freeze_support()
+    raise SystemExit(main())
