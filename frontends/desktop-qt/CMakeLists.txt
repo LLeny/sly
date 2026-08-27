@@ -53,6 +53,8 @@ add_custom_target(sly_cxx_cargo
         COMMENT "Building sly-cxx with Cargo"
 )
 
+file(MAKE_DIRECTORY "${SLY_TARGET_DIR}/cxxbridge")
+
 add_library(sly_cxx STATIC IMPORTED GLOBAL)
 set_target_properties(sly_cxx PROPERTIES
         IMPORTED_LOCATION "${SLY_CXX_LIB}"
