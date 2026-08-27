@@ -119,11 +119,47 @@ jobs:
             libegl-dev libgl1-mesa-dev
 
       - name: Install Qt
+        if: runner.os != 'Windows'
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           modules: qtmultimedia qtshadertools
           cache: true
+
+      - name: Set up Python for Windows Qt
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache Windows Qt
+        if: runner.os == 'Windows'
+        id: qt-windows-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.workspace }}/Qt/${{ env.QT_VERSION }}/msvc2022_64
+          key: qt-windows-${{ env.QT_VERSION }}-msvc2022_64-multimedia-shadertools-v1
+
+      - name: Install Windows Qt
+        if: runner.os == 'Windows' && steps.qt-windows-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          python -m pip install "aqtinstall==3.3.*"
+          python .github/scripts/aqtinstall_qt611_windows.py install-qt `
+            windows desktop "$env:QT_VERSION" win64_msvc2022_64 `
+            --outputdir "$env:RUNNER_WORKSPACE/Qt" `
+            --modules qtmultimedia qtshadertools
+
+      - name: Configure Windows Qt environment
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $qtRoot = "$env:RUNNER_WORKSPACE/Qt/$env:QT_VERSION/msvc2022_64"
+          if (!(Test-Path "$qtRoot/bin/qt-cmake.bat")) {
+              throw "Qt installation is missing qt-cmake.bat at $qtRoot/bin"
+          }
+          "QT_ROOT_DIR=$qtRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "$qtRoot/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install CMake and Ninja
         run: python -m pip install "cmake>=4.3,<4.4" ninja
