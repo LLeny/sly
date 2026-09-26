@@ -1,17 +1,17 @@
 use super::Cpu;
 use super::decoder::{arm, thumb};
-use crate::bus::Bus;
+use crate::mmio::Mmio;
 
 impl Cpu {
-    pub(super) fn execute(&mut self, bus: &mut Bus, instruction: u32) {
-        let mut interpreter = Interpreter { cpu: self, bus };
+    pub(super) fn execute(&mut self, mmio: &mut Mmio, instruction: u32) {
+        let mut interpreter = Interpreter { cpu: self, mmio };
         interpreter.execute(instruction);
     }
 }
 
 pub(super) struct Interpreter<'a> {
     cpu: &'a mut Cpu,
-    bus: &'a mut Bus,
+    mmio: &'a mut Mmio,
 }
 
 impl Interpreter<'_> {

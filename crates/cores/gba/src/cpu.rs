@@ -1,7 +1,7 @@
 pub mod decoder;
 pub mod interpreter;
 
-use crate::bus::Bus;
+use crate::mmio::Mmio;
 
 pub struct Cpu {
     pub registers: [u32; 16],
@@ -18,23 +18,23 @@ impl Cpu {
         }
     }
 
-    pub fn step(&mut self, bus: &mut Bus) {
+    pub fn step(&mut self, mmio: &mut Mmio) {
         self.pipeline[0] = self.pipeline[1];
         self.pipeline[1] = self.pipeline[2];
-        self.pipeline[2] = Some(self.fetch_instruction(bus));
+        self.pipeline[2] = Some(self.fetch_instruction(mmio));
 
         *self.pc_mut() += if self.is_thumb() { 2 } else { 4 };
 
         if let Some(instruction) = self.pipeline[0] {
-            self.execute(bus, instruction);
+            self.execute(mmio, instruction);
         }
     }
 
-    pub fn fetch_instruction(&self, bus: &mut Bus) -> u32 {
+    pub fn fetch_instruction(&self, mmio: &mut Mmio) -> u32 {
         if self.is_thumb() {
-            u32::from(bus.fetch16(self.pc() & !0b1))
+            u32::from(mmio.fetch16(self.pc() & !0b1))
         } else {
-            bus.fetch32(self.pc() & !0b11)
+            mmio.fetch32(self.pc() & !0b11)
         }
     }
 

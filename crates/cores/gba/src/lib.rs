@@ -1,18 +1,18 @@
-pub mod bus;
 pub mod cartridge;
 pub mod cpu;
 pub mod error;
+pub mod mmio;
 
 #[cfg(feature = "debug")]
 pub mod debug;
 
-use bus::Bus;
 pub use cartridge::Cartridge;
 pub use cpu::Cpu;
+use mmio::Mmio;
 
 pub struct Gba {
     cpu: Cpu,
-    bus: Bus,
+    mmio: Mmio,
     cycles: usize,
 }
 
@@ -20,7 +20,7 @@ impl Gba {
     pub fn new(cartridge: Cartridge) -> Self {
         Self {
             cpu: Cpu::new(),
-            bus: Bus::new(cartridge),
+            mmio: Mmio::new(cartridge),
             cycles: 0,
         }
     }
@@ -32,7 +32,7 @@ impl core_model::Core for Gba {
     }
 
     fn step(&mut self) {
-        self.cpu.step(&mut self.bus);
+        self.cpu.step(&mut self.mmio);
         self.cycles += 1;
     }
 
@@ -61,6 +61,6 @@ impl core_model::Core for Gba {
     }
 
     fn cartridge_info(&self) -> Option<core_model::CartridgeInfo> {
-        Some(self.bus.cartridge().info())
+        Some(self.mmio.cartridge().info())
     }
 }

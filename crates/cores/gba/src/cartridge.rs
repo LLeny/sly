@@ -14,6 +14,10 @@ impl Cartridge {
         Ok(Self { rom })
     }
 
+    pub(crate) fn rom(&self) -> &[u8] {
+        &self.rom
+    }
+
     pub fn entry_point(&self) -> u32 {
         u32::from_le_bytes(self.rom[0x34..0x38].try_into().unwrap())
     }

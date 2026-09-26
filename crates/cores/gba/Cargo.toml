@@ -16,3 +16,4 @@ debugger-model = { path = "../../models/debugger", optional = true }
 crc32fast = "1.5.0"
 sha1 = "0.11.0"
 thiserror = "2.0.18"
+tracing = { workspace = true }
