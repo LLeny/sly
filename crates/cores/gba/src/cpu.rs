@@ -1,6 +1,8 @@
 pub mod decoder;
 pub mod interpreter;
 
+use crate::bus::Bus;
+
 pub struct Cpu {
     pub registers: [u32; 16],
     pub cpsr: Psr,
@@ -16,31 +18,47 @@ impl Cpu {
         }
     }
 
-    pub fn step(&mut self) {
+    pub fn step(&mut self, bus: &mut Bus) {
         self.pipeline[0] = self.pipeline[1];
         self.pipeline[1] = self.pipeline[2];
-        self.pipeline[2] = Some(self.fetch_instruction());
+        self.pipeline[2] = Some(self.fetch_instruction(bus));
 
-        *self.pc() += if self.is_thumb() { 2 } else { 4 };
+        *self.pc_mut() += if self.is_thumb() { 2 } else { 4 };
 
         if let Some(instruction) = self.pipeline[0] {
-            self.execute(instruction);
+            self.execute(bus, instruction);
         }
     }
 
-    pub fn fetch_instruction(&self) -> u32 {
-        0
+    pub fn fetch_instruction(&self, bus: &mut Bus) -> u32 {
+        if self.is_thumb() {
+            u32::from(bus.fetch16(self.pc() & !0b1))
+        } else {
+            bus.fetch32(self.pc() & !0b11)
+        }
     }
 
-    pub fn pc(&mut self) -> &mut u32 {
+    pub fn pc(&self) -> u32 {
+        self.registers[15]
+    }
+
+    pub fn pc_mut(&mut self) -> &mut u32 {
         &mut self.registers[15]
     }
 
-    pub fn sp(&mut self) -> &mut u32 {
+    pub fn sp(&self) -> u32 {
+        self.registers[13]
+    }
+
+    pub fn sp_mut(&mut self) -> &mut u32 {
         &mut self.registers[13]
     }
 
-    pub fn lr(&mut self) -> &mut u32 {
+    pub fn lr(&self) -> u32 {
+        self.registers[14]
+    }
+
+    pub fn lr_mut(&mut self) -> &mut u32 {
         &mut self.registers[14]
     }
 

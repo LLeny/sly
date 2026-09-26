@@ -1,9 +1,22 @@
 use super::Cpu;
 use super::decoder::{arm, thumb};
+use crate::bus::Bus;
 
 impl Cpu {
-    pub(super) fn execute(&mut self, instruction: u32) {
-        if self.is_thumb() {
+    pub(super) fn execute(&mut self, bus: &mut Bus, instruction: u32) {
+        let mut interpreter = Interpreter { cpu: self, bus };
+        interpreter.execute(instruction);
+    }
+}
+
+pub(super) struct Interpreter<'a> {
+    cpu: &'a mut Cpu,
+    bus: &'a mut Bus,
+}
+
+impl Interpreter<'_> {
+    fn execute(&mut self, instruction: u32) {
+        if self.cpu.is_thumb() {
             let instr = thumb::Instruction(instruction as u16);
             println!("{}", instr);
             thumb::dispatch_ops(self, instr);
@@ -15,7 +28,7 @@ impl Cpu {
     }
 }
 
-impl arm::Ops for Cpu {
+impl arm::Ops for Interpreter<'_> {
     fn data_processing(&mut self, _op: arm::DataProcessingKind, _inst: arm::Instruction) {
         todo!()
     }
@@ -65,7 +78,7 @@ impl arm::Ops for Cpu {
     }
 }
 
-impl thumb::Ops for Cpu {
+impl thumb::Ops for Interpreter<'_> {
     fn shift_immediate(&mut self, _op: thumb::ShiftImmediateKind, _inst: thumb::Instruction) {
         todo!()
     }
