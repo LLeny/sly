@@ -3,46 +3,27 @@ use std::sync::Arc;
 use gpui::{Div, RenderImage};
 
 use crate::assets::icon;
-use crate::components::{divided_mono, flip_label, footer_row, hex};
+use crate::components::{footer_row, hex};
 use crate::theme::Theme;
 use crate::widgets::grid::{
     GridContent, GridOverlay, GridPanel, GridWindowBand, GridWindowOverlay, build_atlas,
 };
 
-#[derive(Clone)]
-pub struct TilemapEntryView {
-    pub addr: u32,
-    pub raw: u16,
-    pub tile_index: u16,
-    pub palette: u8,
-    pub priority: bool,
-    pub flip_h: bool,
-    pub flip_v: bool,
-}
+use gpui::prelude::*;
 
-impl From<&debugger_model::TilemapEntry> for TilemapEntryView {
-    fn from(entry: &debugger_model::TilemapEntry) -> Self {
-        Self {
-            addr: entry.addr,
-            raw: entry.raw,
-            tile_index: entry.tile_index,
-            palette: entry.palette,
-            priority: entry.priority,
-            flip_h: entry.flip_h,
-            flip_v: entry.flip_v,
-        }
-    }
-}
+use debugger_model::TilemapEntry;
 
 #[derive(Clone)]
 pub struct TilemapView {
     pub width: usize,
     pub height: usize,
     pub tile_px: u8,
-    pub entries: Arc<[TilemapEntryView]>,
+    pub entries: Arc<[TilemapEntry]>,
     pub image: Option<Arc<RenderImage>>,
     pub viewport: Option<GridOverlay>,
+    pub footprint: Option<debugger_model::TilemapViewport>,
     overlays: Arc<[debugger_model::TilemapOverlay]>,
+    detail_rows: usize,
 }
 
 impl TilemapView {
@@ -147,7 +128,7 @@ impl TilemapView {
 }
 
 impl From<debugger_model::Tilemap> for TilemapView {
-    fn from(map: debugger_model::Tilemap) -> Self {
+    fn from(mut map: debugger_model::Tilemap) -> Self {
         let tile_px = map.tile_px as u32;
 
         let image = (!map.entries.is_empty()).then(|| {
@@ -161,13 +142,24 @@ impl From<debugger_model::Tilemap> for TilemapView {
             )
         });
 
+        for entry in &mut map.entries {
+            entry.pixels = Vec::new();
+        }
+
         Self {
+            detail_rows: super::tileset::detail_rows(
+                map.entries.iter().map(|e| e.details.as_slice()),
+            ),
             width: map.width,
             height: map.height,
             tile_px: map.tile_px,
-            entries: map.entries.iter().map(Into::into).collect(),
+            entries: map.entries.into(),
             image,
-            viewport: map.viewport.map(Into::into),
+            viewport: map
+                .viewport
+                .filter(|v| v.transform.is_none())
+                .map(Into::into),
+            footprint: map.viewport.filter(|v| v.transform.is_some()),
             overlays: Vec::new().into(),
         }
     }
@@ -176,7 +168,7 @@ impl From<debugger_model::Tilemap> for TilemapView {
 pub struct TilemapWidget;
 
 impl TilemapWidget {
-    pub const ID: &'static str = "tilemap";
+    pub const ID: &'static str = debugger_model::panel::TILEMAP;
 
     pub fn panel(view: Option<TilemapView>) -> GridPanel {
         let content = view.as_ref().map(|view| GridContent {
@@ -187,6 +179,7 @@ impl TilemapWidget {
             count: view.entries.len(),
             empty_message: "No tilemap",
             overlay: view.viewport,
+            footprint: view.footprint,
             window_overlays: view.window_overlays(),
         });
 
@@ -195,9 +188,11 @@ impl TilemapWidget {
             .placeholder("Select an entry to inspect");
         if let Some(view) = view {
             panel = panel
+                .detail_rows(view.detail_rows)
                 .meta(format!("{}×{}", view.width, view.height))
                 .detail(move |theme, index| self::detail_row(theme, &view, index));
         }
+
         panel
     }
 }
@@ -205,22 +200,16 @@ impl TilemapWidget {
 fn detail_row(theme: &Theme, view: &TilemapView, index: usize) -> Div {
     let entry = &view.entries[index];
     let (x, y) = (index % view.width, index / view.width);
-
-    let mut segs = vec![
-        hex(entry.raw as u32, 16),
-        format!("pal {}", entry.palette),
-        format!("prio {}", entry.priority as u8),
-    ];
-    if let Some(flip) = flip_label(entry.flip_h, entry.flip_v) {
-        segs.push(flip.to_string());
-    }
-    if let Some(last) = segs.last_mut() {
-        *last = format!("{last} @ VRAM {}", hex(entry.addr, 16));
-    }
-
-    footer_row(
-        theme,
-        format!("({x}, {y}) Tile {}", hex(entry.tile_index as u32, 12)),
-        divided_mono(theme, segs),
-    )
+    gpui::div()
+        .flex()
+        .flex_col()
+        .child(footer_row(
+            theme,
+            format!("({x}, {y})"),
+            crate::components::mono_text(
+                theme,
+                format!("{} {}", entry.address.region, hex(entry.address.addr, 16)),
+            ),
+        ))
+        .child(super::tileset::details(theme, &entry.details))
 }

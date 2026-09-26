@@ -9,7 +9,6 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::shader::Shader;
 use bevy::world_serialization::WorldAsset;
 
-use crate::game::{FRAME_HEIGHT, FRAME_WIDTH};
 use crate::materials::{
     BackgroundPattern, BackgroundUiMaterial, CONTOURS_SHADER_PATH, PATTERN_NEUTRAL_TINT,
     contour_parameters, pattern_tint_uniform,
@@ -273,8 +272,8 @@ pub fn setup_assets(
 
     let mut image = Image::new_fill(
         Extent3d {
-            width: FRAME_WIDTH,
-            height: FRAME_HEIGHT,
+            width: 1,
+            height: 1,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,

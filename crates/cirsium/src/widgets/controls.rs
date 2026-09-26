@@ -32,7 +32,7 @@ pub struct ControlsWidget {
 }
 
 impl ControlsWidget {
-    pub const ID: &'static str = "controls";
+    pub const ID: &'static str = debugger_model::panel::CONTROLS;
 
     pub fn new(view: ControlsView) -> Self {
         Self {

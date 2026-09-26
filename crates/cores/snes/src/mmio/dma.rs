@@ -324,14 +324,14 @@ fn transfer_dma_byte(
     let value = if a_bus_blocked && matches!(direction, Direction::AToB) {
         OPEN_BUS
     } else if matches!(direction, Direction::AToB) {
-        snes.read8_mapped(a_bus, &a_bus_space)
+        snes.read8_mapped::<true>(a_bus, &a_bus_space)
     } else {
-        snes.read8_direct(b_bus)
+        snes.read8_direct::<true>(b_bus)
     };
 
     match direction {
-        Direction::AToB => snes.write8_direct(b_bus, value),
-        Direction::BToA if !a_bus_blocked => snes.write8_mapped(a_bus, &a_bus_space, value),
+        Direction::AToB => snes.write8_direct::<true>(b_bus, value),
+        Direction::BToA if !a_bus_blocked => snes.write8_mapped::<true>(a_bus, &a_bus_space, value),
         Direction::BToA => {}
     }
 
@@ -347,8 +347,9 @@ fn read_hdma_table_byte(snes: &mut Bus<impl MemoryMap>, channel: &mut DmaChannel
     let value = if matches!(&space, AddressSpace::Io(_)) {
         OPEN_BUS
     } else {
-        snes.read8_mapped(address, &space)
+        snes.read8_mapped::<true>(address, &space)
     };
+
     snes.mmu.clocks = clocks_before + 8;
     value
 }

@@ -45,10 +45,17 @@ CartridgeInfo to_cartridge_info(ffi::CartridgeInfo value) {
         .title = to_string(value.title),
         .system = to_string(value.system),
         .region_name = to_string(value.region_name),
-        .pal = value.pal,
         .rom_crc32 = value.rom_crc32,
-        .has_battery = value.has_battery,
-        .sram_size = value.sram_size,
+        .backup_battery_backed = value.backup_battery_backed,
+        .backup_capacity = value.backup_capacity,
+        .rom_sha1 = to_string(value.rom_sha1),
+        .rom_size = value.rom_size,
+        .television_system = value.tv_system < 2
+                                 ? std::optional(static_cast<TelevisionSystem>(value.tv_system))
+                                 : std::nullopt,
+        .backup_kind = value.backup_kind > 0
+                           ? std::optional(static_cast<BackupKind>(value.backup_kind))
+                           : std::nullopt,
     };
 }
 
@@ -250,6 +257,20 @@ std::optional<AudioSpec> Core::audio_spec() const noexcept {
     return AudioSpec{.sample_rate = spec.sample_rate, .channels = spec.channels};
 }
 
+std::vector<ControllerInfo> Core::controllers() const {
+    std::vector<ControllerInfo> result;
+    for (const auto& controller : impl_->core->controllers()) {
+        ControllerInfo info{
+            .port = controller.port, .name = to_string(controller.name), .buttons = {}
+        };
+        for (const auto button : controller.buttons) {
+            info.buttons.push_back(static_cast<Button>(button));
+        }
+        result.push_back(std::move(info));
+    }
+    return result;
+}
+
 std::span<const std::int16_t> Core::drain_audio() noexcept {
     const auto samples = impl_->core->drain_audio();
     return {samples.data(), samples.size()};
@@ -305,8 +326,29 @@ std::span<const std::uint8_t> Core::save_ram() const noexcept {
     return {bytes.data(), bytes.size()};
 }
 
+std::string Core::state_path(const std::uint8_t index) const {
+    try {
+        return to_string(impl_->core->state_path(index));
+    } catch (const std::exception& error) {
+        throw Error(error.what());
+    }
+}
+
+std::string Core::save_ram_path() const {
+    return to_string(impl_->core->save_ram_path());
+}
+
 bool Core::load_save_ram(const std::span<const std::uint8_t> bytes) noexcept {
     return impl_->core->load_save_ram(to_slice(bytes));
+}
+
+std::span<const std::uint8_t> Core::persistable_save_ram() const noexcept {
+    const auto bytes = impl_->core->persistable_save_ram();
+    return {bytes.data(), bytes.size()};
+}
+
+void Core::inhibit_save_ram_persistence() const noexcept {
+    impl_->core->inhibit_save_ram_persistence();
 }
 
 CartridgeInfo Core::cartridge_info() const {

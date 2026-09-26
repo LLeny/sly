@@ -1,8 +1,5 @@
 use gpui::prelude::*;
-use gpui::{
-    AnyElement, App, ClickEvent, Div, FontWeight, Hsla, SharedString, Stateful, Window, div, px,
-    svg,
-};
+use gpui::{App, ClickEvent, Div, FontWeight, Hsla, SharedString, Stateful, Window, div, px, svg};
 
 use crate::assets::icon;
 use crate::theme::{MONO_FONT, Theme, with_alpha};
@@ -45,44 +42,9 @@ pub fn status_flag(theme: &Theme, text: impl Into<SharedString>, on: bool) -> Di
 
 pub use debugger_model::hex;
 
-pub fn flip_label(flip_h: bool, flip_v: bool) -> Option<&'static str> {
-    match (flip_h, flip_v) {
-        (false, false) => None,
-        (true, false) => Some("flip H"),
-        (false, true) => Some("flip V"),
-        (true, true) => Some("flip HV"),
-    }
-}
-
 /// A thin vertical divider for statusbar segments.
 pub fn separator(theme: &Theme) -> Div {
     div().w(px(1.)).h(px(12.)).bg(theme.border_strong)
-}
-
-/// Lays out the given segments joined by the same thin vertical divider the
-/// status bar uses between its segments (see [`separator`]).
-pub fn divided(theme: &Theme, segments: impl IntoIterator<Item = AnyElement>) -> Div {
-    let mut row = div().flex().items_center().gap(px(6.));
-    for (i, seg) in segments.into_iter().enumerate() {
-        if i > 0 {
-            row = row.child(separator(theme));
-        }
-        row = row.child(seg);
-    }
-    row
-}
-
-/// [`divided`] over monospace value segments (see [`mono_text`]).
-pub fn divided_mono<S: Into<SharedString>>(
-    theme: &Theme,
-    segments: impl IntoIterator<Item = S>,
-) -> Div {
-    divided(
-        theme,
-        segments
-            .into_iter()
-            .map(|s| mono_text(theme, s).into_any_element()),
-    )
 }
 
 fn field_button_base(

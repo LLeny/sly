@@ -28,6 +28,8 @@ impl<M: ApuMap> decoder::DisasmCtx for Reader<'_, M> {
 /// Execute one instruction and return the SPC700 cycles it took.
 pub fn step<M: ApuMap>(apu: &mut Apu<M>) -> u64 {
     let pc = apu.spc700.pc;
+    #[cfg(feature = "debug")]
+    apu.access.instruction(pc as u32);
     let opcode = apu.peek(pc);
     let (inst, len) = {
         let reader = Reader { apu: &*apu };

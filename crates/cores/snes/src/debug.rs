@@ -3,16 +3,18 @@ use std::time::Duration;
 
 use core_model::{Core, SessionInfo, SoftwareFrame};
 use debugger_model::{
-    AudioScopesView, BreakpointKind, BreakpointMark, CPU_WORKSPACE, CallStackView, CartridgeField,
-    CartridgeView, CpuDescriptor, CpuId, CpuView, DebugCore, DisasmLine, DisasmToken,
-    DmaChannelDetail, DmaChannelView, DmaView, EventDescriptor, EventHit, FlagView, FlowKind,
-    Highlight, HookHit, MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView,
-    PaletteColor, PaletteView, PpuGroup, PpuProperty, PpuView, RegisterView, RunOutcome,
-    SOUND_WORKSPACE, SpriteEntry, Sprites, StackFrame, StepTarget, StructuredView, SyntaxSpec,
-    TableView, Tilemap, TilemapEntry, TilemapOverlay, TilemapOverlayBand, TilemapViewport, Tileset,
-    TilesetLayer, TilesetTile, TokenKind, VIDEO_WORKSPACE, VideoGenerations, hex,
+    AccessSource, AccessTracking, AccessWidth, AudioScopesView, BreakpointKind, BreakpointMark,
+    CPU_WORKSPACE, CallStackView, CartridgeView, CpuDescriptor, CpuId, CpuView, DebugCore,
+    DebugMemoryError, DecodeMode, DisasmLine, DisasmToken, DisassemblyRequest, EventDescriptor,
+    EventHit, Field, FlagView, FlowKind, Highlight, HookHit, MemoryAddress, MemoryRegion,
+    MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView, RasterImage,
+    RegisterView, Row, RunOutcome, SOUND_WORKSPACE, Section, SpriteEntry, Sprites, StackFrame,
+    StepTarget, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapOverlay,
+    TilemapOverlayBand, TilemapViewport, Tileset, TilesetTile, TokenKind, VIDEO_WORKSPACE,
+    VideoDebug, VideoResource, VideoResourceId, VideoResourceKind, VideoRevision, hex,
     standard_manifest, strip_symbol_sigils, tokenize,
 };
+
 use workspace_model::{
     ComponentManifest, DockLocation, PanelDescriptor, PanelGroupLayout, PanelKind, RefreshPolicy,
     WorkspaceDescriptor, WorkspaceIcon,
@@ -54,9 +56,6 @@ const BG_LAYERS: usize = 4;
 const CPU_MAIN: &str = "cpu.65c816";
 const CPU_SPC: &str = "apu.spc700";
 
-const CAPTURE_FRAMES: u32 = 2;
-const TRACK_FRAMES: u32 = 4;
-
 pub struct SnesDebug {
     core: Snes,
     cartridge: CartridgeView,
@@ -68,8 +67,7 @@ pub struct SnesDebug {
     watch: EventWatch,
     events: Vec<EventHit>,
     event_baseline: EventBaseline,
-    capture_frames: std::sync::atomic::AtomicU32,
-    track_frames: std::sync::atomic::AtomicU32,
+    tracking: AccessTracking,
 }
 
 impl SnesDebug {
@@ -79,11 +77,13 @@ impl SnesDebug {
 
         let segments = vec![
             self::mapper_name(&cart).into(),
-            cart.region().tv_system().to_string().into(),
+            crate::cartridge::tv_system(cart.region())
+                .to_string()
+                .into(),
             self::human_size(cart.rom.len()).into(),
         ];
 
-        Self {
+        let mut debug = Self {
             core: Snes::new(cart),
             cartridge,
             system: "SNES".into(),
@@ -94,9 +94,22 @@ impl SnesDebug {
             watch: EventWatch::new(),
             events: Vec::new(),
             event_baseline: EventBaseline::default(),
-            capture_frames: std::sync::atomic::AtomicU32::new(0),
-            track_frames: std::sync::atomic::AtomicU32::new(0),
-        }
+            tracking: AccessTracking::Off,
+        };
+
+        debug.reset_access();
+        debug
+    }
+
+    fn reset_access(&mut self) {
+        self.core
+            .bus
+            .apu
+            .access
+            .share_order(&self.core.bus.mmu.access);
+
+        self.last_access = MemoryAccess::default();
+        self.last_hits.clear();
     }
 
     fn has_gsu(&self) -> bool {
@@ -106,13 +119,29 @@ impl SnesDebug {
     fn has_sa1(&self) -> bool {
         self.core.mmu.cartridge.coprocessor() == crate::cartridge::Coprocessor::Sa1
     }
+
+    fn pc_of(&self, cpu: &str) -> u32 {
+        match cpu {
+            CPU_SPC => self.core.apu.spc700.pc as u32,
+            sa1::CPU => {
+                Address::new(self.core.sa1.cpu.program_bank, self.core.sa1.cpu.pc).as_24bit()
+            }
+            superfx::CPU_GSU => {
+                Address::new(self.core.superfx.pbr, superfx::pc(&self.core.superfx)).as_24bit()
+            }
+            _ => Address::new(self.core.cpu.program_bank, self.core.cpu.pc).as_24bit(),
+        }
+    }
 }
 
 impl Core for SnesDebug {
+    fn cartridge_info(&self) -> Option<core_model::CartridgeInfo> {
+        self.core.cartridge_info()
+    }
+
     fn reset(&mut self) {
         self.core.reset();
-        self.last_access = MemoryAccess::default();
-        self.last_hits.clear();
+        self.reset_access();
     }
 
     fn step(&mut self) {
@@ -133,6 +162,10 @@ impl Core for SnesDebug {
 
     fn set_button(&mut self, player: usize, button: core_model::Button, pressed: bool) {
         self.core.joypads.set_button(player, button, pressed);
+    }
+
+    fn controllers(&self) -> Vec<core_model::ControllerDescriptor> {
+        self.core.controllers()
     }
 
     fn session_info(&self) -> SessionInfo {
@@ -161,8 +194,7 @@ impl Core for SnesDebug {
 
     fn load_state(&mut self, bytes: &[u8]) -> Result<(), core_model::StateError> {
         self.core.load_state(bytes)?;
-        self.last_access = MemoryAccess::default();
-        self.last_hits.clear();
+        self.reset_access();
         Ok(())
     }
 
@@ -178,12 +210,14 @@ impl Core for SnesDebug {
 impl DebugCore for SnesDebug {
     fn cpus(&self) -> Vec<CpuDescriptor> {
         let mut cpus = vec![
-            CpuDescriptor::new(CPU_MAIN, "65C816", "bus", 16),
-            CpuDescriptor::new(CPU_SPC, "SPC700", "spc", 16),
+            CpuDescriptor::new(CPU_MAIN, "65C816", "bus").decode_modes(decode_modes()),
+            CpuDescriptor::new(CPU_SPC, "SPC700", "spc"),
         ];
+
         if self.has_gsu() {
             cpus.push(superfx::descriptor());
         }
+
         if self.has_sa1() {
             cpus.push(sa1::descriptor());
         }
@@ -191,20 +225,24 @@ impl DebugCore for SnesDebug {
     }
 
     fn pc(&self, cpu: &CpuId) -> u32 {
-        match cpu.as_str() {
-            CPU_SPC => self.core.apu.spc700.pc as u32,
-            sa1::CPU => self.core.sa1.cpu.pc as u32,
-            superfx::CPU_GSU => superfx::pc(&self.core.superfx) as u32,
-            _ => self.core.cpu.pc as u32,
-        }
+        self.pc_of(cpu.as_str())
     }
 
     fn set_pc(&mut self, cpu: &CpuId, addr: u32) {
         match cpu.as_str() {
             CPU_SPC => self.core.apu.spc700.pc = addr as u16,
-            sa1::CPU => self.core.sa1.cpu.pc = addr as u16,
-            superfx::CPU_GSU => superfx::set_pc(&mut self.core, addr as u16),
-            _ => self.core.cpu.pc = addr as u16,
+            sa1::CPU => {
+                self.core.sa1.cpu.pc = addr as u16;
+                self.core.sa1.cpu.program_bank = (addr >> 16) as u8;
+            }
+            superfx::CPU_GSU => {
+                self.core.superfx.pbr = (addr >> 16) as u8;
+                superfx::set_pc(&mut self.core, addr as u16);
+            }
+            _ => {
+                self.core.cpu.pc = addr as u16;
+                self.core.cpu.program_bank = (addr >> 16) as u8;
+            }
         }
     }
 
@@ -239,28 +277,34 @@ impl DebugCore for SnesDebug {
         }
     }
 
-    fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> Vec<DisasmLine> {
+    fn disassemble(&self, cpu: &CpuId, request: &DisassemblyRequest) -> Vec<DisasmLine> {
         match cpu.as_str() {
-            CPU_SPC => self::spc_disasm_view(&self.core.apu, base as u16, count),
-            sa1::CPU => sa1::disasm_view(&self.core, base as u16, count),
-            superfx::CPU_GSU => superfx::disasm_view(&self.core, base as u16, count),
-            _ => self::disasm_view(&self.core, base as u16, count),
+            CPU_SPC if request.mode.is_none() => {
+                spc_disasm_view(&self.core.apu, request.base as u16, request.count)
+            }
+            sa1::CPU => sa1::disasm_view(&self.core, request),
+            superfx::CPU_GSU if request.mode.is_none() => {
+                superfx::disasm_view(&self.core, request.base, request.count)
+            }
+            CPU_MAIN => {
+                let Some(decoded) = decode_cpu(&self.core.cpu, request) else {
+                    return Vec::new();
+                };
+
+                disasm_view_on(&decoded, &self.core.bus, request.base as u16, request.count)
+            }
+            _ => Vec::new(),
         }
     }
 
-    fn disassemble_one(&self, cpu: &CpuId, addr: u32) -> Option<DisasmLine> {
-        match cpu.as_str() {
-            sa1::CPU => sa1::disasm_view(&self.core, addr as u16, 1)
-                .into_iter()
-                .next(),
-            superfx::CPU_GSU => superfx::disasm_view(&self.core, addr as u16, 1)
-                .into_iter()
-                .next(),
-            CPU_SPC => self::spc_disasm_view(&self.core.apu, addr as u16, 1)
-                .into_iter()
-                .next(),
-            _ => Some(self::disasm_line_at(&self.core, addr as u16, true).0),
+    fn disassemble_one(&self, cpu: &CpuId, request: &DisassemblyRequest) -> Option<DisasmLine> {
+        if cpu.as_str() == CPU_MAIN && request.mode.is_none() && request.base == self.pc(cpu) {
+            return Some(disasm_line_at(&self.core, request.base as u16, true).0);
         }
+
+        let mut request = request.clone();
+        request.count = 1;
+        self.disassemble(cpu, &request).into_iter().next()
     }
 
     fn call_stack(&self, cpu: &CpuId) -> CallStackView {
@@ -299,53 +343,8 @@ impl DebugCore for SnesDebug {
         self::mmio_view(&self.core)
     }
 
-    fn dma_view(&self) -> DmaView {
-        self::dma_view(&self.core)
-    }
-
-    fn ppu_view(&self) -> PpuView {
-        self::ppu_view(&self.core)
-    }
-
-    fn tileset(&self, layer: usize, color: usize) -> Option<Tileset> {
-        if layer >= BG_LAYERS {
-            return None;
-        }
-        self::tileset(&self.core, layer, color)
-    }
-
-    fn tilemap(&self, layer: usize) -> Option<Tilemap> {
-        if layer >= BG_LAYERS {
-            return (self.has_gsu() && layer == BG_LAYERS)
-                .then(|| superfx::bitmap_tilemap(&self.core))
-                .flatten();
-        }
-        self::tilemap(&self.core, layer)
-    }
-
-    fn tilemap_overlays(&self, layer: usize) -> Vec<TilemapOverlay> {
-        if layer >= BG_LAYERS || mode7_bg_layer(&self.core, layer) {
-            return Vec::new();
-        }
-        self::tilemap_window_overlays(&self.core, layer)
-    }
-
-    fn sprites(&self) -> Option<Sprites> {
-        Some(self::sprites(&self.core))
-    }
-
-    fn tilemap_viewport(&self, layer: usize) -> Option<TilemapViewport> {
-        if mode7_bg_layer(&self.core, layer) {
-            return None;
-        }
-
-        let header = self.core.ppu.tilemap_header(layer)?;
-        Some(TilemapViewport {
-            x: header.scroll_x,
-            y: header.scroll_y,
-            width: crate::ppu::SCREEN_WIDTH,
-            height: crate::ppu::SCREEN_HEIGHT,
-        })
+    fn video(&self) -> Option<&dyn VideoDebug> {
+        Some(self)
     }
 
     fn table_view(&self, id: &str) -> TableView {
@@ -359,6 +358,8 @@ impl DebugCore for SnesDebug {
     fn structured_view(&self, id: &str, selection: Option<usize>) -> StructuredView {
         let dsp = &self.core.apu.dsp;
         match id {
+            "ppu" => self::ppu_view(&self.core),
+            "dma" => self::dma_view(&self.core),
             dsp::REGISTERS_ID => dsp::registers_view(dsp),
             dsp::INSPECTOR_ID => dsp::inspector_view(dsp, selection),
             sa1::STATE_ID => sa1::state_view(&self.core),
@@ -417,11 +418,34 @@ impl DebugCore for SnesDebug {
         self.regions()
     }
 
-    fn read_memory(&self, region: &str, addr: u32, len: usize) -> Vec<u8> {
+    fn peek_memory(&self, region: &str, addr: u32, len: usize) -> Vec<u8> {
         self.read(region, addr, len)
     }
 
-    fn write_memory(&mut self, region: &str, addr: u32, bytes: &[u8]) -> usize {
+    fn track_accesses(&mut self, tracking: AccessTracking) {
+        self.tracking = tracking;
+    }
+
+    fn read_bus(
+        &mut self,
+        region: &str,
+        addr: u32,
+        width: AccessWidth,
+    ) -> Result<u32, DebugMemoryError> {
+        self.bus_read(region, addr, width)
+    }
+
+    fn write_bus(
+        &mut self,
+        region: &str,
+        addr: u32,
+        width: AccessWidth,
+        value: u32,
+    ) -> Result<(), DebugMemoryError> {
+        self.bus_write(region, addr, width, value)
+    }
+
+    fn patch_memory(&mut self, region: &str, addr: u32, bytes: &[u8]) -> usize {
         self.write(region, addr, bytes)
     }
 
@@ -441,20 +465,8 @@ impl DebugCore for SnesDebug {
         self.latest()
     }
 
-    fn palette_view(&self) -> PaletteView {
-        self.palette()
-    }
-
-    fn tileset_layers(&self) -> Vec<TilesetLayer> {
-        self.layers()
-    }
-
-    fn video_generations(&self) -> Option<VideoGenerations> {
-        self.generations()
-    }
-
-    fn disasm_fingerprint(&self, cpu: &CpuId, base: u32, count: usize) -> Option<u64> {
-        self.fingerprint(cpu, base, count)
+    fn disasm_fingerprint(&self, cpu: &CpuId, request: &DisassemblyRequest) -> Option<u64> {
+        self.fingerprint(cpu, request)
     }
 
     fn write_register(&mut self, cpu: &CpuId, name: &str, value: u32) -> bool {

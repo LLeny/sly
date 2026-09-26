@@ -82,6 +82,7 @@ public actor ArtworkService {
             forKeys: [.fileSizeKey, .contentModificationDateKey]
         )
         let key = [
+            system.slug,
             romURL.path,
             String(stamp?.fileSize ?? -1),
             String(stamp?.contentModificationDate?.timeIntervalSince1970 ?? -1),
@@ -101,7 +102,7 @@ public actor ArtworkService {
         preferredRegion: ArtworkRegion
     ) async throws -> ArtworkCover? {
         let region = preferredRegion.native(romRegion: query.region)
-        let cacheKey = "\(query.sha1)-\(preferredRegion.rawValue)"
+        let cacheKey = "\(query.system.slug)-\(query.sha1)-\(preferredRegion.rawValue)"
         if let cached = covers.object(forKey: cacheKey as NSString) {
             return cached.cover
         }
@@ -233,6 +234,7 @@ private struct StoredArtworkCover: Codable {
 }
 
 private struct NativeArtworkQuery {
+    let system: System
     let sha1: String
     let metadataURL: URL
     let authorization: String
@@ -276,6 +278,7 @@ private enum NativeArtwork {
             throw ArtworkError.invalidURL(metadataURLString)
         }
         return NativeArtworkQuery(
+            system: system,
             sha1: string(native.sha1),
             metadataURL: metadataURL,
             authorization: string(native.authorization),
@@ -299,6 +302,7 @@ private enum NativeArtwork {
         let status = sha1.withUnsafeBytes { sha1Bytes in
             metadata.withUnsafeBytes { metadataBytes in
                 sly_artwork_resolve(
+                    query.system.native,
                     sha1Bytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
                     sha1Bytes.count,
                     region,

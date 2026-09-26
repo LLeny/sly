@@ -1,4 +1,4 @@
-use core_model::Region;
+use core_model::{GameId, Region};
 use serde::Deserialize;
 
 // Not security relevant, only used for metrics
@@ -29,12 +29,16 @@ pub struct ArtworkManifest {
     pub label: Option<String>,
 }
 
-pub fn metadata_url(sha1: &str) -> String {
-    format!("{BASE_URL}/snes/{sha1}")
+fn game_path(game: &GameId) -> String {
+    format!("{}/{}", game.system.slug(), game.sha1)
 }
 
-pub fn art_url(sha1: &str, art: &str) -> String {
-    format!("{BASE_URL}/snes/{sha1}?art={art}")
+pub fn metadata_url(game: &GameId) -> String {
+    format!("{BASE_URL}/{}", game_path(game))
+}
+
+pub fn art_url(game: &GameId, art: &str) -> String {
+    format!("{}?art={art}", metadata_url(game))
 }
 
 pub fn parse_metadata(bytes: &[u8]) -> Result<Metadata, serde_json::Error> {
@@ -43,12 +47,12 @@ pub fn parse_metadata(bytes: &[u8]) -> Result<Metadata, serde_json::Error> {
 
 /// `regions` is a priority list, most preferred first; an empty list falls back to any region.
 pub fn resolve_metadata(
-    sha1: &str,
+    game: &GameId,
     regions: &[Region],
     bytes: &[u8],
 ) -> Result<ArtworkManifest, serde_json::Error> {
     let metadata = parse_metadata(bytes)?;
-    let url = |kind| select_art(&metadata.art, kind, regions).map(|art| art_url(sha1, &art));
+    let url = |kind| select_art(&metadata.art, kind, regions).map(|art| art_url(game, &art));
     Ok(ArtworkManifest {
         title: metadata.title,
         front: url("box-front"),
@@ -109,7 +113,7 @@ mod fetch {
     use std::sync::LazyLock;
     use std::time::Duration;
 
-    use core_model::Region;
+    use core_model::{GameId, Region};
 
     use super::Metadata;
 
@@ -130,39 +134,48 @@ mod fetch {
         pub label: Option<Vec<u8>>,
     }
 
-    pub fn fetch_bundle(sha1: &str, region: Region) -> Result<ArtworkBundle, String> {
-        if let Some(cached) = load_cached_bundle(sha1) {
+    pub fn fetch_bundle(game: &GameId, region: Option<Region>) -> Result<ArtworkBundle, String> {
+        if let Some(cached) = load_cached_bundle(game) {
             return Ok(cached);
         }
 
-        let metadata = fetch_metadata(sha1)?;
+        let metadata = fetch_metadata(game)?;
 
         let bundle = ArtworkBundle {
             title: metadata.title,
-            front: fetch_kind(sha1, &metadata.art, "box-front", region),
-            back: fetch_kind(sha1, &metadata.art, "box-back", region),
-            spine: fetch_kind(sha1, &metadata.art, "box-spine", region),
-            label: fetch_kind(sha1, &metadata.art, "support-texture", region),
+            front: fetch_kind(game, &metadata.art, "box-front", region),
+            back: fetch_kind(game, &metadata.art, "box-back", region),
+            spine: fetch_kind(game, &metadata.art, "box-spine", region),
+            label: fetch_kind(game, &metadata.art, "support-texture", region),
         };
 
         if bundle.front.is_some() {
-            write_cached_bundle(sha1, &bundle);
+            write_cached_bundle(game, &bundle);
         }
+
         Ok(bundle)
     }
 
-    pub fn fetch_wheel(sha1: &str, region: Region) -> Result<Option<Vec<u8>>, String> {
-        let cache_name = format!("wheel-{}", super::art_variants(region).join("-"));
-        let path = bundle_cache_dir(sha1).join(&cache_name);
+    pub fn fetch_wheel(game: &GameId, region: Option<Region>) -> Result<Option<Vec<u8>>, String> {
+        let cache_name = format!(
+            "wheel-{}",
+            region
+                .map(super::art_variants)
+                .unwrap_or_default()
+                .join("-")
+        );
+
+        let path = bundle_cache_dir(game).join(&cache_name);
         if let Some(cached) = read_cache_bytes(&path) {
             return Ok(Some(cached));
         }
 
-        let metadata = fetch_metadata(sha1)?;
-        let wheel = fetch_kind(sha1, &metadata.art, "wheel", region);
+        let metadata = fetch_metadata(game)?;
+        let wheel = fetch_kind(game, &metadata.art, "wheel", region);
         if let Some(bytes) = &wheel {
-            write_cache_bytes(sha1, &cache_name, bytes);
+            write_cache_bytes(game, &cache_name, bytes);
         }
+
         Ok(wheel)
     }
 
@@ -172,12 +185,12 @@ mod fetch {
             .unwrap_or_else(|| PathBuf::from("artwork"))
     }
 
-    fn bundle_cache_dir(sha1: &str) -> PathBuf {
-        cache_root().join(sha1)
+    fn bundle_cache_dir(game: &GameId) -> PathBuf {
+        cache_root().join(super::game_path(game))
     }
 
-    fn load_cached_bundle(sha1: &str) -> Option<ArtworkBundle> {
-        let dir = bundle_cache_dir(sha1);
+    fn load_cached_bundle(game: &GameId) -> Option<ArtworkBundle> {
+        let dir = bundle_cache_dir(game);
         let front = read_cache_bytes(&dir.join("front"))?;
         let title = std::fs::read_to_string(dir.join("title"))
             .unwrap_or_default()
@@ -196,27 +209,28 @@ mod fetch {
         std::fs::read(path).ok().filter(|bytes| !bytes.is_empty())
     }
 
-    fn fetch_metadata(sha1: &str) -> Result<Metadata, String> {
-        get(&super::metadata_url(sha1))
+    fn fetch_metadata(game: &GameId) -> Result<Metadata, String> {
+        get(&super::metadata_url(game))
             .map_err(|err| format!("metadata unavailable: {err}"))?
             .body_mut()
             .read_json()
             .map_err(|err| format!("invalid artwork metadata: {err}"))
     }
 
-    fn write_cache_bytes(sha1: &str, name: &str, bytes: &[u8]) {
-        let dir = bundle_cache_dir(sha1);
+    fn write_cache_bytes(game: &GameId, name: &str, bytes: &[u8]) {
+        let dir = bundle_cache_dir(game);
         if let Err(err) = std::fs::create_dir_all(&dir) {
             eprintln!("artwork cache: failed to create {}: {err}", dir.display());
             return;
         }
+
         if let Err(err) = std::fs::write(dir.join(name), bytes) {
-            eprintln!("artwork cache: failed to write {name} for {sha1}: {err}");
+            eprintln!("artwork cache: failed to write {name} for {game:?}: {err}");
         }
     }
 
-    fn write_cached_bundle(sha1: &str, bundle: &ArtworkBundle) {
-        let dir = bundle_cache_dir(sha1);
+    fn write_cached_bundle(game: &GameId, bundle: &ArtworkBundle) {
+        let dir = bundle_cache_dir(game);
         if let Err(err) = std::fs::create_dir_all(&dir) {
             eprintln!("artwork cache: failed to create {}: {err}", dir.display());
             return;
@@ -226,7 +240,7 @@ mod fetch {
             if let Some(bytes) = bytes
                 && let Err(err) = std::fs::write(dir.join(name), bytes)
             {
-                eprintln!("artwork cache: failed to write {name} for {sha1}: {err}");
+                eprintln!("artwork cache: failed to write {name} for {game:?}: {err}");
             }
         };
 
@@ -236,7 +250,7 @@ mod fetch {
         write("label", &bundle.label);
 
         if let Err(err) = std::fs::write(dir.join("title"), &bundle.title) {
-            eprintln!("artwork cache: failed to write title for {sha1}: {err}");
+            eprintln!("artwork cache: failed to write title for {game:?}: {err}");
         }
     }
 
@@ -247,9 +261,14 @@ mod fetch {
             .call()
     }
 
-    fn fetch_kind(sha1: &str, available: &[String], kind: &str, region: Region) -> Option<Vec<u8>> {
-        let selected = super::select_art(available, kind, &[region])?;
-        get(&super::art_url(sha1, &selected))
+    fn fetch_kind(
+        game: &GameId,
+        available: &[String],
+        kind: &str,
+        region: Option<Region>,
+    ) -> Option<Vec<u8>> {
+        let selected = super::select_art(available, kind, region.as_slice())?;
+        get(&super::art_url(game, &selected))
             .and_then(|response| response.into_body().read_to_vec())
             .ok()
     }

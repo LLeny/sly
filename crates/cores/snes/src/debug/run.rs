@@ -79,17 +79,17 @@ impl<'a> Sa1Stops<'a> {
     fn covers(&self, pc: u32) -> bool {
         self.marks
             .iter()
-            .any(|mark| mark.covers(BreakpointKind::Execute, &self.cpu, pc))
+            .any(|mark| mark.covers(BreakpointKind::Execute, &self.cpu, "sa1", pc, 1))
     }
 }
 
 impl SnesDebug {
     fn cpu_pcs(&self) -> [(&'static str, u32); 4] {
         [
-            (CPU_MAIN, self.core.cpu.pc as u32),
-            (CPU_SPC, self.core.apu.spc700.pc as u32),
-            (sa1::CPU, self.core.sa1.cpu.pc as u32),
-            (superfx::CPU_GSU, superfx::pc(&self.core.superfx) as u32),
+            (CPU_MAIN, self.pc_of(CPU_MAIN)),
+            (CPU_SPC, self.pc_of(CPU_SPC)),
+            (sa1::CPU, self.pc_of(sa1::CPU)),
+            (superfx::CPU_GSU, self.pc_of(superfx::CPU_GSU)),
         ]
     }
 
@@ -98,12 +98,7 @@ impl SnesDebug {
 
         breakpoints
             .iter()
-            .filter(|m| m.kind == BreakpointKind::Execute)
-            .any(|m| {
-                pcs.iter().any(|(id, pc)| {
-                    m.cpu.as_str() == *id && (m.start & 0xFFFF..=m.end & 0xFFFF).contains(pc)
-                })
-            })
+            .any(|m| pcs.iter().any(|&(id, pc)| executes_at(m, id, pc)))
     }
 
     pub(super) fn captured(
@@ -126,35 +121,27 @@ impl SnesDebug {
     }
 
     pub(super) fn step_captured(&mut self) -> MemoryAccess {
-        self.captured(TrackMode::Full, |debug| debug.core.step())
+        self.captured(self.track_mode(), |debug| debug.core.step())
     }
 
     fn step_stopping_at(&mut self, sa1: &Sa1Stops<'_>) {
-        self.core.step_until_sa1(|cpu| sa1.covers(cpu.pc as u32));
+        self.core
+            .step_until_sa1(|cpu| sa1.covers(Address::new(cpu.program_bank, cpu.pc).as_24bit()));
     }
 
     pub(super) fn track_mode(&self) -> TrackMode {
-        use std::sync::atomic::Ordering::Relaxed;
-
-        for (frames, mode) in [
-            (&self.capture_frames, TrackMode::Full),
-            (&self.track_frames, TrackMode::LastOnly),
-        ] {
-            let remaining = frames.load(Relaxed);
-            if remaining > 0 {
-                frames.store(remaining - 1, Relaxed);
-                return mode;
-            }
+        match self.tracking {
+            AccessTracking::Off => TrackMode::Off,
+            AccessTracking::Latest => TrackMode::LastOnly,
+            AccessTracking::Highlights => TrackMode::Full,
         }
-
-        TrackMode::Off
     }
 
     pub(super) fn event_outcome(&self, frame_end: u64) -> RunOutcome {
         if self.core.scheduler.cycles() >= frame_end {
-            RunOutcome::Done
+            RunOutcome::FrameComplete
         } else {
-            RunOutcome::Breakpoint
+            RunOutcome::Event
         }
     }
 
@@ -204,7 +191,7 @@ impl SnesDebug {
         }
 
         let before = std::mem::replace(&mut self.event_baseline, now);
-        let pc = self.core.cpu.pc as u32;
+        let pc = self.pc(&CPU_MAIN.into());
         // NMI and IRQ report the line they fired on, so it is worth the
         // division here even when the scanline itself is not watched.
         let line = if self.watch.scanline {
@@ -247,109 +234,98 @@ impl SnesDebug {
         breakpoints: &[BreakpointMark],
         access: &MemoryAccess,
     ) -> Vec<HookHit> {
-        const MAX_HITS: usize = 64;
-
-        let pcs = self.cpu_pcs();
-        let main_pc = self.core.cpu.pc as u32;
-
         let mut hits = Vec::new();
-        'marks: for mark in breakpoints {
-            if hits.len() >= MAX_HITS {
-                break;
+        for (id, pc) in self.cpu_pcs() {
+            if breakpoints.iter().any(|mark| executes_at(mark, id, pc)) {
+                let cpu = CpuId::from(id);
+                hits.push(HookHit {
+                    kind: BreakpointKind::Execute,
+                    cpu: cpu.clone(),
+                    region: cpu_space(id).into(),
+                    addr: pc,
+                    pc,
+                    value: 0,
+                    width: AccessWidth::Byte,
+                    source: AccessSource::Cpu(cpu),
+                });
             }
+        }
 
-            match mark.kind {
-                BreakpointKind::Execute => {
-                    let hit = pcs.iter().find(|(id, pc)| {
-                        mark.cpu.as_str() == *id
-                            && (mark.start & 0xFFFF..=mark.end & 0xFFFF).contains(pc)
-                    });
+        if access.events.is_empty() {
+            return hits;
+        }
 
-                    if let Some((_, pc)) = hit {
-                        hits.push(HookHit {
-                            kind: mark.kind,
-                            cpu: mark.cpu.clone(),
-                            region: mark.region.clone(),
-                            addr: *pc,
-                            pc: *pc,
-                        });
-                    }
+        let (main, spc) = (CpuId::from(CPU_MAIN), CpuId::from(CPU_SPC));
+        for event in &access.events {
+            let cpu = if event.key.0 == MemKind::Spc {
+                &spc
+            } else {
+                &main
+            };
+
+            let kind = if event.write {
+                BreakpointKind::Write
+            } else {
+                BreakpointKind::Read
+            };
+
+            let mut emitted_regions: Vec<&str> = Vec::new();
+            for mark in breakpoints {
+                if mark.kind != kind || emitted_regions.contains(&mark.region.as_ref()) {
+                    continue;
                 }
-                BreakpointKind::Read | BreakpointKind::Write => {
-                    let set = match mark.kind {
-                        BreakpointKind::Read => &access.reads,
-                        _ => &access.writes,
-                    };
 
-                    let push = |addr: u32, hits: &mut Vec<HookHit>| {
-                        hits.push(HookHit {
-                            kind: mark.kind,
-                            cpu: mark.cpu.clone(),
-                            region: mark.region.clone(),
-                            addr,
-                            pc: main_pc,
-                        });
-                    };
-
-                    match mark.region.as_ref() {
-                        "bus" => {
-                            for addr in mark.start..=mark.end {
-                                if self
-                                    .region_key("bus", addr)
-                                    .is_some_and(|key| set.contains(&key))
-                                {
-                                    push(addr, &mut hits);
-                                    if hits.len() >= MAX_HITS {
-                                        break 'marks;
-                                    }
-                                }
-                            }
-                        }
-                        region => {
-                            for &key in set.iter() {
-                                if (mark.start..=mark.end).contains(&key.1)
-                                    && self.region_key(region, key.1) == Some(key)
-                                {
-                                    push(key.1, &mut hits);
-                                    if hits.len() >= MAX_HITS {
-                                        break 'marks;
-                                    }
-                                }
-                            }
-                        }
+                let addr = if mark.region.as_ref() == "bus" {
+                    if event.key.0 == MemKind::Spc {
+                        continue;
                     }
+
+                    event.address
+                } else {
+                    if self.region_key(&mark.region, event.key.1) != Some(event.key) {
+                        continue;
+                    }
+
+                    event.key.1
+                };
+
+                if !mark.covers(kind, cpu, &mark.region, addr, 1) {
+                    continue;
                 }
+
+                emitted_regions.push(&mark.region);
+                hits.push(HookHit {
+                    kind,
+                    cpu: cpu.clone(),
+                    region: mark.region.clone(),
+                    addr,
+                    pc: event.pc,
+                    value: u32::from(event.value),
+                    width: AccessWidth::Byte,
+                    source: if event.dma {
+                        AccessSource::Dma
+                    } else {
+                        AccessSource::Cpu(cpu.clone())
+                    },
+                });
             }
         }
 
         hits
     }
 
-    pub(super) fn watch_hit(&self, breakpoints: &[BreakpointMark], access: &MemoryAccess) -> bool {
-        breakpoints.iter().any(|m| {
-            let set = match m.kind {
-                BreakpointKind::Read => &access.reads,
-                BreakpointKind::Write => &access.writes,
-                _ => return false,
-            };
-            match m.region.as_ref() {
-                "bus" => (m.start..=m.end).any(|addr| {
-                    self.region_key("bus", addr)
-                        .is_some_and(|key| set.contains(&key))
-                }),
-                _ => set.iter().any(|&key| {
-                    (m.start..=m.end).contains(&key.1)
-                        && self.region_key(&m.region, key.1) == Some(key)
-                }),
-            }
-        })
-    }
-
     pub(super) fn run_to(&mut self, target: &str) -> RunOutcome {
         const CAP: u64 = 2_000_000;
+        if !self
+            .step_targets()
+            .iter()
+            .any(|descriptor| descriptor.id.as_ref() == target)
+        {
+            return RunOutcome::Unsupported;
+        }
 
         let Some(target) = Target::from_id(target) else {
-            return RunOutcome::Done;
+            return RunOutcome::Unsupported;
         };
 
         enum Target {
@@ -425,10 +401,11 @@ impl SnesDebug {
         };
 
         if matches!(target, Target::Sa1) && crate::sa1::debug_step(&mut self.core) {
-            return RunOutcome::Breakpoint;
+            return RunOutcome::TargetReached;
         }
+
         if matches!(target, Target::Gsu) && crate::superfx::debug_step(&mut self.core) {
-            return RunOutcome::Breakpoint;
+            return RunOutcome::TargetReached;
         }
 
         let start = self.core.scheduler.cycles();
@@ -447,9 +424,9 @@ impl SnesDebug {
         });
 
         if hit {
-            RunOutcome::Breakpoint
+            RunOutcome::TargetReached
         } else {
-            RunOutcome::Done
+            RunOutcome::BudgetExhausted
         }
     }
 
@@ -469,16 +446,17 @@ impl SnesDebug {
         if watch {
             let mut access = MemoryAccess::default();
             while self.core.scheduler.cycles() < frame_end {
-                let step_access =
-                    self.captured(TrackMode::Full, |debug| debug.step_stopping_at(&sa1_stops));
-                access.merge(&step_access);
+                let step_access = self.captured(TrackMode::Transactions, |debug| {
+                    debug.step_stopping_at(&sa1_stops)
+                });
 
-                let breakpoint =
-                    self.watch_hit(breakpoints, &step_access) || self.execute_hit(breakpoints);
+                access.merge_highlights(&step_access);
+
+                let hits = self.collect_hits(breakpoints, &step_access);
                 let event = self.scan_events();
 
-                if breakpoint {
-                    self.last_hits = self.collect_hits(breakpoints, &step_access);
+                if !hits.is_empty() {
+                    self.last_hits = hits;
                     self.last_access = access;
                     return RunOutcome::Breakpoint;
                 }
@@ -490,13 +468,13 @@ impl SnesDebug {
             }
 
             self.last_access = access;
-            return RunOutcome::Done;
+            return RunOutcome::FrameComplete;
         }
 
         let mode = self.track_mode();
         let stepping = events || !breakpoints.is_empty();
 
-        let mut outcome = RunOutcome::Done;
+        let mut outcome = RunOutcome::FrameComplete;
         let mut hits = Vec::new();
         self.last_access = self.captured(mode, |debug| {
             if !stepping {
@@ -525,5 +503,21 @@ impl SnesDebug {
 
         self.last_hits = hits;
         outcome
+    }
+}
+
+fn executes_at(mark: &BreakpointMark, cpu: &str, pc: u32) -> bool {
+    mark.kind == BreakpointKind::Execute
+        && mark.cpu.as_str() == cpu
+        && mark.region.as_ref() == cpu_space(cpu)
+        && (mark.start..=mark.end).contains(&pc)
+}
+
+fn cpu_space(cpu: &str) -> &'static str {
+    match cpu {
+        CPU_SPC => "spc",
+        sa1::CPU => "sa1",
+        superfx::CPU_GSU => "gsu",
+        _ => "bus",
     }
 }

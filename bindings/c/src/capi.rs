@@ -4,11 +4,11 @@ use std::cell::RefCell;
 use std::ffi::{CString, c_char};
 use std::sync::OnceLock;
 
-use core_model::{StateError, System, TvSystem};
+use core_model::{BackupKind, CartridgeInfo, StateError, System, TvSystem};
 
 use crate::runtime::{Runtime, button_from_index, inspect_cartridge, system_from_index};
 
-pub const SLY_ABI_VERSION: u32 = 1;
+pub const SLY_ABI_VERSION: u32 = 2;
 
 /// Anything but `Ok` leaves a description in `sly_last_error()`.
 #[repr(C)]
@@ -57,6 +57,17 @@ crate::assert_button_order!(SlyButton, |button| button as usize);
 pub enum SlyTvSystem {
     Ntsc = 0,
     Pal,
+    Unspecified,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SlyBackupKind {
+    None = 0,
+    Sram,
+    Fram,
+    Eeprom,
+    Flash,
 }
 
 #[repr(C)]
@@ -95,8 +106,11 @@ pub struct SlyCartridgeInfo {
     pub region_name: SlyBuffer,
     pub tv_system: SlyTvSystem,
     pub rom_crc32: u32,
-    pub has_battery: bool,
-    pub sram_size: usize,
+    pub rom_sha1: SlyBuffer,
+    pub rom_size: usize,
+    pub backup_kind: SlyBackupKind,
+    pub backup_capacity: usize,
+    pub backup_battery_backed: bool,
 }
 
 struct SystemMetadata {
@@ -113,6 +127,8 @@ pub struct SlyCore {
     title: CString,
     system: CString,
     region_name: CString,
+    rom_sha1: CString,
+    controller_names: Vec<CString>,
 }
 
 thread_local! {
@@ -128,7 +144,7 @@ fn state_status(err: &StateError) -> SlyStatus {
     match err {
         StateError::Unsupported => SlyStatus::StateUnsupported,
         StateError::BadMagic => SlyStatus::StateBadMagic,
-        StateError::Version { .. } => SlyStatus::StateVersion,
+        StateError::Version { .. } | StateError::PayloadVersion { .. } => SlyStatus::StateVersion,
         StateError::SystemMismatch => SlyStatus::StateSystemMismatch,
         StateError::RomMismatch => SlyStatus::StateRomMismatch,
         StateError::Truncated => SlyStatus::StateTruncated,
@@ -143,6 +159,39 @@ fn cstring_lossy(text: &str) -> CString {
 fn binding_system(system: System) -> SlySystem {
     match system {
         System::Snes => SlySystem::Snes,
+    }
+}
+
+pub fn binding_tv(system: Option<TvSystem>) -> SlyTvSystem {
+    match system {
+        Some(TvSystem::Ntsc) => SlyTvSystem::Ntsc,
+        Some(TvSystem::Pal) => SlyTvSystem::Pal,
+        None => SlyTvSystem::Unspecified,
+    }
+}
+
+pub fn binding_backup(kind: Option<BackupKind>) -> SlyBackupKind {
+    match kind {
+        None => SlyBackupKind::None,
+        Some(BackupKind::Sram) => SlyBackupKind::Sram,
+        Some(BackupKind::Fram) => SlyBackupKind::Fram,
+        Some(BackupKind::Eeprom) => SlyBackupKind::Eeprom,
+        Some(BackupKind::Flash) => SlyBackupKind::Flash,
+    }
+}
+
+fn binding_cartridge(meta: &CartridgeInfo) -> SlyCartridgeInfo {
+    SlyCartridgeInfo {
+        title: buffer_from_vec(meta.title.as_bytes().to_vec()),
+        system: buffer_from_vec(meta.system.slug().as_bytes().to_vec()),
+        region_name: buffer_from_vec(crate::runtime::region_name(meta).into_bytes()),
+        tv_system: binding_tv(meta.tv_system),
+        rom_crc32: meta.rom.crc32,
+        rom_sha1: buffer_from_vec(meta.rom.sha1.as_bytes().to_vec()),
+        rom_size: meta.rom.len,
+        backup_kind: binding_backup(meta.backup.map(|backup| backup.kind)),
+        backup_capacity: meta.backup.map_or(0, |backup| backup.capacity),
+        backup_battery_backed: meta.backup.is_some_and(|backup| backup.battery_backed),
     }
 }
 
@@ -252,23 +301,10 @@ pub unsafe extern "C" fn sly_cartridge_inspect(
 
     match inspect_cartridge(core_system, bytes) {
         Ok(meta) => {
-            let system = meta.system.slug().as_bytes().to_vec();
-            let region_name = meta.region.to_string().into_bytes();
-            let tv_system = match meta.region.tv_system() {
-                TvSystem::Ntsc => SlyTvSystem::Ntsc,
-                TvSystem::Pal => SlyTvSystem::Pal,
-            };
             unsafe {
-                out_info.write(SlyCartridgeInfo {
-                    title: buffer_from_vec(meta.title.into_bytes()),
-                    system: buffer_from_vec(system),
-                    region_name: buffer_from_vec(region_name),
-                    tv_system,
-                    rom_crc32: meta.rom_crc32,
-                    has_battery: meta.has_battery,
-                    sram_size: meta.sram_size,
-                });
+                out_info.write(binding_cartridge(&meta));
             }
+
             SlyStatus::Ok
         }
         Err(error) => {
@@ -288,7 +324,105 @@ pub unsafe extern "C" fn sly_cartridge_info_free(info: *mut SlyCartridgeInfo) {
         sly_buffer_free(&mut info.title);
         sly_buffer_free(&mut info.system);
         sly_buffer_free(&mut info.region_name);
+        sly_buffer_free(&mut info.rom_sha1);
     }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_core_controller_count(core: *const SlyCore) -> usize {
+    unsafe { core.as_ref() }.map_or(0, |core| core.rt.controllers().len())
+}
+
+/// The descriptor's port can differ from `index`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_core_controller_port(
+    core: *const SlyCore,
+    index: usize,
+    out_port: *mut u32,
+) -> bool {
+    let port = unsafe { core.as_ref() }
+        .and_then(|core| core.rt.controllers().get(index))
+        .and_then(|controller| u32::try_from(controller.port).ok());
+    unsafe { write_out(out_port, port) }
+}
+
+/// Owned by the core, don't free it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_core_controller_name(
+    core: *const SlyCore,
+    index: usize,
+) -> *const c_char {
+    unsafe { core.as_ref() }
+        .and_then(|core| core.controller_names.get(index))
+        .map_or(std::ptr::null(), |name| name.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_core_supports_button(
+    core: *const SlyCore,
+    port: u32,
+    button: SlyButton,
+) -> bool {
+    let Some(button) = button_from_index(button as usize) else {
+        return false;
+    };
+
+    unsafe { core.as_ref() }.is_some_and(|core| {
+        core.rt
+            .controllers()
+            .iter()
+            .any(|controller| controller.port == port as usize && controller.supports(button))
+    })
+}
+
+/// Owned by the core, don't free it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_core_rom_sha1(core: *const SlyCore) -> *const c_char {
+    unsafe { core.as_ref() }.map_or(std::ptr::null(), |core| core.rom_sha1.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_core_rom_size(core: *const SlyCore) -> usize {
+    unsafe { core.as_ref() }.map_or(0, |core| core.rt.meta().rom.len)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_core_backup_kind(core: *const SlyCore) -> SlyBackupKind {
+    binding_backup(
+        unsafe { core.as_ref() }
+            .and_then(|core| core.rt.meta().backup)
+            .map(|backup| backup.kind),
+    )
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_core_inhibit_save_ram_persistence(core: *const SlyCore) {
+    if let Some(core) = unsafe { core.as_ref() } {
+        core.rt.inhibit_save_ram_persistence();
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_core_persistable_save_ram(
+    core: *const SlyCore,
+    out_data: *mut *const u8,
+    out_len: *mut usize,
+) -> bool {
+    if out_data.is_null() || out_len.is_null() {
+        return false;
+    }
+
+    let Some(bytes) = unsafe { core.as_ref() }.and_then(|core| core.rt.persistable_save_ram())
+    else {
+        return false;
+    };
+
+    unsafe {
+        out_data.write(bytes.as_ptr());
+        out_len.write(bytes.len());
+    }
+
+    true
 }
 
 /// Never NULL; empty when no error has occurred. Valid until the next failing
@@ -323,9 +457,16 @@ pub unsafe extern "C" fn sly_core_create(
             let core = Box::new(SlyCore {
                 title: cstring_lossy(&meta.title),
                 system: cstring_lossy(rt.meta().system.slug()),
-                region_name: cstring_lossy(&meta.region.to_string()),
+                region_name: cstring_lossy(&crate::runtime::region_name(meta)),
+                rom_sha1: cstring_lossy(&meta.rom.sha1),
+                controller_names: rt
+                    .controllers()
+                    .iter()
+                    .map(|controller| cstring_lossy(&controller.name))
+                    .collect(),
                 rt,
             });
+
             unsafe { out_core.write(Box::into_raw(core)) };
             SlyStatus::Ok
         }
@@ -493,6 +634,55 @@ pub unsafe extern "C" fn sly_core_load_state(
     }
 }
 
+/// Index 0 is the quick slot, 1 to 10 are the numbered slots. Free with sly_buffer_free.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_core_state_path(
+    core: *const SlyCore,
+    index: u8,
+    out_path: *mut SlyBuffer,
+) -> SlyStatus {
+    let Some(core) = (unsafe { core.as_ref() }) else {
+        set_last_error("NULL core in sly_core_state_path");
+        return SlyStatus::InvalidArg;
+    };
+
+    if out_path.is_null() {
+        set_last_error("NULL out_path in sly_core_state_path");
+        return SlyStatus::InvalidArg;
+    }
+
+    match core.rt.state_path(index) {
+        Ok(path) => {
+            unsafe { out_path.write(buffer_from_vec(path.into_bytes())) };
+            SlyStatus::Ok
+        }
+        Err(error) => {
+            set_last_error(&error);
+            SlyStatus::InvalidArg
+        }
+    }
+}
+
+/// Free with sly_buffer_free.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sly_core_save_ram_path(
+    core: *const SlyCore,
+    out_path: *mut SlyBuffer,
+) -> SlyStatus {
+    let Some(core) = (unsafe { core.as_ref() }) else {
+        set_last_error("NULL core in sly_core_save_ram_path");
+        return SlyStatus::InvalidArg;
+    };
+
+    if out_path.is_null() {
+        set_last_error("NULL out_path in sly_core_save_ram_path");
+        return SlyStatus::InvalidArg;
+    }
+
+    unsafe { out_path.write(buffer_from_vec(core.rt.save_ram_path().into_bytes())) };
+    SlyStatus::Ok
+}
+
 /// Safe to call with NULL or an already-freed buffer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sly_buffer_free(buf: *mut SlyBuffer) {
@@ -507,8 +697,7 @@ pub unsafe extern "C" fn sly_buffer_free(buf: *mut SlyBuffer) {
     buf.len = 0;
 }
 
-/// False when the cartridge has no battery or the SRAM is empty. The pointer is
-/// valid until the next mutating call on this core.
+/// The pointer is valid until the next mutating call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sly_core_save_ram(
     core: *const SlyCore,
@@ -533,7 +722,6 @@ pub unsafe extern "C" fn sly_core_save_ram(
     }
 }
 
-/// False when the cartridge has no battery or the size does not match.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sly_core_load_save_ram(
     core: *mut SlyCore,
@@ -568,7 +756,7 @@ pub unsafe extern "C" fn sly_core_system(core: *const SlyCore) -> *const c_char 
     }
 }
 
-/// Human-readable, e.g. "North America (NTSC)". Owned by the core; do not free.
+/// Owned by the core, don't free it.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sly_core_region_name(core: *const SlyCore) -> *const c_char {
     match unsafe { core.as_ref() } {
@@ -579,27 +767,31 @@ pub unsafe extern "C" fn sly_core_region_name(core: *const SlyCore) -> *const c_
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sly_core_tv_system(core: *const SlyCore) -> SlyTvSystem {
-    match unsafe { core.as_ref() }.map(|core| core.rt.meta().region.tv_system()) {
-        Some(TvSystem::Pal) => SlyTvSystem::Pal,
-        _ => SlyTvSystem::Ntsc,
-    }
+    binding_tv(unsafe { core.as_ref() }.and_then(|core| core.rt.meta().tv_system))
 }
 
 /// Copier header stripped.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sly_core_rom_crc32(core: *const SlyCore) -> u32 {
-    unsafe { core.as_ref() }.map_or(0, |core| core.rt.meta().rom_crc32)
+    unsafe { core.as_ref() }.map_or(0, |core| core.rt.meta().rom.crc32)
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sly_core_has_battery(core: *const SlyCore) -> bool {
-    unsafe { core.as_ref() }.is_some_and(|core| core.rt.meta().has_battery)
+pub unsafe extern "C" fn sly_core_backup_battery_backed(core: *const SlyCore) -> bool {
+    unsafe { core.as_ref() }.is_some_and(|core| {
+        core.rt
+            .meta()
+            .backup
+            .is_some_and(|backup| backup.battery_backed)
+    })
 }
 
 /// Declared size in bytes, 0 when none.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sly_core_sram_size(core: *const SlyCore) -> usize {
-    unsafe { core.as_ref() }.map_or(0, |core| core.rt.meta().sram_size)
+pub unsafe extern "C" fn sly_core_backup_capacity(core: *const SlyCore) -> usize {
+    unsafe { core.as_ref() }.map_or(0, |core| {
+        core.rt.meta().backup.map_or(0, |backup| backup.capacity)
+    })
 }
 
 pub(crate) unsafe fn slice_from_raw<'a>(ptr: *const u8, len: usize) -> &'a [u8] {

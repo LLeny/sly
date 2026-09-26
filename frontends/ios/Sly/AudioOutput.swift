@@ -14,7 +14,7 @@ final class AudioOutput {
     private var hasStartedPlayback = false
     private var isPaused = false
 
-    init?(core: EmulatorCore, framesPerSecond: Int) {
+    init?(core: EmulatorCore) {
         guard let spec = core.audioSpec,
               let frameIntervalNanoseconds = core.frameIntervalNanoseconds
         else {
@@ -22,16 +22,15 @@ final class AudioOutput {
         }
 
         channelCount = Int(spec.channels)
-        
+
         let emulatedFrameDuration =
             Double(frameIntervalNanoseconds) / 1_000_000_000
-        let playbackSampleRate =
-            Double(spec.sampleRate) * emulatedFrameDuration
-                * Double(framesPerSecond)
-        
+        let playbackSampleRate = Double(spec.sampleRate)
+
         guard spec.sampleRate > 0,
               channelCount > 0,
-              framesPerSecond > 0,
+              emulatedFrameDuration.isFinite,
+              emulatedFrameDuration > 0,
               playbackSampleRate.isFinite,
               playbackSampleRate > 0,
               let format = AVAudioFormat(
@@ -44,7 +43,7 @@ final class AudioOutput {
 
         self.format = format
         let maximumAudioFrames =
-            (Int(spec.sampleRate) + framesPerSecond - 1) / framesPerSecond
+            Int(ceil(Double(spec.sampleRate) * emulatedFrameDuration)) + 1
         maximumSamplesPerFrame = maximumAudioFrames * channelCount
 
         do {
@@ -68,30 +67,29 @@ final class AudioOutput {
     }
 
     func enqueue(from core: EmulatorCore) {
-        let samples = core.drainAudio(maxSamples: maximumSamplesPerFrame)
-        let frameCount = samples.count / channelCount
-        guard frameCount > 0,
-              let buffer = AVAudioPCMBuffer(
-                  pcmFormat: format,
-                  frameCapacity: AVAudioFrameCount(frameCount)
-              ),
-              let channels = buffer.floatChannelData
-        else {
-            return
-        }
+        while true {
+            let samples = core.drainAudio(maxSamples: maximumSamplesPerFrame)
+            let frameCount = samples.count / channelCount
+            guard frameCount > 0,
+                  let buffer = AVAudioPCMBuffer(
+                      pcmFormat: format,
+                      frameCapacity: AVAudioFrameCount(frameCount)
+                  ),
+                  let channels = buffer.floatChannelData
+            else { break }
 
-        buffer.frameLength = AVAudioFrameCount(frameCount)
-        for frame in 0..<frameCount {
-            for channel in 0..<channelCount {
-                channels[channel][frame] = Float(
-                    samples[frame * channelCount + channel]
-                ) / Self.int16FullScale
+            buffer.frameLength = AVAudioFrameCount(frameCount)
+            for frame in 0..<frameCount {
+                for channel in 0..<channelCount {
+                    channels[channel][frame] = Float(
+                        samples[frame * channelCount + channel]
+                    ) / Self.int16FullScale
+                }
             }
-        }
 
-        playerNode.scheduleBuffer(buffer)
-        if !hasStartedPlayback {
-            scheduledBufferCount += 1
+            playerNode.scheduleBuffer(buffer)
+            if !hasStartedPlayback { scheduledBufferCount += 1 }
+            if samples.count < maximumSamplesPerFrame { break }
         }
         startPlaybackIfReady()
     }

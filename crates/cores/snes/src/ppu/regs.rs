@@ -256,7 +256,11 @@ impl IoRegister for Ppu2Status {
 
     fn peek<M: MemoryMap>(snes: &Bus<M>, _reg: u16) -> u8 {
         let mut status = Self::default();
-        status.set_pal(snes.mmu.cartridge.region().tv_system() == crate::cartridge::TvSystem::Pal);
+        status.set_pal(
+            crate::cartridge::tv_system(snes.mmu.cartridge.region())
+                == crate::cartridge::TvSystem::Pal,
+        );
+
         status.set_counter_latch(!snes.mmu.latch_pin_high() || snes.ppu.counter_latch);
         status.raw()
     }

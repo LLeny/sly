@@ -1,5 +1,4 @@
-use core_model::{Region, System};
-use snes::Cartridge;
+use core_model::{GameId, Region};
 
 use crate::capi::{
     SlyBuffer, SlyStatus, SlySystem, buffer_from_vec, set_last_error, slice_from_raw,
@@ -69,22 +68,25 @@ pub unsafe extern "C" fn sly_artwork_query(
         set_last_error("unknown artwork system");
         return SlyStatus::InvalidArg;
     };
+
     let bytes = unsafe { slice_from_raw(rom, rom_len) };
 
-    let region = match inspect_region(system, bytes) {
-        Ok(region) => region,
+    let meta = match core_loader::inspect(system, bytes.to_vec()) {
+        Ok(meta) => meta,
         Err(err) => {
-            set_last_error(&err);
+            set_last_error(&err.to_string());
             return SlyStatus::BadRom;
         }
     };
-    let sha1 = ::artwork::rom_sha1(system, bytes);
+
+    let game = meta.game_id();
     let query = SlyArtworkQuery {
-        metadata_url: buffer_from_string(::artwork::layle::metadata_url(&sha1)),
+        metadata_url: buffer_from_string(::artwork::layle::metadata_url(&game)),
         authorization: buffer_from_string(::artwork::layle::authorization()),
-        sha1: buffer_from_string(sha1),
-        region: region.into(),
+        sha1: buffer_from_string(game.sha1),
+        region: meta.region.map(Into::into).unwrap_or(SlyRegion::Other),
     };
+
     unsafe { out_query.write(query) };
 
     SlyStatus::Ok
@@ -93,6 +95,7 @@ pub unsafe extern "C" fn sly_artwork_query(
 /// Resolve art.layle.dev metadata into region-preferred artwork URLs without performing network I/O.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sly_artwork_resolve(
+    system: SlySystem,
     sha1: *const u8,
     sha1_len: usize,
     preferred_region: SlyRegion,
@@ -109,6 +112,11 @@ pub unsafe extern "C" fn sly_artwork_resolve(
         return SlyStatus::InvalidArg;
     }
 
+    let Some(system) = system_from_index(system as usize) else {
+        set_last_error("unknown artwork system");
+        return SlyStatus::InvalidArg;
+    };
+
     let sha1_bytes = unsafe { slice_from_raw(sha1, sha1_len) };
     let Ok(sha1) = std::str::from_utf8(sha1_bytes) else {
         set_last_error("artwork SHA-1 is not UTF-8");
@@ -121,7 +129,7 @@ pub unsafe extern "C" fn sly_artwork_resolve(
     let metadata = unsafe { slice_from_raw(metadata, metadata_len) };
 
     match ::artwork::layle::resolve_metadata(
-        sha1,
+        &GameId::new(system, sha1),
         &[preferred_region.into(), rom_region.into()],
         metadata,
     ) {
@@ -169,12 +177,6 @@ pub unsafe extern "C" fn sly_artwork_manifest_free(manifest: *mut SlyArtworkMani
         crate::capi::sly_buffer_free(&mut manifest.back_url);
         crate::capi::sly_buffer_free(&mut manifest.spine_url);
         crate::capi::sly_buffer_free(&mut manifest.label_url);
-    }
-}
-
-fn inspect_region(system: System, rom: &[u8]) -> Result<Region, String> {
-    match system {
-        System::Snes => Cartridge::region_of(rom).map_err(|err| err.to_string()),
     }
 }
 

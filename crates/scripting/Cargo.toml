@@ -8,6 +8,7 @@ core-model = { path = "../models/core" }
 debugger-model = { path = "../models/debugger" }
 anyhow = "1.0.100"
 piccolo = "0.3.3"
+logos = "0.16.1"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { version = "0.2.16", features = ["js"] }

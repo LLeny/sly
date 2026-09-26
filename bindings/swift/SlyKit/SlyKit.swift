@@ -37,7 +37,7 @@ public enum System: Hashable, Sendable {
     }
 }
 
-public enum Button: Hashable, Sendable {
+public enum Button: Hashable, Sendable, CaseIterable {
     case up, down, left, right
     case a, b, x, y
     case l, r, start, select
@@ -60,7 +60,7 @@ public enum Button: Hashable, Sendable {
     }
 }
 
-public enum TelevisionSystem {
+public enum TelevisionSystem: Sendable {
     case ntsc
     case pal
 }
@@ -76,30 +76,34 @@ public struct AudioSpec {
     public let channels: UInt8
 }
 
+public enum BackupKind: Sendable {
+    case sram, fram, eeprom, flash
+}
+
+public struct ControllerDescriptor: Sendable {
+    public let port: UInt32
+    public let name: String
+    public let buttons: [Button]
+}
+
 public struct Cartridge {
     public let title: String
     public let system: String
     public let region: String
-    public let televisionSystem: TelevisionSystem
+    public let televisionSystem: TelevisionSystem?
     public let romCRC32: UInt32
-    public let hasBattery: Bool
-    public let saveRAMSize: Int
+    public let romSHA1: String
+    public let romSize: Int
+    public let backupKind: BackupKind?
+    public let backupBatteryBacked: Bool
+    public let backupCapacity: Int
 
     public static func inspect(
         system: System = .snes,
         rom: Data
     ) throws -> Cartridge {
         try checkABI()
-
-        var info = SlyCartridgeInfo(
-            title: SlyBuffer(data: nil, len: 0),
-            system: SlyBuffer(data: nil, len: 0),
-            region_name: SlyBuffer(data: nil, len: 0),
-            tv_system: SLY_TV_SYSTEM_NTSC,
-            rom_crc32: 0,
-            has_battery: false,
-            sram_size: 0
-        )
+        var info = SlyCartridgeInfo()
         let status = rom.withUnsafeBytes { bytes in
             sly_cartridge_inspect(
                 system.native,
@@ -110,23 +114,43 @@ public struct Cartridge {
         }
         try checkNativeStatus(status)
         defer { sly_cartridge_info_free(&info) }
-
         return Cartridge(
             title: nativeString(info.title),
             system: nativeString(info.system),
             region: nativeString(info.region_name),
-            televisionSystem: info.tv_system == SLY_TV_SYSTEM_PAL ? .pal : .ntsc,
+            televisionSystem: decodeTelevisionSystem(info.tv_system),
             romCRC32: info.rom_crc32,
-            hasBattery: info.has_battery,
-            saveRAMSize: info.sram_size
+            romSHA1: nativeString(info.rom_sha1),
+            romSize: info.rom_size,
+            backupKind: decodeBackupKind(info.backup_kind),
+            backupBatteryBacked: info.backup_battery_backed,
+            backupCapacity: info.backup_capacity
         )
+    }
+}
+
+private func decodeTelevisionSystem(_ value: SlyTvSystem) -> TelevisionSystem? {
+    switch value {
+    case SLY_TV_SYSTEM_NTSC: .ntsc
+    case SLY_TV_SYSTEM_PAL: .pal
+    default: nil
+    }
+}
+
+private func decodeBackupKind(_ value: SlyBackupKind) -> BackupKind? {
+    switch value {
+    case SLY_BACKUP_KIND_SRAM: .sram
+    case SLY_BACKUP_KIND_FRAM: .fram
+    case SLY_BACKUP_KIND_EEPROM: .eeprom
+    case SLY_BACKUP_KIND_FLASH: .flash
+    default: nil
     }
 }
 
 /// Owns one native emulator instance. Use it from one execution context at a
 /// time; the underlying core is intentionally not thread-safe.
 public final class EmulatorCore {
-    public static let expectedABIVersion: UInt32 = 1
+    public static let expectedABIVersion: UInt32 = 2
 
     private let handle: OpaquePointer
 
@@ -171,6 +195,18 @@ public final class EmulatorCore {
 
     public func setButton(_ button: Button, pressed: Bool, player: UInt32 = 0) {
         sly_core_set_button(handle, player, button.native, pressed)
+    }
+
+    public var controllers: [ControllerDescriptor] {
+        (0..<sly_core_controller_count(handle)).compactMap { index in
+            var port: UInt32 = 0
+            guard sly_core_controller_port(handle, index, &port) else { return nil }
+            return ControllerDescriptor(
+                port: port,
+                name: nativeString(sly_core_controller_name(handle, index)),
+                buttons: Button.allCases.filter { sly_core_supports_button(handle, port, $0.native) }
+            )
+        }
     }
 
     public var frameIntervalNanoseconds: UInt64? {
@@ -218,6 +254,21 @@ public final class EmulatorCore {
         return Data(bytes: data, count: buffer.len)
     }
 
+    /// 0 is the quick slot, 1...10 are the numbered slots.
+    public func statePath(_ index: UInt8 = 0) throws -> String {
+        var buffer = SlyBuffer(data: nil, len: 0)
+        try checkNativeStatus(sly_core_state_path(handle, index, &buffer))
+        defer { sly_buffer_free(&buffer) }
+        return nativeString(buffer)
+    }
+
+    public func saveRAMPath() throws -> String {
+        var buffer = SlyBuffer(data: nil, len: 0)
+        try checkNativeStatus(sly_core_save_ram_path(handle, &buffer))
+        defer { sly_buffer_free(&buffer) }
+        return nativeString(buffer)
+    }
+
     public func loadState(_ state: Data) throws {
         let status = state.withUnsafeBytes { bytes in
             sly_core_load_state(
@@ -238,6 +289,17 @@ public final class EmulatorCore {
         return Data(bytes: data, count: count)
     }
 
+    public func persistableSaveRAM() -> Data? {
+        var data: UnsafePointer<UInt8>?
+        var count = 0
+        guard sly_core_persistable_save_ram(handle, &data, &count), let data else { return nil }
+        return Data(bytes: data, count: count)
+    }
+
+    public func inhibitSaveRAMPersistence() {
+        sly_core_inhibit_save_ram_persistence(handle)
+    }
+
     @discardableResult
     public func loadSaveRAM(_ data: Data) -> Bool {
         data.withUnsafeBytes { bytes in
@@ -254,12 +316,13 @@ public final class EmulatorCore {
             title: nativeString(sly_core_title(handle)),
             system: nativeString(sly_core_system(handle)),
             region: nativeString(sly_core_region_name(handle)),
-            televisionSystem: sly_core_tv_system(handle) == SLY_TV_SYSTEM_PAL
-                ? .pal
-                : .ntsc,
+            televisionSystem: decodeTelevisionSystem(sly_core_tv_system(handle)),
             romCRC32: sly_core_rom_crc32(handle),
-            hasBattery: sly_core_has_battery(handle),
-            saveRAMSize: sly_core_sram_size(handle)
+            romSHA1: nativeString(sly_core_rom_sha1(handle)),
+            romSize: sly_core_rom_size(handle),
+            backupKind: decodeBackupKind(sly_core_backup_kind(handle)),
+            backupBatteryBacked: sly_core_backup_battery_backed(handle),
+            backupCapacity: sly_core_backup_capacity(handle)
         )
     }
 

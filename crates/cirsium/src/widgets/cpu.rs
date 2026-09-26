@@ -3,84 +3,11 @@ use gpui::{App, ClickEvent, SharedString, Window, div};
 use std::sync::Arc;
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Copyable, Panel, bool_chip, hex, label_text};
-use crate::diff::{Highlight, highlight_color};
+use crate::components::{ClickHandler, Copyable, Panel, bool_chip, label_text};
+use crate::diff::highlight_color;
 use crate::theme::Theme;
 
-#[derive(Clone)]
-pub struct RegisterView {
-    pub name: SharedString,
-    pub value: u32,
-    pub bits: u8,
-    pub highlight: Highlight,
-}
-
-impl RegisterView {
-    pub fn new(name: impl Into<SharedString>, value: u32, bits: u8) -> Self {
-        Self {
-            name: name.into(),
-            value,
-            bits,
-            highlight: Highlight::None,
-        }
-    }
-
-    fn hex(&self) -> String {
-        hex(self.value, self.bits)
-    }
-}
-
-#[derive(Clone)]
-pub struct FlagView {
-    pub name: SharedString,
-    pub set: bool,
-}
-
-impl FlagView {
-    pub fn new(name: impl Into<SharedString>, set: bool) -> Self {
-        Self {
-            name: name.into(),
-            set,
-        }
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct CpuView {
-    pub isa: SharedString,
-    pub registers: Vec<RegisterView>,
-    pub flags: Vec<FlagView>,
-}
-
-impl From<debugger_model::RegisterView> for RegisterView {
-    fn from(reg: debugger_model::RegisterView) -> Self {
-        Self {
-            name: SharedString::from(reg.name.as_ref()),
-            value: reg.value,
-            bits: reg.bits,
-            highlight: reg.highlight,
-        }
-    }
-}
-
-impl From<debugger_model::FlagView> for FlagView {
-    fn from(flag: debugger_model::FlagView) -> Self {
-        Self {
-            name: SharedString::from(flag.name.as_ref()),
-            set: flag.set,
-        }
-    }
-}
-
-impl From<debugger_model::CpuView> for CpuView {
-    fn from(view: debugger_model::CpuView) -> Self {
-        Self {
-            isa: SharedString::from(view.isa.as_ref()),
-            registers: view.registers.into_iter().map(Into::into).collect(),
-            flags: view.flags.into_iter().map(Into::into).collect(),
-        }
-    }
-}
+pub use debugger_model::{CpuView, FlagView, RegisterView};
 
 #[derive(IntoElement)]
 pub struct CpuWidget {
@@ -168,7 +95,7 @@ impl RenderOnce for CpuWidget {
 
         Panel::new(self.id, self.title)
             .glyph(icon::CPU)
-            .meta(self.view.isa.clone())
+            .meta(SharedString::from(self.view.isa.clone()))
             .collapsed(self.collapsed)
             .on_toggle_opt(self.on_toggle)
             .child(body)

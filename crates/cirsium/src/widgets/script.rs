@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
-use debugger_model::{BUILTIN_GROUPS, ConsoleLevel, ScriptStatus};
+use debugger_model::{ConsoleLevel, ScriptStatus};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClickEvent, FontWeight, Hsla, ScrollHandle, SharedString,
     UniformListScrollHandle, Window, div, px, uniform_list,
 };
+
+use scripting::BUILTIN_GROUPS;
 
 use crate::assets::icon;
 use crate::components::{

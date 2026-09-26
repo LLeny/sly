@@ -5,10 +5,12 @@ fn cell_size(viewport: Size<f32>, cols: usize, rows: usize, tile_px: u32) -> f32
         return (tile_px * 2) as f32;
     }
 
-    (viewport.width / cols as f32)
-        .min(viewport.height / rows as f32)
-        .floor()
-        .max(4.)
+    let fit = (viewport.width / cols as f32).min(viewport.height / rows as f32);
+    if tile_px == 1 {
+        fit.max(0.1)
+    } else {
+        fit.floor().max(4.)
+    }
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -52,6 +54,7 @@ pub(super) fn cell_grid(
             count: content.count,
             cell,
             overlay: content.overlay,
+            footprint: content.footprint,
             window_overlays: if show_window_overlays {
                 content.window_overlays.clone()
             } else {
@@ -74,6 +77,7 @@ struct GridSpec {
     count: usize,
     cell: f32,
     overlay: Option<GridOverlay>,
+    footprint: Option<debugger_model::TilemapViewport>,
     window_overlays: Vec<GridWindowOverlay>,
 }
 
@@ -94,6 +98,7 @@ fn render(
         count,
         cell,
         overlay,
+        footprint,
         window_overlays,
     } = spec;
 
@@ -167,6 +172,49 @@ fn render(
                 outline(bounds, with_alpha(theme.accent, 0.7)).bg(with_alpha(theme.accent, 0.12)),
             );
         }
+    }
+
+    if let Some(viewport) = footprint {
+        let color = theme.accent;
+        let scale = cell / tile_px as f32;
+        grid = grid.child(
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    let [a, b, tx, c, d, ty] =
+                        viewport.transform.unwrap_or([1., 0., 0., 0., 1., 0.]);
+                    let (x, y, w, h) = (
+                        viewport.x as f32,
+                        viewport.y as f32,
+                        viewport.width as f32,
+                        viewport.height as f32,
+                    );
+
+                    let mut path = gpui::PathBuilder::stroke(px(1.));
+                    for (i, (x, y)) in [(x, y), (x + w, y), (x + w, y + h), (x, y + h), (x, y)]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let p = point(
+                            bounds.origin.x + px((a * x + b * y + tx) * scale),
+                            bounds.origin.y + px((c * x + d * y + ty) * scale),
+                        );
+
+                        if i == 0 {
+                            path.move_to(p);
+                        } else {
+                            path.line_to(p);
+                        }
+                    }
+
+                    if let Ok(path) = path.build() {
+                        window.paint_path(path, color);
+                    }
+                },
+            )
+            .absolute()
+            .size_full(),
+        );
     }
 
     let (map_w, map_h) = (cols as u32 * tile_px, rows as u32 * tile_px);

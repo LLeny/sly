@@ -1,8 +1,12 @@
+mod input;
+mod metadata;
 pub mod state;
 
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use input::ControllerDescriptor;
+pub use metadata::{BackupKind, BackupMemory, CartridgeInfo, GameId, RomIdentity};
 pub use state::StateError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,7 +65,8 @@ pub enum Button {
 }
 
 impl Button {
-    pub const ALL: [Button; 12] = [
+    /// This order is part of the C ABI. New buttons can only be appended to `ALL`.
+    pub const CLASSIC: [Button; 12] = [
         Button::Up,
         Button::Down,
         Button::Left,
@@ -75,6 +80,8 @@ impl Button {
         Button::Start,
         Button::Select,
     ];
+
+    pub const ALL: [Button; 12] = Self::CLASSIC;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -129,20 +136,6 @@ pub enum Region {
     Other(u8),
 }
 
-impl Region {
-    pub fn tv_system(self) -> TvSystem {
-        match self {
-            Region::Japan
-            | Region::NorthAmerica
-            | Region::SouthKorea
-            | Region::Canada
-            | Region::Common
-            | Region::Other(_) => TvSystem::Ntsc,
-            _ => TvSystem::Pal,
-        }
-    }
-}
-
 impl std::fmt::Display for Region {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
@@ -166,18 +159,9 @@ impl std::fmt::Display for Region {
             Region::Australia => "Australia",
             Region::Other(code) => return write!(f, "Region ${code:02X}"),
         };
-        write!(f, "{name} ({})", self.tv_system())
-    }
-}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CartridgeInfo {
-    pub system: System,
-    pub title: String,
-    pub region: Region,
-    pub rom_crc32: u32,
-    pub has_battery: bool,
-    pub sram_size: usize,
+        f.write_str(name)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -226,6 +210,14 @@ pub trait Core {
     fn drain_audio(&mut self, _out: &mut Vec<i16>) {}
 
     fn set_button(&mut self, _player: usize, _button: Button, _pressed: bool) {}
+
+    fn controllers(&self) -> Vec<ControllerDescriptor> {
+        Vec::new()
+    }
+
+    fn cartridge_info(&self) -> Option<CartridgeInfo> {
+        None
+    }
 
     fn session_info(&self) -> SessionInfo {
         SessionInfo::default()

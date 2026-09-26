@@ -46,14 +46,34 @@ struct AudioSpec {
     std::uint8_t channels{};
 };
 
+enum class TelevisionSystem : std::uint8_t {
+    Ntsc = 0,
+    Pal = 1
+};
+enum class BackupKind : std::uint8_t {
+    Sram = 1,
+    Fram = 2,
+    Eeprom = 3,
+    Flash = 4
+};
+
+struct ControllerInfo {
+    std::uint32_t port{};
+    std::string name;
+    std::vector<Button> buttons;
+};
+
 struct CartridgeInfo {
     std::string title;
     std::string system;
     std::string region_name;
-    bool pal{};
     std::uint32_t rom_crc32{};
-    bool has_battery{};
-    std::size_t sram_size{};
+    bool backup_battery_backed{};
+    std::size_t backup_capacity{};
+    std::string rom_sha1;
+    std::size_t rom_size{};
+    std::optional<TelevisionSystem> television_system;
+    std::optional<BackupKind> backup_kind;
 };
 
 // The pixel span is borrowed from the core and remains valid only until the
@@ -157,6 +177,10 @@ public:
 
     [[nodiscard]] std::chrono::nanoseconds frame_interval() const noexcept;
     void set_button(std::uint32_t player, Button button, bool pressed) noexcept;
+    [[nodiscard]] std::vector<ControllerInfo> controllers() const;
+    /// Index 0 is the quick slot, 1 to 10 are the numbered slots.
+    [[nodiscard]] std::string state_path(std::uint8_t index = 0) const;
+    [[nodiscard]] std::string save_ram_path() const;
 
     [[nodiscard]] std::optional<AudioSpec> audio_spec() const noexcept;
 
@@ -174,6 +198,8 @@ public:
     // on this core.
     [[nodiscard]] std::span<const std::uint8_t> save_ram() const noexcept;
     [[nodiscard]] bool load_save_ram(std::span<const std::uint8_t> bytes) noexcept;
+    [[nodiscard]] std::span<const std::uint8_t> persistable_save_ram() const noexcept;
+    void inhibit_save_ram_persistence() const noexcept;
 
     [[nodiscard]] CartridgeInfo cartridge_info() const;
 

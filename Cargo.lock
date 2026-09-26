@@ -377,7 +377,6 @@ dependencies = [
  "dirs",
  "serde",
  "serde_json",
- "sha1",
  "ureq",
  "urlencoding",
 ]
@@ -2763,6 +2762,7 @@ dependencies = [
  "image",
  "rust-embed",
  "rust-sugiyama",
+ "scripting",
  "workspace-model",
 ]
 
@@ -3199,6 +3199,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-loader"
+version = "0.1.0"
+dependencies = [
+ "core-model",
+ "debugger-model",
+ "snes",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "core-model"
 version = "0.1.0"
 dependencies = [
@@ -3555,17 +3565,17 @@ dependencies = [
  "artwork",
  "audio",
  "cirsium",
+ "core-loader",
  "core-model",
- "crc32fast",
  "debugger-model",
  "futures",
+ "game-database",
  "gpui",
  "gpui_platform",
  "gpui_web",
  "js-sys",
  "reqwest_client",
  "scripting",
- "snes",
  "storage",
  "tracing",
  "tracing-subscriber",
@@ -4339,6 +4349,13 @@ dependencies = [
  "memchr",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "game-database"
+version = "0.1.0"
+dependencies = [
+ "core-model",
 ]
 
 [[package]]
@@ -8157,12 +8174,11 @@ checksum = "5a2d2f3481209a6b42eec2fbb49063fb4e8d35b57023401495d4fe0f85c817f0"
 name = "runner"
 version = "0.1.0"
 dependencies = [
- "artwork",
  "audio",
+ "core-loader",
  "core-model",
  "gif 0.14.2",
  "sdl3",
- "snes",
  "storage",
 ]
 
@@ -8513,6 +8529,7 @@ dependencies = [
  "debugger-model",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
+ "logos",
  "piccolo",
 ]
 
@@ -8967,6 +8984,7 @@ name = "sly-cxx"
 version = "0.1.0"
 dependencies = [
  "artwork",
+ "core-loader",
  "core-model",
  "cxx",
  "cxx-build",
@@ -8979,8 +8997,9 @@ version = "0.1.0"
 dependencies = [
  "artwork",
  "cbindgen 0.29.4",
+ "core-loader",
  "core-model",
- "snes",
+ "storage",
 ]
 
 [[package]]
@@ -8991,16 +9010,16 @@ dependencies = [
  "audio",
  "bevy",
  "clap",
+ "core-loader",
  "core-model",
- "crc32fast",
  "dirs",
+ "game-database",
  "image",
  "objc2 0.6.4",
  "objc2-avf-audio",
  "raw-window-handle",
  "serde",
  "shellexpand",
- "snes",
  "storage",
  "toml 1.1.4+spec-1.1.0",
  "walkdir",
@@ -9086,6 +9105,7 @@ dependencies = [
  "postcard",
  "serde",
  "serde-big-array",
+ "sha1",
  "thiserror 2.0.18",
  "tracing",
  "workspace-model",

@@ -3,7 +3,8 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy::window::AppLifecycle;
 
-use core_model::Core;
+use bevy::render::render_resource::Extent3d;
+use core_model::{ControllerDescriptor, Core};
 
 use crate::assets::{GameTexture, Models};
 use crate::cartridge::{DetailCart, swap_detail_cart};
@@ -12,14 +13,12 @@ use crate::launch::PLAYING_FADE_DURATION;
 use crate::state::{LauncherState, ModeTimers};
 use crate::ui::{GameFrame, GameUi, LauncherUi, show_game_screen};
 
-pub const FRAME_WIDTH: u32 = 256;
-pub const FRAME_HEIGHT: u32 = 224;
-
 const MAX_CATCH_UP_FRAMES: u32 = 3;
 
 #[derive(Resource)]
 pub struct GameSession {
     pub core: Box<dyn Core + Send + Sync>,
+    pub controller: Option<ControllerDescriptor>,
     pub session: storage::Session<storage::FsStore>,
     pub audio_samples: Vec<i16>,
     pub frame_dirty: bool,
@@ -149,20 +148,32 @@ pub fn present_game_frame(
     if !session.frame_dirty {
         return;
     }
+
     session.frame_dirty = false;
 
-    let pixels = session
+    let Some(frame) = session
         .core
         .software_frame()
-        .expect("core frame buffer disappeared")
-        .pixels;
+        .filter(|frame| frame.is_valid())
+    else {
+        return;
+    };
+
     let Some(mut image) = images.get_mut(&game_texture.0) else {
         return;
     };
 
+    if image.width() != frame.width || image.height() != frame.height {
+        image.resize(Extent3d {
+            width: frame.width,
+            height: frame.height,
+            depth_or_array_layers: 1,
+        });
+    }
+
     let data = image.data.get_or_insert_default();
     data.clear();
-    data.extend_from_slice(pixels.as_flattened());
+    data.extend_from_slice(frame.bytes());
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -192,17 +203,27 @@ pub fn exit_playing(
 pub fn resize_game_frame(
     window: Single<&Window>,
     ui_scale: Res<UiScale>,
+    session: Option<Res<GameSession>>,
     mut frame: Single<&mut Node, With<GameFrame>>,
 ) {
+    let Some(video) = session
+        .as_ref()
+        .and_then(|session| session.core.software_frame())
+        .filter(|frame| frame.is_valid())
+    else {
+        return;
+    };
+
     let density = window.scale_factor();
-    let scale = (window.width() * density / FRAME_WIDTH as f32)
-        .min(window.height() * density / FRAME_HEIGHT as f32)
+    let scale = (window.width() * density / video.width as f32)
+        .min(window.height() * density / video.height as f32)
         .max(1.0)
         .floor();
 
-    let width = px(FRAME_WIDTH as f32 * scale / density / ui_scale.0);
-    if frame.width != width {
+    let width = px(video.width as f32 * scale / density / ui_scale.0);
+    let height = px(video.height as f32 * scale / density / ui_scale.0);
+    if frame.width != width || frame.height != height {
         frame.width = width;
-        frame.height = px(FRAME_HEIGHT as f32 * scale / density / ui_scale.0);
+        frame.height = height;
     }
 }

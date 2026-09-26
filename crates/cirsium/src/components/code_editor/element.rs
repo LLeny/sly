@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use debugger_model::LuaTokenKind;
 use gpui::prelude::*;
 use gpui::{
     App, Bounds, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, Hsla,
     InspectorElementId, LayoutId, PaintQuad, Pixels, Point, ShapedLine, Style, TextRun, Window,
     fill, point, px, relative, size,
 };
+
+use scripting::LuaTokenKind;
 
 use super::CodeEditor;
 use crate::theme::{Theme, with_alpha};

@@ -60,6 +60,14 @@ impl Debugger {
                     let view = self.structured_views.get(id).cloned().unwrap_or_default();
                     StructuredPanel::new(chrome, view)
                         .scroll(self.scroll_for(id))
+                        .expanded(self.expanded_set(id))
+                        .on_toggle_group({
+                            let this = this.clone();
+                            let panel = pid.clone();
+                            move |group, _, cx| {
+                                this.update(cx, |d, cx| d.toggle_expanded(panel.clone(), group, cx))
+                            }
+                        })
                         .into_any_element()
                 }
                 PanelKind::ChannelScopes => {

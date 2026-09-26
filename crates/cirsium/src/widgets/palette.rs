@@ -13,22 +13,7 @@ use crate::theme::Theme;
 
 type SelectCallback = Rc<dyn Fn(usize, usize, &mut Window, &mut App) + 'static>;
 
-pub use debugger_model::PaletteColor;
-
-#[derive(Clone, Default)]
-pub struct PaletteView {
-    pub palettes: Vec<Vec<PaletteColor>>,
-    pub meta: SharedString,
-}
-
-impl From<debugger_model::PaletteView> for PaletteView {
-    fn from(view: debugger_model::PaletteView) -> Self {
-        Self {
-            palettes: view.palettes,
-            meta: view.meta.into(),
-        }
-    }
-}
+pub use debugger_model::{PaletteColor, PaletteView};
 
 fn swatch_color(color: &PaletteColor) -> Rgba {
     let (r, g, b) = color.rgb;
@@ -43,10 +28,13 @@ pub struct PaletteWidget {
     scroll: ScrollHandle,
     on_toggle: Option<ClickHandler>,
     on_select: Option<SelectCallback>,
+    resources: Vec<debugger_model::VideoResource>,
+    resource_index: usize,
+    on_resource_select: Option<super::grid::SelectCallback>,
 }
 
 impl PaletteWidget {
-    pub const ID: &'static str = "palette";
+    pub const ID: &'static str = debugger_model::panel::PALETTE;
 
     pub fn new(view: Arc<PaletteView>) -> Self {
         Self {
@@ -56,7 +44,28 @@ impl PaletteWidget {
             scroll: ScrollHandle::new(),
             on_toggle: None,
             on_select: None,
+            resources: Vec::new(),
+            resource_index: 0,
+            on_resource_select: None,
         }
+    }
+
+    pub fn resources(
+        mut self,
+        resources: Vec<debugger_model::VideoResource>,
+        selected: usize,
+    ) -> Self {
+        self.resources = resources;
+        self.resource_index = selected;
+        self
+    }
+
+    pub fn on_resource_select(
+        mut self,
+        handler: impl Fn(usize, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_resource_select = Some(Rc::new(handler));
+        self
     }
 
     pub fn selected(mut self, selected: Option<(usize, usize)>) -> Self {
@@ -165,9 +174,20 @@ impl RenderOnce for PaletteWidget {
             .grow(true)
             .collapsed(self.collapsed)
             .on_toggle_opt(self.on_toggle);
+
         if !self.view.meta.is_empty() {
-            panel = panel.meta(self.view.meta.clone());
+            panel = panel.meta(SharedString::from(self.view.meta.clone()));
         }
+
+        if self.resources.len() > 1 {
+            panel = panel.header_action(super::grid::picker(
+                "palette-resources",
+                &self.resources,
+                self.resource_index,
+                self.on_resource_select,
+            ));
+        }
+
         panel.child(body)
     }
 }

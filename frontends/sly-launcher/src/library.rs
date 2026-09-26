@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use core_model::{Region, System, TvSystem};
-use snes::Cartridge;
+
 use walkdir::WalkDir;
 
 use crate::config;
-use crate::gamedb::{self, GameMeta};
+use game_database::{self, GameMeta};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CartShell {
@@ -14,10 +14,10 @@ pub enum CartShell {
 }
 
 impl CartShell {
-    pub fn from_region(region: Region) -> Self {
-        match (region, region.tv_system()) {
-            (Region::Japan, _) | (_, TvSystem::Pal) => Self::JpPal,
-            (_, TvSystem::Ntsc) => Self::Us,
+    pub fn from_region(region: Option<Region>, tv_system: Option<TvSystem>) -> Self {
+        match (region, tv_system) {
+            (Some(Region::Japan), _) | (_, Some(TvSystem::Pal)) => Self::JpPal,
+            _ => Self::Us,
         }
     }
 }
@@ -29,9 +29,9 @@ pub enum BoxStyle {
 }
 
 impl BoxStyle {
-    pub fn from_region(region: Region) -> Self {
+    pub fn from_region(region: Option<Region>) -> Self {
         match region {
-            Region::Japan => Self::Japanese,
+            Some(Region::Japan) => Self::Japanese,
             _ => Self::Western,
         }
     }
@@ -40,15 +40,17 @@ impl BoxStyle {
 #[derive(Clone, Debug)]
 pub struct LibraryEntry {
     pub path: PathBuf,
+    pub system: System,
     pub sha1: String,
     pub title: String,
-    pub region: Region,
+    pub region: Option<Region>,
+    pub tv_system: Option<TvSystem>,
     pub meta: GameMeta,
 }
 
 impl LibraryEntry {
     pub fn cart_shell(&self) -> CartShell {
-        CartShell::from_region(self.region)
+        CartShell::from_region(self.region, self.tv_system)
     }
 
     pub fn box_style(&self) -> BoxStyle {
@@ -92,31 +94,25 @@ fn scan(root: &Path) -> impl Iterator<Item = PathBuf> {
                 None
             }
         })
-        .filter(|entry| entry.file_type().is_file() && is_snes_rom(entry.path()))
+        .filter(|entry| {
+            entry.file_type().is_file() && core_loader::system_for_path(entry.path()).is_ok()
+        })
         .map(walkdir::DirEntry::into_path)
 }
 
-pub fn read_rom(path: &Path) -> Result<Vec<u8>, String> {
-    let mut bytes = std::fs::read(path).map_err(|err| format!("failed to read ROM: {err}"))?;
-    if bytes.len() % 1024 == 512 {
-        bytes.drain(..512);
-    }
-    Ok(bytes)
-}
-
-pub fn load_cartridge(path: &Path) -> Result<Cartridge, String> {
-    let bytes = read_rom(path)?;
-    Cartridge::new(bytes).map_err(|err| format!("invalid SNES ROM: {err}"))
+pub fn load_core(system: System, path: &Path) -> Result<core_loader::PlayerCore, String> {
+    let bytes = std::fs::read(path).map_err(|err| format!("failed to read ROM: {err}"))?;
+    core_loader::load(system, bytes).map_err(|err| err.to_string())
 }
 
 fn read_entry(path: &Path) -> Result<LibraryEntry, String> {
-    let bytes = read_rom(path)?;
-    let sha1 = artwork::rom_sha1(artwork::System::Snes, &bytes);
-    let cartridge = Cartridge::new(bytes).map_err(|err| format!("invalid SNES ROM: {err}"))?;
-    let crc = cartridge.rom_crc32();
-    let meta = gamedb::lookup(&sha1, crc);
+    let system = core_loader::system_for_path(path).map_err(|err| err.to_string())?;
+    let bytes = std::fs::read(path).map_err(|err| err.to_string())?;
+    let cartridge = core_loader::inspect(system, bytes).map_err(|err| err.to_string())?;
+    let sha1 = cartridge.rom.sha1.clone();
+    let meta = game_database::lookup(system, &cartridge.rom);
     let normalized_title = meta.display_title();
-    let header_title = cartridge.title().trim().to_string();
+    let header_title = cartridge.title.trim().to_string();
     let title = normalized_title.unwrap_or_else(|| {
         if header_title.is_empty() {
             path.file_stem()
@@ -127,24 +123,16 @@ fn read_entry(path: &Path) -> Result<LibraryEntry, String> {
             header_title
         }
     });
-    let region = cartridge.region();
+
+    let region = cartridge.region;
 
     Ok(LibraryEntry {
         path: path.to_owned(),
+        system,
+        tv_system: cartridge.tv_system,
         sha1,
         title,
         region,
         meta,
     })
-}
-
-fn is_snes_rom(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            System::Snes
-                .rom_extensions()
-                .iter()
-                .any(|supported| extension.eq_ignore_ascii_case(supported))
-        })
 }

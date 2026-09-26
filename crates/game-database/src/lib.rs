@@ -1,24 +1,32 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use core_model::{RomIdentity, System};
+
 const NO_INTRO_DAT: &str = include_str!(
     "../../../submodules/libretro-database/metadat/no-intro/Nintendo - Super Nintendo Entertainment System.dat"
 );
+
 const GENRE_DAT: &str = include_str!(
     "../../../submodules/libretro-database/metadat/genre/Nintendo - Super Nintendo Entertainment System.dat"
 );
+
 const DEVELOPER_DAT: &str = include_str!(
     "../../../submodules/libretro-database/metadat/developer/Nintendo - Super Nintendo Entertainment System.dat"
 );
+
 const PUBLISHER_DAT: &str = include_str!(
     "../../../submodules/libretro-database/metadat/publisher/Nintendo - Super Nintendo Entertainment System.dat"
 );
+
 const RELEASE_YEAR_DAT: &str = include_str!(
     "../../../submodules/libretro-database/metadat/releaseyear/Nintendo - Super Nintendo Entertainment System.dat"
 );
+
 const RELEASE_MONTH_DAT: &str = include_str!(
     "../../../submodules/libretro-database/metadat/releasemonth/Nintendo - Super Nintendo Entertainment System.dat"
 );
+
 const MAX_USERS_DAT: &str = include_str!(
     "../../../submodules/libretro-database/metadat/maxusers/Nintendo - Super Nintendo Entertainment System.dat"
 );
@@ -41,11 +49,11 @@ impl GameMeta {
         (!trimmed.is_empty()).then(|| trimmed.to_string())
     }
 
-    /// Non-allocating equivalent of `display_title().is_some()`.
     pub fn has_normalized_title(&self) -> bool {
         let Some(name) = self.name.as_deref() else {
             return false;
         };
+
         let trimmed = name.split(" (").next().unwrap_or(name).trim();
         !trimmed.is_empty()
     }
@@ -54,6 +62,7 @@ impl GameMeta {
         const MONTHS: [&str; 12] = [
             "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
         ];
+
         let year = self.release_year?;
         match self.release_month {
             Some(month) if (1..=12).contains(&month) => {
@@ -88,8 +97,13 @@ struct GameDb {
     fields_by_crc: HashMap<u32, FieldRecord>,
 }
 
-pub fn lookup(sha1: &str, crc: u32) -> GameMeta {
-    let db = database();
+pub fn lookup(system: System, identity: &RomIdentity) -> GameMeta {
+    let db = match system {
+        System::Snes => database(),
+    };
+
+    let sha1 = &identity.sha1;
+    let crc = identity.crc32;
 
     let mut meta = GameMeta::default();
     meta.name = db
@@ -124,10 +138,12 @@ fn database() -> &'static GameDb {
             let Some(name) = fields.get("name") else {
                 return;
             };
+
             if let Some(sha1) = rom.get("sha1") {
                 db.names_by_sha1
                     .insert(sha1.to_ascii_lowercase(), name.clone());
             }
+
             if let Some(crc) = parse_crc(rom) {
                 db.names_by_crc.entry(crc).or_insert_with(|| name.clone());
             }
@@ -138,28 +154,35 @@ fn database() -> &'static GameDb {
                 let Some(crc) = parse_crc(rom) else {
                     return;
                 };
+
                 apply(db.fields_by_crc.entry(crc).or_default(), fields);
             });
         };
+
         merge(GENRE_DAT, |record, fields| {
             record.genre = fields.get("genre").cloned();
         });
+
         merge(DEVELOPER_DAT, |record, fields| {
             record.developer = fields.get("developer").cloned();
         });
+
         merge(PUBLISHER_DAT, |record, fields| {
             record.publisher = fields.get("publisher").cloned();
         });
+
         merge(RELEASE_YEAR_DAT, |record, fields| {
             record.release_year = fields
                 .get("releaseyear")
                 .and_then(|value| value.parse().ok());
         });
+
         merge(RELEASE_MONTH_DAT, |record, fields| {
             record.release_month = fields
                 .get("releasemonth")
                 .and_then(|value| value.parse().ok());
         });
+
         merge(MAX_USERS_DAT, |record, fields| {
             record.max_users = fields.get("users").and_then(|value| value.parse().ok());
         });
@@ -188,6 +211,7 @@ fn for_each_game(
                 fields.clear();
                 rom.clear();
             }
+
             continue;
         }
 

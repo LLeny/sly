@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use debugger_model::{
     BreakpointKind, BreakpointMark, ConsoleLevel, ConsoleLine, CpuDescriptor, CpuId, DebugCore,
-    EventHit, HookHit,
+    EventHit, HookHit, MemoryRegion,
 };
+
 use piccolo::StashedFunction;
 
 const CONSOLE_LIMIT: usize = 4096;
@@ -24,7 +25,6 @@ pub struct Hook {
     pub end: u32,
     pub cpu: CpuId,
     pub region: Arc<str>,
-    pub pc_mask: u32,
     pub func: StashedFunction,
 }
 
@@ -40,7 +40,6 @@ impl Hook {
             kind,
             cpu: self.cpu.clone(),
             region: self.region.clone(),
-            pc_mask: self.pc_mask,
         })
     }
 
@@ -58,30 +57,11 @@ impl Hook {
     }
 }
 
-pub struct CpuInfo {
-    pub id: CpuId,
-    pub title: Arc<str>,
-    pub space: Arc<str>,
-    pub pc_mask: u32,
-}
-
-impl From<CpuDescriptor> for CpuInfo {
-    fn from(desc: CpuDescriptor) -> Self {
-        let pc_mask = desc.pc_mask();
-        Self {
-            id: desc.id,
-            title: desc.title,
-            space: desc.space,
-            pc_mask,
-        }
-    }
-}
-
 #[derive(Default)]
 pub struct HostState {
-    pub cpus: Vec<CpuInfo>,
+    pub cpus: Vec<CpuDescriptor>,
     pub events: Vec<Arc<str>>,
-    pub regions: Vec<(Arc<str>, u32)>,
+    pub regions: Vec<MemoryRegion>,
     pub hooks: Vec<Hook>,
     pub output: VecDeque<ConsoleLine>,
     pub status: Option<Arc<str>>,
@@ -91,7 +71,7 @@ pub struct HostState {
 }
 
 impl HostState {
-    pub fn cpu(&self, name: Option<&str>) -> Option<&CpuInfo> {
+    pub fn cpu(&self, name: Option<&str>) -> Option<&CpuDescriptor> {
         match name {
             None => self.cpus.first(),
             Some(name) => self.cpus.iter().find(|cpu| {
@@ -102,24 +82,19 @@ impl HostState {
 
     pub fn region(&self, cpu: Option<&str>, region: Option<&str>) -> Option<Arc<str>> {
         match region {
-            Some(region) => self
-                .regions
-                .iter()
-                .find(|(known, _)| known.eq_ignore_ascii_case(region))
-                .map(|(known, _)| known.clone()),
+            Some(region) => self.region_descriptor(region).map(|known| known.id.clone()),
             None => self.cpu(cpu).map(|cpu| cpu.space.clone()),
         }
     }
 
     pub fn region_names(&self) -> impl Iterator<Item = &Arc<str>> {
-        self.regions.iter().map(|(id, _)| id)
+        self.regions.iter().map(|region| &region.id)
     }
 
-    pub fn region_size(&self, region: &str) -> Option<u32> {
+    pub fn region_descriptor(&self, region: &str) -> Option<&MemoryRegion> {
         self.regions
             .iter()
-            .find(|(id, _)| id.eq_ignore_ascii_case(region))
-            .map(|(_, size)| *size)
+            .find(|known| known.id.eq_ignore_ascii_case(region))
     }
 
     pub fn add_hook(
@@ -129,7 +104,6 @@ impl HostState {
         end: u32,
         cpu: CpuId,
         region: Arc<str>,
-        pc_mask: u32,
         func: StashedFunction,
     ) -> u64 {
         self.next_hook += 1;
@@ -141,7 +115,6 @@ impl HostState {
             end,
             cpu,
             region,
-            pc_mask,
             func,
         });
         id
@@ -178,12 +151,8 @@ impl Host {
 
     pub fn describe(&self, core: &dyn DebugCore) {
         let mut state = self.state.borrow_mut();
-        state.cpus = core.cpus().into_iter().map(CpuInfo::from).collect();
-        state.regions = core
-            .memory_regions()
-            .into_iter()
-            .map(|region| (region.id, region.size))
-            .collect();
+        state.cpus = core.cpus();
+        state.regions = core.memory_regions();
         state.events = core.events().into_iter().map(|event| event.id).collect();
     }
 

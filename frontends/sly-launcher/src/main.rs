@@ -5,7 +5,6 @@ mod cartridge;
 mod config;
 mod discovery;
 mod game;
-mod gamedb;
 mod input;
 #[cfg(target_os = "ios")]
 mod ios;

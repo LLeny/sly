@@ -4,7 +4,6 @@ mod app;
 mod audio_out;
 mod breakpoints;
 mod cover;
-mod db;
 mod disasm;
 mod logging;
 mod memory;
@@ -54,31 +53,31 @@ fn init_logging() -> LogBuffer {
 
 pub(crate) type LoadedRom = (Box<dyn DebugCore>, cover::ArtQuery, storage::GameId);
 
-pub(crate) fn load_snes_rom(
+pub(crate) fn load_rom(
     rom: Vec<u8>,
     file_name: String,
 ) -> Result<LoadedRom, Box<dyn std::error::Error>> {
-    use artwork::System;
-
-    let name = db::title(System::Snes, &rom)
-        .map(str::to_string)
+    let system = core_loader::system_for_path(&file_name)?;
+    let core = core_loader::load_debug(system, rom, file_name.clone())?;
+    let meta = core
+        .cartridge_info()
+        .ok_or("loaded core did not provide cartridge metadata")?;
+    let name = game_database::lookup(system, &meta.rom)
+        .name
         .unwrap_or_else(|| {
             std::path::Path::new(&file_name)
                 .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| file_name.clone())
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or(file_name)
         });
 
-    let sha1 = artwork::rom_sha1(System::Snes, &rom);
-    let cart = snes::Cartridge::new(rom)?;
     let art = cover::ArtQuery {
-        sha1,
-        region: cart.region(),
-        fallback: artwork::libretro::cover_url(System::Snes, &name).map(Into::into),
+        game: meta.game_id(),
+        region: meta.region,
+        fallback: artwork::libretro::cover_url(system, &name).map(Into::into),
     };
-    let game = storage::GameId::new(System::Snes, art.sha1.clone());
-    let core = Box::new(snes::debug::SnesDebug::new(cart, file_name, None));
-    Ok((core, art, game))
+
+    Ok((core, art, meta.game_id()))
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -153,7 +152,7 @@ fn main() {
     let logs = init_logging();
 
     let initial = match std::env::args().nth(1) {
-        Some(path) => match load_snes(&path) {
+        Some(path) => match load_rom_path(&path) {
             Ok(target) => Some(target),
             Err(err) => {
                 eprintln!("failed to load {path}: {err}");
@@ -167,9 +166,9 @@ fn main() {
 }
 
 #[cfg(not(target_family = "wasm"))]
-fn load_snes(path: &str) -> Result<LoadedRom, Box<dyn std::error::Error>> {
+fn load_rom_path(path: &str) -> Result<LoadedRom, Box<dyn std::error::Error>> {
     let rom = std::fs::read(path)?;
-    load_snes_rom(rom, file_name_of(std::path::Path::new(path)))
+    load_rom(rom, file_name_of(std::path::Path::new(path)))
 }
 
 // ---------------------------------------------------------------------------

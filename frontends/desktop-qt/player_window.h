@@ -29,9 +29,9 @@ protected:
 
 private:
     void resize_video(sly::FrameView frame, int scale);
-    QString state_path(std::string_view file_name) const;
-    void save_state(std::string_view file_name);
-    void load_state(std::string_view file_name);
+    QString state_path(std::uint8_t slot) const;
+    void save_state(std::uint8_t slot);
+    void load_state(std::uint8_t slot);
     void restore_save_ram();
     void persist_save_ram();
     void initialize_audio();
@@ -43,9 +43,7 @@ private:
     void set_paused(bool paused);
     void reset_core();
 
-    std::string game_id_;
     sly::Core core_;
-    QString save_directory_;
     QString save_ram_path_;
 
     VideoWidget* video_widget_ = nullptr;
@@ -54,6 +52,7 @@ private:
     QAudioSink* audio_sink_ = nullptr;
     QIODevice* audio_device_ = nullptr;
 
+    std::optional<sly::ControllerInfo> controller_;
     GamepadInput gamepad_;
     sly::ButtonState keyboard_state_{};
     sly::ButtonState gamepad_state_{};

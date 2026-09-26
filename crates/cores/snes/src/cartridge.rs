@@ -2,6 +2,7 @@ use chapa::{BitField, bitenum};
 use core_model::System;
 pub use core_model::{CartridgeInfo, Region, TvSystem};
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 use crate::error::SnesError;
 
@@ -13,6 +14,8 @@ const COPIER_HEADER_LENGTH: usize = 512;
 pub struct Cartridge {
     #[serde(skip)]
     pub rom: Vec<u8>,
+    #[serde(skip)]
+    identity: OnceLock<core_model::RomIdentity>,
     pub sram: Vec<u8>, // Either save RAM or Game Pak RAM (Super FX, maybe more?)
     header_offset: usize,
     map_mode: Option<MapMode>,
@@ -26,9 +29,13 @@ impl Cartridge {
         Self::strip_copier_header(&mut rom);
 
         let header_offset = Self::search_header(&rom).ok_or(SnesError::InvalidRomHeader)?;
+        // Remember the ROM as it was loaded, so debugger patches or a restored state don't change
+        // its identity.
+        let identity = OnceLock::from(identity(&rom));
 
         let mut cartridge = Self {
             rom,
+            identity,
             header_offset,
             map_mode: None,
             rom_mask: None,
@@ -91,17 +98,32 @@ impl Cartridge {
     }
 
     pub fn rom_crc32(&self) -> u32 {
-        crc32fast::hash(&self.rom)
+        self.rom_identity().crc32
+    }
+
+    pub fn rom_identity(&self) -> &core_model::RomIdentity {
+        self.identity.get_or_init(|| identity(&self.rom))
+    }
+
+    pub(crate) fn restore_rom_from(&mut self, current: &mut Self) {
+        self.rom = std::mem::take(&mut current.rom);
+        self.identity = std::mem::take(&mut current.identity);
     }
 
     pub fn info(&self) -> CartridgeInfo {
         CartridgeInfo {
             system: System::Snes,
             title: self.title(),
-            region: self.region(),
-            rom_crc32: self.rom_crc32(),
-            has_battery: self.has_battery(),
-            sram_size: self.sram.len(),
+            region: Some(self.region()),
+            tv_system: Some(tv_system(self.region())),
+            rom: self.rom_identity().clone(),
+            backup: (!self.sram.is_empty() && self.has_battery()).then_some(
+                core_model::BackupMemory {
+                    kind: core_model::BackupKind::Sram,
+                    capacity: self.sram.len(),
+                    battery_backed: true,
+                },
+            ),
         }
     }
 
@@ -186,7 +208,7 @@ impl Cartridge {
 
     /// Reads the region straight from a borrowed ROM, without building a cartridge.
     pub fn region_of(rom: &[u8]) -> Result<Region, SnesError> {
-        let rom = Self::without_copier_header(rom);
+        let rom = Self::normalized_rom(rom);
         let header_offset = Self::search_header(rom).ok_or(SnesError::InvalidRomHeader)?;
         Ok(Self::region_at(rom, header_offset))
     }
@@ -201,7 +223,7 @@ impl Cartridge {
         region_from_code(code)
     }
 
-    fn without_copier_header(rom: &[u8]) -> &[u8] {
+    pub fn normalized_rom(rom: &[u8]) -> &[u8] {
         if rom.len() % 1024 == COPIER_HEADER_LENGTH {
             &rom[COPIER_HEADER_LENGTH..]
         } else {
@@ -210,8 +232,9 @@ impl Cartridge {
     }
 
     fn strip_copier_header(rom: &mut Vec<u8>) {
-        if rom.len() % 1024 == COPIER_HEADER_LENGTH {
-            rom.drain(..COPIER_HEADER_LENGTH);
+        let prefix = rom.len() - Self::normalized_rom(rom).len();
+        if prefix != 0 {
+            rom.drain(..prefix);
         }
     }
 
@@ -348,6 +371,36 @@ pub struct MemoryMap {
 
     #[bits(4..=7)]
     pub map_mode: MapMode,
+}
+
+pub fn tv_system(region: Region) -> TvSystem {
+    match region {
+        Region::Japan
+        | Region::NorthAmerica
+        | Region::SouthKorea
+        | Region::Canada
+        | Region::Common
+        | Region::Other(_) => TvSystem::Ntsc,
+        _ => TvSystem::Pal,
+    }
+}
+
+pub fn identity(rom: &[u8]) -> core_model::RomIdentity {
+    use sha1::{Digest, Sha1};
+    use std::fmt::Write;
+    let rom = Cartridge::normalized_rom(rom);
+    let sha1 = Sha1::digest(rom)
+        .iter()
+        .fold(String::with_capacity(40), |mut hex, byte| {
+            write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
+            hex
+        });
+
+    core_model::RomIdentity {
+        sha1,
+        crc32: crc32fast::hash(rom),
+        len: rom.len(),
+    }
 }
 
 pub fn frame_rate(system: TvSystem) -> f64 {

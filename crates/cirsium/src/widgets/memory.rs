@@ -56,7 +56,7 @@ pub struct MemoryWidget {
 }
 
 impl MemoryWidget {
-    pub const ID: &'static str = "memory";
+    pub const ID: &'static str = debugger_model::panel::MEMORY;
 
     pub fn new(
         rows: RowProvider,

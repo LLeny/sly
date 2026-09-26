@@ -11,14 +11,14 @@ use bevy::window::{PrimaryWindow, RawHandleWrapper};
 use crate::assets::{Fonts, GameTexture, Icons, PromptIcons};
 use crate::camera::DetailCamera;
 use crate::discovery::{Library, title_alphabet_index};
-use crate::game::{FRAME_HEIGHT, FRAME_WIDTH};
-use crate::gamedb::GameMeta;
 use crate::launch::Blackout;
 use crate::materials::{
     BackgroundPattern, BackgroundUiMaterial, FrostedBubbleMaterial, IrisBlackoutMaterial,
 };
+
 use crate::state::{LauncherState, ViewMode};
 use crate::touch::{self, TouchControls, TouchTarget};
+use game_database::GameMeta;
 
 pub const BG_ROOT: Color = Color::srgb(0.955, 0.957, 0.962);
 pub const TEXT_PRIMARY: Color = Color::srgb(0.125, 0.11, 0.15);
@@ -176,6 +176,9 @@ pub struct GameFrame;
 pub struct TitleText;
 
 #[derive(Component, Default, Clone)]
+pub struct SystemText;
+
+#[derive(Component, Default, Clone)]
 pub struct StatusText;
 
 #[derive(Component, Default, Clone)]
@@ -325,11 +328,12 @@ pub fn launcher_ui(
                         CornerPill
                         Children [
                             (
-                                Text("SNES")
+                                Text("Library")
                                 Node { top: px(1) }
                                 text_font(mono.clone(), 13.0)
                                 TextColor(ACCENT)
                                 TintedPillText
+                                SystemText
                             )
                         ]
                     ),
@@ -657,9 +661,10 @@ pub fn game_ui(
         Children [
             (
                 Node {
-                    width: px(FRAME_WIDTH as f32),
-                    height: px(FRAME_HEIGHT as f32),
+                    width: px(1.0),
+                    height: px(1.0),
                 }
+
                 ImageNode { image: {frame} }
                 GameFrame
             ),
@@ -866,6 +871,7 @@ pub fn update_ui(
         Query<&mut Text, With<StatusText>>,
         Query<&mut Text, With<TvPillText>>,
         Query<(&FactValue, &mut Text)>,
+        Query<&mut Text, With<SystemText>>,
     )>,
 ) {
     if !state.is_changed()
@@ -879,8 +885,11 @@ pub fn update_ui(
     set_text_if_changed(&mut texts.p1(), &state.status);
 
     let Some(entry) = library.entries.get(state.selected) else {
+        set_text_if_changed(&mut texts.p4(), "Library");
         return;
     };
+
+    set_text_if_changed(&mut texts.p4(), entry.system.name());
 
     let window_size = Vec2::new(window.width(), window.height()) / ui_scale.0;
     if let Ok((mut text, mut font)) = texts.p0().single_mut() {
@@ -894,7 +903,14 @@ pub fn update_ui(
             font.font_size = FontSize::Px(size);
         }
     }
-    set_text_if_changed(&mut texts.p2(), &entry.region.tv_system().to_string());
+
+    set_text_if_changed(
+        &mut texts.p2(),
+        &entry
+            .tv_system
+            .map(|system| system.to_string())
+            .unwrap_or_else(|| entry.system.name().to_string()),
+    );
 
     let meta = &entry.meta;
     for (fact, mut text) in texts.p3().iter_mut() {

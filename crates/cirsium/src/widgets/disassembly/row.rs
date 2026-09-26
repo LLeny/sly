@@ -21,10 +21,10 @@ impl RowStates {
         self.breakpoints.get(&ix).copied()
     }
 
-    pub(super) fn note<'a>(&'a self, ix: usize, line: &'a DisasmLine) -> &'a SharedString {
+    pub(super) fn note<'a>(&'a self, ix: usize, line: &'a DisasmLine) -> &'a str {
         match &self.current_note {
-            Some(note) if self.is_current(ix) => note,
-            _ => &line.note,
+            Some(note) if self.is_current(ix) => note.as_ref(),
+            _ => line.note.as_ref(),
         }
     }
 }
@@ -47,7 +47,7 @@ pub(super) fn disasm_row(
     let current = options.rows.is_current(ix);
     let selected = options.rows.is_selected(ix);
     let breakpoint = options.rows.breakpoint(ix);
-    let note = options.rows.note(ix, line).clone();
+    let note = SharedString::from(options.rows.note(ix, line));
 
     let mut gutter = div()
         .w(px(13.))
@@ -109,7 +109,7 @@ pub(super) fn disasm_row(
             .min_w(px(58.))
             .flex_none()
             .text_color(theme.code_address)
-            .child(line.address.clone()),
+            .child(SharedString::from(line.address.clone())),
     );
 
     if options.show_bytes {
@@ -120,7 +120,7 @@ pub(super) fn disasm_row(
                 .w(px(BYTES_WIDTH))
                 .flex_none()
                 .text_color(theme.text_dim)
-                .child(line.bytes.clone()),
+                .child(SharedString::from(line.bytes.clone())),
         );
     }
 
@@ -174,15 +174,17 @@ pub(super) fn instruction_text(theme: &Theme, tokens: &[DisasmToken], mnemonic_m
                 .pr_2()
                 .flex_none()
                 .text_color(super::model::token_color(theme, mnemonic.kind))
-                .child(mnemonic.text.clone()),
+                .child(SharedString::from(mnemonic.text.clone())),
         );
     }
+
     for tok in tokens.iter().skip(1) {
         text = text.child(
             div()
                 .text_color(super::model::token_color(theme, tok.kind))
-                .child(tok.text.clone()),
+                .child(SharedString::from(tok.text.clone())),
         );
     }
+
     text
 }

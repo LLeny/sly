@@ -22,26 +22,13 @@ type OverlayToggleCallback = Rc<dyn Fn(&mut Window, &mut App) + 'static>;
 
 type DetailFn = Box<dyn Fn(&Theme, usize) -> Div + 'static>;
 
-#[derive(Clone)]
-pub struct TilesetLayer {
-    pub label: SharedString,
-    pub enabled: bool,
-}
-
-impl From<debugger_model::TilesetLayer> for TilesetLayer {
-    fn from(layer: debugger_model::TilesetLayer) -> Self {
-        Self {
-            label: SharedString::from(layer.name),
-            enabled: layer.enabled,
-        }
-    }
-}
+pub use debugger_model::VideoResource;
 
 pub(super) fn build_atlas<'a>(
     cols: usize,
     rows: usize,
     cell_px: u32,
-    cells: impl Iterator<Item = (&'a [(u8, u8, u8)], u32, u32)>,
+    cells: impl Iterator<Item = (&'a [[u8; 4]], u32, u32)>,
 ) -> Arc<RenderImage> {
     let mut atlas = image::RgbaImage::new(cols as u32 * cell_px, rows as u32 * cell_px);
 
@@ -75,16 +62,12 @@ pub(in crate::widgets) fn bgra([r, g, b, a]: [u8; 4]) -> [u8; 4] {
     [b, g, r, a]
 }
 
-pub(in crate::widgets) fn bgra_rgb((r, g, b): (u8, u8, u8)) -> [u8; 4] {
-    self::bgra([r, g, b, 0xFF])
-}
-
 fn blit(
     atlas: &mut image::RgbaImage,
     row: &mut [u8],
     x0: u32,
     y0: u32,
-    pixels: &[(u8, u8, u8)],
+    pixels: &[[u8; 4]],
     width: u32,
     height: u32,
 ) {
@@ -96,7 +79,7 @@ fn blit(
 
     for sy in 0..height {
         for sx in 0..width {
-            let px = self::bgra_rgb(pixels[sy * width + sx]);
+            let px = self::bgra(pixels[sy * width + sx]);
             row[sx * 4..sx * 4 + 4].copy_from_slice(&px);
         }
 
@@ -171,6 +154,7 @@ pub struct GridContent {
     pub count: usize,
     pub empty_message: &'static str,
     pub overlay: Option<GridOverlay>,
+    pub footprint: Option<debugger_model::TilemapViewport>,
     pub window_overlays: Vec<GridWindowOverlay>,
 }
 
@@ -184,7 +168,7 @@ pub struct GridPanel {
     detail: Option<DetailFn>,
     detail_rows: usize,
     placeholder: &'static str,
-    layers: Vec<TilesetLayer>,
+    layers: Vec<VideoResource>,
     layer: usize,
     selected: Option<usize>,
     hovered: Option<usize>,
@@ -253,7 +237,7 @@ impl GridPanel {
         self
     }
 
-    pub fn layers(mut self, layers: Vec<TilesetLayer>) -> Self {
+    pub fn layers(mut self, layers: Vec<VideoResource>) -> Self {
         self.layers = layers;
         self
     }
@@ -355,9 +339,10 @@ impl RenderOnce for GridPanel {
                 self.on_layer_select,
             ));
         }
+
         if self.window_overlay_toggle {
             let mut toggle = Segmented::new(format!("{}-windows", self.id))
-                .option_label("windows", "W1/W2")
+                .option_label("windows", "Overlays")
                 .selected(if self.show_window_overlays {
                     "windows"
                 } else {
@@ -421,18 +406,18 @@ impl RenderOnce for GridPanel {
     }
 }
 
-fn picker(
+pub(super) fn picker(
     id: impl Into<SharedString>,
-    layers: &[TilesetLayer],
+    layers: &[VideoResource],
     selected: usize,
     handler: Option<SelectCallback>,
 ) -> Segmented {
     let mut picker = Segmented::new(id).selected(selected.to_string());
     for (index, layer) in layers.iter().enumerate() {
         picker = if layer.enabled {
-            picker.option_label(index.to_string(), layer.label.clone())
+            picker.option_label(index.to_string(), SharedString::from(layer.name.clone()))
         } else {
-            picker.option_disabled(index.to_string(), layer.label.clone())
+            picker.option_disabled(index.to_string(), SharedString::from(layer.name.clone()))
         };
     }
 

@@ -3,7 +3,7 @@ use std::string::String as StdString;
 use std::sync::Arc;
 
 use core_model::Button;
-use debugger_model::{BreakpointKind, ConsoleLevel};
+use debugger_model::{AccessWidth, BreakpointKind, ConsoleLevel};
 use piccolo::{Callback, CallbackReturn, Context, Error, FromValue, Function, Stack, Table, Value};
 
 use crate::host::{Host, Trigger};
@@ -18,9 +18,14 @@ pub fn install(ctx: Context<'_>, host: &Rc<Host>) {
         ("read8", read8 as Builtin),
         ("read16", read16),
         ("read24", read24),
+        ("read32", read32),
+        ("bus_read8", bus_read8),
+        ("bus_read16", bus_read16),
+        ("bus_read32", bus_read32),
         ("read", read),
         ("write8", write8),
         ("write16", write16),
+        ("write32", write32),
         ("write", write),
         ("regions", regions),
         ("find", find),
@@ -341,7 +346,7 @@ fn read_region<'gc>(
     region: Option<StdString>,
 ) -> Result<Vec<u8>, Error<'gc>> {
     let region = self::resolve_region(host, ctx, region.as_deref())?;
-    host.with_core(|core| core.read_memory(&region, addr as u32, len))
+    host.with_core(|core| core.peek_memory(&region, addr as u32, len))
         .ok_or_else(|| self::detached(ctx))
 }
 
@@ -353,7 +358,7 @@ fn write_region<'gc>(
     region: Option<StdString>,
 ) -> Result<usize, Error<'gc>> {
     let region = self::resolve_region(host, ctx, region.as_deref())?;
-    host.with_core(|core| core.write_memory(&region, addr as u32, bytes))
+    host.with_core(|core| core.patch_memory(&region, addr as u32, bytes))
         .ok_or_else(|| self::detached(ctx))
 }
 
@@ -385,6 +390,55 @@ fn read16<'gc>(
     self::read_width(2, host, ctx, stack)
 }
 
+fn read32<'gc>(
+    host: &Host,
+    ctx: Context<'gc>,
+    stack: Stack<'gc, '_>,
+) -> Result<CallbackReturn<'gc>, Error<'gc>> {
+    self::read_width(4, host, ctx, stack)
+}
+
+fn bus_read<'gc>(
+    width: AccessWidth,
+    host: &Host,
+    ctx: Context<'gc>,
+    mut stack: Stack<'gc, '_>,
+) -> Result<CallbackReturn<'gc>, Error<'gc>> {
+    let (addr, region): (i64, Option<StdString>) = stack.consume(ctx)?;
+    let region = self::resolve_region(host, ctx, region.as_deref())?;
+    let value = host
+        .with_core(|core| core.read_bus(&region, addr as u32, width))
+        .ok_or_else(|| self::detached(ctx))?
+        .map_err(|err| self::fail(ctx, err.to_string()))?;
+
+    stack.replace(ctx, value as i64);
+    Ok(CallbackReturn::Return)
+}
+
+fn bus_read8<'gc>(
+    host: &Host,
+    ctx: Context<'gc>,
+    stack: Stack<'gc, '_>,
+) -> Result<CallbackReturn<'gc>, Error<'gc>> {
+    bus_read(AccessWidth::Byte, host, ctx, stack)
+}
+
+fn bus_read16<'gc>(
+    host: &Host,
+    ctx: Context<'gc>,
+    stack: Stack<'gc, '_>,
+) -> Result<CallbackReturn<'gc>, Error<'gc>> {
+    bus_read(AccessWidth::Halfword, host, ctx, stack)
+}
+
+fn bus_read32<'gc>(
+    host: &Host,
+    ctx: Context<'gc>,
+    stack: Stack<'gc, '_>,
+) -> Result<CallbackReturn<'gc>, Error<'gc>> {
+    bus_read(AccessWidth::Word, host, ctx, stack)
+}
+
 fn read24<'gc>(
     host: &Host,
     ctx: Context<'gc>,
@@ -413,16 +467,17 @@ fn read<'gc>(
 }
 
 fn write_width<'gc>(
-    len: usize,
+    width: AccessWidth,
     host: &Host,
     ctx: Context<'gc>,
     mut stack: Stack<'gc, '_>,
 ) -> Result<CallbackReturn<'gc>, Error<'gc>> {
     let (addr, value, region): (i64, i64, Option<StdString>) = stack.consume(ctx)?;
-    let bytes: Vec<u8> = (0..len).map(|ix| (value >> (8 * ix)) as u8).collect();
-    let written = self::write_region(host, ctx, addr, &bytes, region)?;
-
-    stack.replace(ctx, written == len);
+    let region = self::resolve_region(host, ctx, region.as_deref())?;
+    host.with_core(|core| core.write_bus(&region, addr as u32, width, value as u32))
+        .ok_or_else(|| self::detached(ctx))?
+        .map_err(|err| self::fail(ctx, err.to_string()))?;
+    stack.replace(ctx, true);
     Ok(CallbackReturn::Return)
 }
 
@@ -431,7 +486,15 @@ fn write8<'gc>(
     ctx: Context<'gc>,
     stack: Stack<'gc, '_>,
 ) -> Result<CallbackReturn<'gc>, Error<'gc>> {
-    self::write_width(1, host, ctx, stack)
+    self::write_width(AccessWidth::Byte, host, ctx, stack)
+}
+
+fn write32<'gc>(
+    host: &Host,
+    ctx: Context<'gc>,
+    stack: Stack<'gc, '_>,
+) -> Result<CallbackReturn<'gc>, Error<'gc>> {
+    self::write_width(AccessWidth::Word, host, ctx, stack)
 }
 
 fn write16<'gc>(
@@ -439,7 +502,7 @@ fn write16<'gc>(
     ctx: Context<'gc>,
     stack: Stack<'gc, '_>,
 ) -> Result<CallbackReturn<'gc>, Error<'gc>> {
-    self::write_width(2, host, ctx, stack)
+    self::write_width(AccessWidth::Halfword, host, ctx, stack)
 }
 
 fn write<'gc>(
@@ -669,10 +732,7 @@ fn add_access_hook<'gc>(
 
     let id = {
         let mut state = host.state();
-        let Some((cpu_id, pc_mask)) = state
-            .cpu(cpu.as_deref())
-            .map(|cpu| (cpu.id.clone(), cpu.pc_mask))
-        else {
+        let Some(cpu_id) = state.cpu(cpu.as_deref()).map(|cpu| cpu.id.clone()) else {
             return Err(self::fail(
                 ctx,
                 format!("unknown cpu `{}`", cpu.unwrap_or_default()),
@@ -684,13 +744,24 @@ fn add_access_hook<'gc>(
                 format!("unknown region `{}`", region.unwrap_or_default()),
             ));
         };
+
+        if kind != BreakpointKind::Execute
+            && state
+                .region_descriptor(&region)
+                .is_none_or(|region| region.watch_sources.is_empty())
+        {
+            return Err(self::fail(
+                ctx,
+                format!("region `{region}` does not support data watchpoints"),
+            ));
+        }
+
         state.add_hook(
             Trigger::Access(kind),
             start.min(end) as u32,
             start.max(end) as u32,
             cpu_id,
             region,
-            pc_mask,
             ctx.stash(function),
         )
     };
@@ -741,17 +812,17 @@ fn on_event<'gc>(
         let mut state = host.state();
         let Some(cpu) = state
             .cpu(None)
-            .map(|cpu| (cpu.id.clone(), cpu.space.clone(), cpu.pc_mask))
+            .map(|cpu| (cpu.id.clone(), cpu.space.clone()))
         else {
             return Err(self::fail(ctx, "core exposes no processors"));
         };
+
         state.add_hook(
             Trigger::Event { id, value },
             0,
             0,
             cpu.0,
             cpu.1,
-            cpu.2,
             ctx.stash(function),
         )
     };
@@ -816,13 +887,22 @@ fn find<'gc>(
         }
         _ => None,
     };
-    let start = field("start").map_or(0, |value| self::as_integer(value) as u32);
+
+    let requested_start = field("start").map(|value| self::as_integer(value) as u32);
     let limit = field("limit").map_or(DEFAULT_LIMIT, |value| {
         (self::as_integer(value).max(1) as usize).min(4096)
     });
 
     let region = self::resolve_region(host, ctx, region.as_deref())?;
-    let end = host.state().region_size(&region).unwrap_or(0);
+    let descriptor = host
+        .state()
+        .region_descriptor(&region)
+        .cloned()
+        .ok_or_else(|| self::fail(ctx, "unknown memory region"))?;
+
+    let end = descriptor.end();
+    let start =
+        u64::from(requested_start.unwrap_or(descriptor.base)).max(u64::from(descriptor.base));
     if end == 0 {
         return Err(self::fail(
             ctx,
@@ -832,17 +912,18 @@ fn find<'gc>(
 
     let mut found = Vec::new();
     let mut addr = start.min(end);
-    let overlap = needle.len() as u32 - 1;
+    let overlap = needle.len() as u64 - 1;
 
     while addr < end && found.len() < limit {
         let span = CHUNK.min((end - addr) as usize);
-        let Some(bytes) = host.with_core(|core| core.read_memory(&region, addr, span)) else {
+        let Some(bytes) = host.with_core(|core| core.peek_memory(&region, addr as u32, span))
+        else {
             return Err(self::detached(ctx));
         };
 
         for offset in 0..bytes.len().saturating_sub(needle.len() - 1) {
             if bytes[offset..offset + needle.len()] == needle[..] {
-                found.push(addr + offset as u32);
+                found.push(addr + offset as u64);
                 if found.len() >= limit {
                     break;
                 }
@@ -852,7 +933,8 @@ fn find<'gc>(
         if span < CHUNK {
             break;
         }
-        addr += CHUNK as u32 - overlap;
+
+        addr += CHUNK as u64 - overlap;
     }
 
     let table = Table::new(&ctx);
@@ -887,19 +969,12 @@ fn on_frame<'gc>(
         let mut state = host.state();
         let Some(cpu) = state
             .cpu(None)
-            .map(|cpu| (cpu.id.clone(), cpu.space.clone(), cpu.pc_mask))
+            .map(|cpu| (cpu.id.clone(), cpu.space.clone()))
         else {
             return Err(self::fail(ctx, "core exposes no processors"));
         };
-        state.add_hook(
-            Trigger::Frame,
-            0,
-            0,
-            cpu.0,
-            cpu.1,
-            cpu.2,
-            ctx.stash(function),
-        )
+
+        state.add_hook(Trigger::Frame, 0, 0, cpu.0, cpu.1, ctx.stash(function))
     };
 
     stack.replace(ctx, id as i64);

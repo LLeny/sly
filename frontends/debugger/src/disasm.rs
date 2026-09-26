@@ -19,7 +19,9 @@ struct GraphAnim {
     start: Instant,
 }
 
-use debugger_model::{BreakpointMark, CpuId, DebugCore, mark_at};
+use debugger_model::{
+    BreakpointMark, CpuDescriptor, CpuId, DebugCore, DecodeMode, DisassemblyRequest, mark_at,
+};
 
 const LEAD_BYTES: u32 = 48;
 const COUNT: usize = 200;
@@ -49,7 +51,9 @@ pub struct Disasm {
     pub menu: Option<Menu>,
     pub layout_cache: Rc<RefCell<DisassemblyLayoutCache>>,
     cpu: CpuId,
-    pc_mask: u32,
+    space: Arc<str>,
+    decode_modes: Vec<DecodeMode>,
+    decode_mode: Option<usize>,
     follow_pc: bool,
     show_bytes: bool,
     view_mode: ViewMode,
@@ -68,14 +72,16 @@ pub struct Disasm {
 }
 
 impl Disasm {
-    pub fn new(cpu: CpuId, pc_mask: u32) -> Self {
+    pub fn new(desc: &CpuDescriptor) -> Self {
         Self {
             view: Arc::default(),
             scroll: UniformListScrollHandle::new(),
             menu: None,
             layout_cache: Rc::default(),
-            cpu,
-            pc_mask,
+            cpu: desc.id.clone(),
+            space: desc.space.clone(),
+            decode_modes: desc.decode_modes.clone(),
+            decode_mode: None,
             follow_pc: true,
             show_bytes: false,
             view_mode: ViewMode::Linear,
@@ -92,6 +98,34 @@ impl Disasm {
             current_note: None,
             bp_rows: Rc::default(),
         }
+    }
+
+    fn request(&self, base: u32, count: usize) -> DisassemblyRequest {
+        DisassemblyRequest {
+            base,
+            count,
+            mode: self.decode_mode.map(|ix| self.decode_modes[ix].id.clone()),
+        }
+    }
+
+    pub fn decode_label(&self) -> Option<SharedString> {
+        (!self.decode_modes.is_empty()).then(|| {
+            self.decode_mode.map_or_else(
+                || "Decode: live".into(),
+                |ix| format!("Decode: {}", self.decode_modes[ix].label).into(),
+            )
+        })
+    }
+
+    pub fn cycle_decode_mode(&mut self, target: &dyn DebugCore) {
+        self.decode_mode = match self.decode_mode {
+            None if !self.decode_modes.is_empty() => Some(0),
+            Some(ix) if ix + 1 < self.decode_modes.len() => Some(ix + 1),
+            _ => None,
+        };
+
+        self.fingerprint = None;
+        self.rebuild(target, true);
     }
 
     pub fn follow_pc(&self) -> bool {
@@ -130,7 +164,7 @@ impl Disasm {
         if !force_rebase && !self.view.lines.is_empty() {
             let holds_pc = self.view.lines.iter().any(|l| l.addr == pc);
             if !self.follow_pc || holds_pc {
-                let fp = target.disasm_fingerprint(&self.cpu, self.base, COUNT);
+                let fp = target.disasm_fingerprint(&self.cpu, &self.request(self.base, COUNT));
                 if fp.is_some() && fp == self.fingerprint {
                     self.refresh_row_states(target, pc);
                     self.follow_scroll();
@@ -151,7 +185,7 @@ impl Disasm {
             let held = if force_rebase {
                 None
             } else {
-                let held_lines = target.disassemble(&self.cpu, self.base, COUNT);
+                let held_lines = target.disassemble(&self.cpu, &self.request(self.base, COUNT));
                 held_lines
                     .iter()
                     .any(|line| line.addr == pc)
@@ -162,29 +196,34 @@ impl Disasm {
                 Some(held_lines) => (held_lines, self.base),
                 None => {
                     let base = self.aligned_base(target, pc, lead);
-                    let lines = target.disassemble(&self.cpu, base, COUNT);
+                    let lines = target.disassemble(&self.cpu, &self.request(base, COUNT));
 
                     if lines.iter().any(|line| line.addr == pc) {
                         (lines, base)
                     } else {
-                        (target.disassemble(&self.cpu, pc, COUNT), pc)
+                        (target.disassemble(&self.cpu, &self.request(pc, COUNT)), pc)
                     }
                 }
             }
         } else {
-            (target.disassemble(&self.cpu, self.base, COUNT), self.base)
+            (
+                target.disassemble(&self.cpu, &self.request(self.base, COUNT)),
+                self.base,
+            )
         };
 
         let same_base = base == self.base;
         self.base = base;
         self.view = Arc::new(DisassemblyView {
-            lines: lines.into_iter().map(Into::into).collect(),
+            lines,
             show_bytes: self.show_bytes,
         });
+
         self.fingerprint = match checked_fp {
             Some(fp) if same_base => fp,
-            _ => target.disasm_fingerprint(&self.cpu, base, COUNT),
+            _ => target.disasm_fingerprint(&self.cpu, &self.request(base, COUNT)),
         };
+
         self.refresh_row_states(target, pc);
         self.refresh_breakpoint_rows();
 
@@ -199,7 +238,9 @@ impl Disasm {
     fn refresh_row_states(&mut self, target: &dyn DebugCore, pc: u32) {
         self.current_ix = self.view.lines.iter().position(|l| l.addr == pc);
         self.current_note = self.current_ix.and_then(|_| {
-            let note = target.disassemble_one(&self.cpu, pc)?.note;
+            let note = target
+                .disassemble_one(&self.cpu, &self.request(pc, 1))?
+                .note;
             (!note.is_empty()).then(|| SharedString::from(note.as_ref()))
         });
     }
@@ -211,7 +252,14 @@ impl Disasm {
                 .iter()
                 .enumerate()
                 .filter_map(|(ix, line)| {
-                    mark_at(&self.breakpoints, line.addr, self.pc_mask).map(|kind| (ix, kind))
+                    mark_at(
+                        &self.breakpoints,
+                        &self.cpu,
+                        &self.space,
+                        line.addr,
+                        Some(BreakpointKind::Execute),
+                    )
+                    .map(|kind| (ix, kind))
                 })
                 .collect(),
         );
@@ -229,7 +277,7 @@ impl Disasm {
     fn aligned_base(&self, target: &dyn DebugCore, pc: u32, lead: u32) -> u32 {
         aligned_base(pc, lead, |start, count| {
             target
-                .disassemble(&self.cpu, start, count)
+                .disassemble(&self.cpu, &self.request(start, count))
                 .iter()
                 .map(|line| line.addr)
                 .collect()
@@ -261,10 +309,10 @@ impl Disasm {
             self.menu = Some(Menu {
                 position,
                 addr: line.addr,
-                len: line.bytes.split_whitespace().count().max(1) as u32,
-                address: line.address.clone(),
-                bytes: line.bytes.clone(),
-                text: line.text.clone(),
+                len: u32::from(line.length),
+                address: line.address.clone().into(),
+                bytes: line.bytes.clone().into(),
+                text: line.text.clone().into(),
             });
         }
     }

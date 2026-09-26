@@ -6,17 +6,19 @@ use workspace_model::{
     WorkspaceDescriptor, WorkspaceIcon,
 };
 
+use crate::{AccessTracking, AccessWidth, DebugMemoryError};
+
 use crate::model::{
-    AudioScopesView, CallStackView, CartridgeView, CpuView, DisasmLine, DmaView, Highlight,
-    MemoryRegion, MmioView, PaletteView, PpuView, Sprites, StructuredView, TableView, Tilemap,
-    TilemapOverlay, TilemapViewport, Tileset, TilesetLayer, VideoGenerations,
+    AudioScopesView, CallStackView, CartridgeView, CpuView, DisasmLine, Highlight, MemoryRegion,
+    MmioView, StructuredView, TableView,
 };
+
 use crate::script::{
     EventDescriptor, EventHit, HookHit, SCRIPT_BUILTINS_PANEL, SCRIPT_CONSOLE_PANEL,
     SCRIPT_EDITOR_PANEL, SCRIPT_WORKSPACE,
 };
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CpuId(Arc<str>);
 
 impl CpuId {
@@ -41,12 +43,45 @@ impl From<Arc<str>> for CpuId {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct DecodeMode {
+    pub id: Arc<str>,
+    pub label: Arc<str>,
+}
+
+impl DecodeMode {
+    pub fn new(id: impl Into<Arc<str>>, label: impl Into<Arc<str>>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DisassemblyRequest {
+    pub base: u32,
+    pub count: usize,
+    /// None uses the current CPU mode.
+    pub mode: Option<Arc<str>>,
+}
+
+impl DisassemblyRequest {
+    pub fn new(base: u32, count: usize) -> Self {
+        Self {
+            base,
+            count,
+            mode: None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct CpuDescriptor {
     pub id: CpuId,
     pub title: Arc<str>,
     pub space: Arc<str>,
-    pc_bits: u8,
+    pub decode_modes: Vec<DecodeMode>,
 }
 
 impl CpuDescriptor {
@@ -54,28 +89,18 @@ impl CpuDescriptor {
         id: impl Into<CpuId>,
         title: impl Into<Arc<str>>,
         space: impl Into<Arc<str>>,
-        pc_bits: u8,
     ) -> Self {
-        assert!((1..=32).contains(&pc_bits), "PC width must be 1..=32 bits");
-
         Self {
             id: id.into(),
             title: title.into(),
             space: space.into(),
-            pc_bits,
+            decode_modes: Vec::new(),
         }
     }
 
-    pub fn pc_bits(&self) -> u8 {
-        self.pc_bits
-    }
-
-    pub fn pc_mask(&self) -> u32 {
-        if self.pc_bits == 32 {
-            u32::MAX
-        } else {
-            (1_u32 << self.pc_bits) - 1
-        }
+    pub fn decode_modes(mut self, modes: Vec<DecodeMode>) -> Self {
+        self.decode_modes = modes;
+        self
     }
 }
 
@@ -126,42 +151,55 @@ pub struct BreakpointMark {
     pub kind: BreakpointKind,
     pub cpu: CpuId,
     pub region: Arc<str>,
-    pub pc_mask: u32,
 }
 
 impl BreakpointMark {
-    pub fn covers(&self, kind: BreakpointKind, cpu: &CpuId, addr: u32) -> bool {
-        if self.kind != kind {
+    pub fn covers(
+        &self,
+        kind: BreakpointKind,
+        cpu: &CpuId,
+        region: &str,
+        addr: u32,
+        width: u32,
+    ) -> bool {
+        if self.kind != kind || self.region.as_ref() != region {
             return false;
         }
 
-        match kind {
-            BreakpointKind::Execute => {
-                self.cpu == *cpu
-                    && (self.start & self.pc_mask..=self.end & self.pc_mask)
-                        .contains(&(addr & self.pc_mask))
-            }
-            BreakpointKind::Read | BreakpointKind::Write => (self.start..=self.end).contains(&addr),
+        if kind == BreakpointKind::Execute {
+            self.cpu == *cpu && (self.start..=self.end).contains(&addr)
+        } else {
+            let last = u64::from(addr) + u64::from(width.saturating_sub(1));
+            u64::from(self.start) <= last && u64::from(self.end) >= u64::from(addr)
         }
     }
 
     pub fn covers_hit(&self, hit: &HookHit) -> bool {
-        self.region == hit.region && self.covers(hit.kind, &hit.cpu, hit.addr)
+        self.covers(hit.kind, &hit.cpu, &hit.region, hit.addr, hit.width.bytes())
     }
 }
 
-pub fn mark_at(marks: &[BreakpointMark], addr: u32, mask: u32) -> Option<BreakpointKind> {
-    let addr = addr & mask;
+pub fn mark_at(
+    marks: &[BreakpointMark],
+    cpu: &CpuId,
+    region: &str,
+    addr: u32,
+    kind: Option<BreakpointKind>,
+) -> Option<BreakpointKind> {
     marks
         .iter()
-        .find(|m| (m.start & mask..=m.end & mask).contains(&addr))
+        .find(|m| kind.is_none_or(|k| k == m.kind) && m.covers(m.kind, cpu, region, addr, 1))
         .map(|m| m.kind)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RunOutcome {
-    Done,
+    FrameComplete,
     Breakpoint,
+    Event,
+    TargetReached,
+    BudgetExhausted,
+    Unsupported,
 }
 
 #[derive(Clone)]
@@ -181,17 +219,23 @@ impl StepTarget {
 
 pub trait DebugCore: Core {
     fn cpus(&self) -> Vec<CpuDescriptor>;
+    /// Next instruction address, not a pipelined PC register.
     fn pc(&self, cpu: &CpuId) -> u32;
-    fn set_pc(&mut self, cpu: &CpuId, addr: u32);
-    fn cpu_view(&self, cpu: &CpuId) -> CpuView;
-    fn disassemble(&self, cpu: &CpuId, base: u32, count: usize) -> Vec<DisasmLine>;
 
-    fn disasm_fingerprint(&self, _cpu: &CpuId, _base: u32, _count: usize) -> Option<u64> {
+    fn set_pc(&mut self, cpu: &CpuId, addr: u32);
+
+    fn cpu_view(&self, cpu: &CpuId) -> CpuView;
+
+    fn disassemble(&self, cpu: &CpuId, request: &DisassemblyRequest) -> Vec<DisasmLine>;
+
+    fn disasm_fingerprint(&self, _cpu: &CpuId, _request: &DisassemblyRequest) -> Option<u64> {
         None
     }
 
-    fn disassemble_one(&self, cpu: &CpuId, addr: u32) -> Option<DisasmLine> {
-        self.disassemble(cpu, addr, 1).into_iter().next()
+    fn disassemble_one(&self, cpu: &CpuId, request: &DisassemblyRequest) -> Option<DisasmLine> {
+        let mut request = request.clone();
+        request.count = 1;
+        self.disassemble(cpu, &request).into_iter().next()
     }
 
     fn call_stack(&self, _cpu: &CpuId) -> CallStackView {
@@ -210,7 +254,7 @@ pub trait DebugCore: Core {
     }
 
     fn run_until(&mut self, _target: &str) -> RunOutcome {
-        RunOutcome::Done
+        RunOutcome::Unsupported
     }
 
     fn cartridge(&self) -> &CartridgeView;
@@ -219,43 +263,7 @@ pub trait DebugCore: Core {
 
     fn mmio_view(&self) -> MmioView;
 
-    fn dma_view(&self) -> DmaView {
-        DmaView::default()
-    }
-
-    fn palette_view(&self) -> PaletteView {
-        PaletteView::default()
-    }
-
-    fn ppu_view(&self) -> PpuView {
-        PpuView::default()
-    }
-
-    fn tileset_layers(&self) -> Vec<TilesetLayer> {
-        Vec::new()
-    }
-
-    fn tileset(&self, _layer: usize, _color: usize) -> Option<Tileset> {
-        None
-    }
-
-    fn tilemap(&self, _layer: usize) -> Option<Tilemap> {
-        None
-    }
-
-    fn tilemap_overlays(&self, _layer: usize) -> Vec<TilemapOverlay> {
-        Vec::new()
-    }
-
-    fn tilemap_viewport(&self, _layer: usize) -> Option<TilemapViewport> {
-        None
-    }
-
-    fn sprites(&self) -> Option<Sprites> {
-        None
-    }
-
-    fn video_generations(&self) -> Option<VideoGenerations> {
+    fn video(&self) -> Option<&dyn crate::VideoDebug> {
         None
     }
 
@@ -286,10 +294,33 @@ pub trait DebugCore: Core {
     }
 
     fn caption(&self, label: &str) -> String;
-    fn memory_regions(&self) -> Vec<MemoryRegion>;
-    fn read_memory(&self, region: &str, addr: u32, len: usize) -> Vec<u8>;
 
-    fn write_memory(&mut self, _region: &str, _addr: u32, _bytes: &[u8]) -> usize {
+    fn memory_regions(&self) -> Vec<MemoryRegion>;
+    /// Returns exactly `len` bytes, zero where unmapped.
+    fn peek_memory(&self, region: &str, addr: u32, len: usize) -> Vec<u8>;
+
+    fn read_bus(
+        &mut self,
+        _region: &str,
+        _addr: u32,
+        _width: AccessWidth,
+    ) -> Result<u32, DebugMemoryError> {
+        Err(DebugMemoryError::Unsupported)
+    }
+
+    fn write_bus(
+        &mut self,
+        _region: &str,
+        _addr: u32,
+        _width: AccessWidth,
+        _value: u32,
+    ) -> Result<(), DebugMemoryError> {
+        Err(DebugMemoryError::Unsupported)
+    }
+
+    fn track_accesses(&mut self, _tracking: AccessTracking) {}
+
+    fn patch_memory(&mut self, _region: &str, _addr: u32, _bytes: &[u8]) -> usize {
         0
     }
 
@@ -309,21 +340,46 @@ pub const CPU_WORKSPACE: &str = "cpu";
 pub const VIDEO_WORKSPACE: &str = "video";
 pub const SOUND_WORKSPACE: &str = "sound";
 
+pub mod panel {
+    pub const CONTROLS: &str = "controls";
+    pub const SAVESTATES: &str = "savestates";
+    pub const BREAKPOINTS: &str = "breakpoints";
+    pub const CARTRIDGE: &str = "cartridge";
+    pub const MEMORY: &str = "memory";
+    pub const MMIO: &str = "mmio";
+    pub const LOG: &str = "log";
+    pub const FRAMEBUFFER: &str = "framebuffer";
+    pub const PALETTE: &str = "palette";
+    pub const PPU: &str = "ppu";
+    pub const DMA: &str = "dma";
+    pub const TILESET: &str = "tileset";
+    pub const TILEMAP: &str = "tilemap";
+    pub const SPRITES: &str = "sprites";
+    pub const RASTER: &str = "raster";
+    pub const AUDIO_SCOPE: &str = "audio_scope";
+}
+
 pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
     use DockLocation::{Bottom, Center, Left, Right};
     use RefreshPolicy::{Continuous, OnPause};
 
     let mut panels = vec![
-        PanelDescriptor::new("controls", "Controls", PanelKind::Controls, Left, OnPause),
         PanelDescriptor::new(
-            "savestates",
+            panel::CONTROLS,
+            "Controls",
+            PanelKind::Controls,
+            Left,
+            OnPause,
+        ),
+        PanelDescriptor::new(
+            panel::SAVESTATES,
             "Save States",
             PanelKind::Savestates,
             Left,
             OnPause,
         ),
         PanelDescriptor::new(
-            "breakpoints",
+            panel::BREAKPOINTS,
             "Breakpoints",
             PanelKind::Breakpoints,
             Left,
@@ -331,7 +387,7 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
         )
         .tag(CPU_WORKSPACE),
         PanelDescriptor::new(
-            "cartridge",
+            panel::CARTRIDGE,
             "Cartridge",
             PanelKind::Cartridge,
             Left,
@@ -364,8 +420,9 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
             .tag(CPU_WORKSPACE),
         );
     }
+
     panels.push(PanelDescriptor::new(
-        "memory",
+        panel::MEMORY,
         "Memory",
         PanelKind::Memory,
         Center,
@@ -386,7 +443,7 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
     }
 
     panels.push(PanelDescriptor::new(
-        "mmio",
+        panel::MMIO,
         "MMIO",
         PanelKind::Mmio,
         Right,
@@ -394,7 +451,8 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
     ));
 
     panels.push(
-        PanelDescriptor::new("log", "Log", PanelKind::Log, Bottom, Continuous).tag(CPU_WORKSPACE),
+        PanelDescriptor::new(panel::LOG, "Log", PanelKind::Log, Bottom, Continuous)
+            .tag(CPU_WORKSPACE),
     );
 
     panels.push(

@@ -355,6 +355,7 @@ pub fn game_touch(
         &ComputedNode,
         &UiGlobalTransform,
         &mut PadPress,
+        &mut Visibility,
     )>,
     mut actions: Query<
         (&PadAction, &ComputedNode, &UiGlobalTransform, &mut PadPress),
@@ -365,31 +366,52 @@ pub fn game_touch(
     let Some(mut session) = session else {
         return;
     };
+
+    let controller = session.controller.clone();
+    let supported = |button: &Button| {
+        controller
+            .as_ref()
+            .is_some_and(|controller| controller.supports(*button))
+    };
+
     let scale = ui_scale.0;
 
     let mut held = [false; Button::ALL.len()];
-    for (zone, node, transform, _) in &zones {
+    for (zone, node, transform, _, _) in &zones {
         let down = touches
             .iter()
             .any(|touch| contains(node, transform, touch.position() / scale));
         if down {
             for &button in &zone.0 {
-                held[button as usize] = true;
+                if supported(&button) {
+                    held[button as usize] = true;
+                }
             }
         }
     }
 
-    for (zone, _, _, mut press) in &mut zones {
+    for (zone, _, _, mut press, mut visibility) in &mut zones {
+        *visibility = if zone.0.iter().all(&supported) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+
         press.held = !zone.0.is_empty() && zone.0.iter().all(|&button| held[button as usize]);
     }
+
     for (_, node, transform, mut press) in &mut actions {
         press.held = touches
             .iter()
             .any(|touch| contains(node, transform, touch.position() / scale));
     }
 
-    for button in Button::ALL {
-        session.core.set_button(0, button, held[button as usize]);
+    if let Some(controller) = controller {
+        for button in controller.buttons {
+            session
+                .core
+                .set_button(controller.port, button, held[button as usize]);
+        }
     }
 
     for touch in touches.iter_just_released() {

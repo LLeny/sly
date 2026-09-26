@@ -4,6 +4,8 @@ impl SnesDebug {
     pub(super) fn region_byte(&self, region: &str, addr: u32) -> u8 {
         match region {
             "wram" => self.core.mmu.wram.get(addr as usize).copied().unwrap_or(0),
+            "vram" if addr < 0x1_0000 => self.core.ppu.vram.byte(addr),
+            "vram" => 0,
             "iram" => self.core.sa1.iram.get(addr as usize).copied().unwrap_or(0),
             "sram" => self
                 .core
@@ -21,12 +23,27 @@ impl SnesDebug {
                 .get(addr as usize)
                 .copied()
                 .unwrap_or(0),
-            "bus" => self.core.peek8(Address::from_24bit(addr & 0x00FF_FFFF)),
-            "sa1" => sa1::bus_peek(&self.core, Address::from_24bit(addr & 0x00FF_FFFF)),
-            "spc" => self.core.apu.peek(addr as u16),
-            "gsu" => superfx::bus_peek(&self.core, (addr >> 16) as u8 & 0x7F, addr as u16),
-            "gsucache" => self.core.superfx.cache.data[addr as usize & 0x1FF],
-            _ => self.core.peek8(Address::new(0x00, addr as u16)),
+            "bus" if addr < BUS_SIZE => self.core.peek8(Address::from_24bit(addr)),
+            "sa1" if addr < BUS_SIZE => sa1::bus_peek(&self.core, Address::from_24bit(addr)),
+            "spc" if addr < 0x1_0000 => self.core.apu.peek(addr as u16),
+            "gsu" if addr < 0x80_0000 => {
+                superfx::bus_peek(&self.core, (addr >> 16) as u8, addr as u16)
+            }
+            "gsucache" => self
+                .core
+                .superfx
+                .cache
+                .data
+                .get(addr as usize)
+                .copied()
+                .unwrap_or(0),
+            "ppu" if (PPU_BASE..PPU_BASE + PPU_SIZE).contains(&addr) => {
+                self.core.peek8(Address::new(0x00, addr as u16))
+            }
+            "cpu" if (CPU_BASE..CPU_BASE + CPU_SIZE).contains(&addr) => {
+                self.core.peek8(Address::new(0x00, addr as u16))
+            }
+            _ => 0,
         }
     }
 
@@ -38,7 +55,7 @@ impl SnesDebug {
             "rom" => Some((MemKind::Rom, addr)),
             "bus" => self.core.classify(Address::from_24bit(addr & 0x00FF_FFFF)),
             "spc" => Some((MemKind::Spc, addr)),
-            "sa1" | "gsu" | "gsucache" => None,
+            "vram" | "sa1" | "gsu" | "gsucache" => None,
             _ => Some((MemKind::Io, addr)),
         }
     }
@@ -46,6 +63,7 @@ impl SnesDebug {
     pub(super) fn regions(&self) -> Vec<MemoryRegion> {
         let mut regions = vec![
             MemoryRegion::new("wram", "WRAM", 0, WRAM_SIZE),
+            MemoryRegion::new("vram", "VRAM", 0, 0x1_0000),
             MemoryRegion::new("rom", "ROM", 0, self.core.mmu.cartridge.rom.len() as u32),
             MemoryRegion::new("ppu", "PPU/APU", PPU_BASE, PPU_SIZE),
             MemoryRegion::new("cpu", "CPU/DMA", CPU_BASE, CPU_SIZE),
@@ -75,6 +93,17 @@ impl SnesDebug {
             regions.push(MemoryRegion::new("gsu", "GSU Bus", 0, 0x80_0000));
             regions.push(MemoryRegion::new("gsucache", "GSU Cache", 0, 0x200));
         }
+
+        for region in &mut regions {
+            region.watch_sources = match region.id.as_ref() {
+                "bus" | "wram" | "iram" | "rom" | "sram" | "ppu" | "cpu" => {
+                    vec![AccessSource::Cpu(CPU_MAIN.into()), AccessSource::Dma]
+                }
+                "spc" => vec![AccessSource::Cpu(CPU_SPC.into())],
+                _ => Vec::new(),
+            };
+        }
+
         regions
     }
 
@@ -94,8 +123,13 @@ impl SnesDebug {
             "iram" => window(&self.core.sa1.iram, addr, len),
             "sram" => window(&self.core.mmu.cartridge.sram, addr, len),
             "rom" => window(&self.core.mmu.cartridge.rom, addr, len),
-            _ => (0..len as u32)
-                .map(|i| self.region_byte(region, addr.wrapping_add(i)))
+            _ => (0..len)
+                .map(|i| {
+                    u32::try_from(i)
+                        .ok()
+                        .and_then(|i| addr.checked_add(i))
+                        .map_or(0, |addr| self.region_byte(region, addr))
+                })
                 .collect(),
         }
     }
@@ -113,30 +147,73 @@ impl SnesDebug {
             "iram" => patch(&mut self.core.sa1.iram, addr, bytes),
             "sram" => patch(&mut self.core.mmu.cartridge.sram, addr, bytes),
             "rom" => patch(&mut self.core.mmu.cartridge.rom, addr, bytes),
-            "spc" => {
-                for (ix, byte) in bytes.iter().enumerate() {
-                    self.core
-                        .apu
-                        .write(addr.wrapping_add(ix as u32) as u16, *byte);
-                }
-                bytes.len()
-            }
-            "sa1" | "gsu" | "gsucache" => 0,
-            "bus" => {
-                for (ix, byte) in bytes.iter().enumerate() {
-                    let addr = addr.wrapping_add(ix as u32) & 0x00FF_FFFF;
-                    self.core.write8(Address::from_24bit(addr), *byte);
-                }
-                bytes.len()
-            }
-            _ => {
-                for (ix, byte) in bytes.iter().enumerate() {
-                    let addr = addr.wrapping_add(ix as u32) as u16;
-                    self.core.write8(Address::new(0x00, addr), *byte);
-                }
-                bytes.len()
+            "spc" => self.core.apu.patch_ram(addr, bytes),
+            _ => 0,
+        }
+    }
+
+    fn validate_bus_access(
+        &self,
+        region: &str,
+        addr: u32,
+        width: AccessWidth,
+    ) -> Result<(), DebugMemoryError> {
+        let (base, size) = match region {
+            "bus" => (0, BUS_SIZE),
+            "spc" => (0, 0x1_0000),
+            "ppu" => (PPU_BASE, PPU_SIZE),
+            "cpu" => (CPU_BASE, CPU_SIZE),
+            _ => return Err(DebugMemoryError::Unsupported),
+        };
+
+        let (addr, base) = (u64::from(addr), u64::from(base));
+        if addr < base || addr + u64::from(width.bytes()) > base + u64::from(size) {
+            return Err(DebugMemoryError::InvalidAddress);
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn bus_read(
+        &mut self,
+        region: &str,
+        addr: u32,
+        width: AccessWidth,
+    ) -> Result<u32, DebugMemoryError> {
+        self.validate_bus_access(region, addr, width)?;
+        let mut value = 0;
+        // Both buses are 8-bit, so wider or unaligned requests are split into bytes.
+        for offset in 0..width.bytes() {
+            let byte = if region == "spc" {
+                self.core.apu.read((addr + offset) as u16)
+            } else {
+                self.core.read8(Address::from_24bit(addr + offset))
+            };
+
+            value |= u32::from(byte) << (offset * 8);
+        }
+
+        Ok(value)
+    }
+
+    pub(super) fn bus_write(
+        &mut self,
+        region: &str,
+        addr: u32,
+        width: AccessWidth,
+        value: u32,
+    ) -> Result<(), DebugMemoryError> {
+        self.validate_bus_access(region, addr, width)?;
+        for offset in 0..width.bytes() {
+            let byte = (value >> (offset * 8)) as u8;
+            if region == "spc" {
+                self.core.apu.write((addr + offset) as u16, byte);
+            } else {
+                self.core.write8(Address::from_24bit(addr + offset), byte);
             }
         }
+
+        Ok(())
     }
 
     pub(super) fn format_addr(&self, region: &str, addr: u32) -> String {
@@ -154,9 +231,6 @@ impl SnesDebug {
     }
 
     pub(super) fn highlights(&self, region: &str, addr: u32, len: usize) -> Vec<Highlight> {
-        self.capture_frames
-            .store(CAPTURE_FRAMES, std::sync::atomic::Ordering::Relaxed);
-
         (0..len as u32)
             .map(|i| match self.region_key(region, addr.wrapping_add(i)) {
                 Some(key) if self.last_access.writes.contains(&key) => Highlight::Written,
@@ -173,10 +247,7 @@ impl SnesDebug {
     }
 
     pub(super) fn latest(&self) -> Option<(Arc<str>, u32)> {
-        self.track_frames
-            .store(TRACK_FRAMES, std::sync::atomic::Ordering::Relaxed);
-
-        let (kind, offset) = self.last_access.last?;
+        let (kind, offset) = self.last_access.last()?;
         let region = match kind {
             MemKind::Wram => "wram",
             MemKind::Iram => "iram",

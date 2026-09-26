@@ -10,7 +10,8 @@ crate-type = ["lib", "staticlib", "cdylib"]
 [dependencies]
 artwork = { path = "../../crates/artwork" }
 core-model = { path = "../../crates/models/core" }
-snes = { path = "../../crates/cores/snes" }
+core-loader = { path = "../../crates/core-loader" }
+storage = { path = "../../crates/storage" }
 
 [build-dependencies]
 cbindgen = { version = "0.29.4", default-features = false }

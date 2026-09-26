@@ -1,6 +1,9 @@
 use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use core_model::{Core, System};
+use core_model::Core;
+pub use core_model::GameId;
 use thiserror::Error;
 
 #[cfg(not(target_family = "wasm"))]
@@ -34,17 +37,35 @@ pub enum StoreError {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct GameId {
-    pub system: System,
-    pub sha1: String,
+#[derive(Debug)]
+pub struct BackupPolicy {
+    allowed: AtomicBool,
 }
 
-impl GameId {
-    pub fn new(system: System, sha1: impl Into<String>) -> Self {
+impl Default for BackupPolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BackupPolicy {
+    pub const fn new() -> Self {
         Self {
-            system,
-            sha1: sha1.into(),
+            allowed: AtomicBool::new(true),
+        }
+    }
+
+    pub fn allow_persist(&self) -> bool {
+        self.allowed.load(Ordering::Relaxed)
+    }
+
+    pub fn inhibit(&self) {
+        self.allowed.store(false, Ordering::Relaxed);
+    }
+
+    pub fn restored(&self, success: bool) {
+        if !success {
+            self.inhibit();
         }
     }
 }
@@ -148,11 +169,16 @@ pub trait SaveStore {
 pub struct Session<S: SaveStore> {
     store: S,
     game: GameId,
+    backup_policy: Arc<BackupPolicy>,
 }
 
 impl<S: SaveStore> Session<S> {
     pub fn new(store: S, game: GameId) -> Self {
-        Self { store, game }
+        Self {
+            store,
+            game,
+            backup_policy: Arc::new(BackupPolicy::new()),
+        }
     }
 
     pub fn game(&self) -> &GameId {
@@ -168,7 +194,20 @@ impl<S: SaveStore> Session<S> {
     }
 
     pub fn hydrate(&self) -> impl Future<Output = Result<(), StoreError>> + 'static {
-        self.store.hydrate(&self.game)
+        let hydrate = self.store.hydrate(&self.game);
+        let policy = self.backup_policy.clone();
+        async move {
+            let result = hydrate.await;
+            if result.is_err() {
+                policy.inhibit();
+            }
+
+            result
+        }
+    }
+
+    pub fn inhibit_save_ram_persistence(&self) {
+        self.backup_policy.inhibit();
     }
 
     pub fn read_state(&self, slot: Slot) -> Result<Option<Vec<u8>>, StoreError> {
@@ -215,11 +254,17 @@ impl<S: SaveStore> Session<S> {
     }
 
     pub fn restore_save_ram<C: Core + ?Sized>(&self, core: &mut C) -> Result<bool, SessionError> {
-        let Some(bytes) = self.store.read(&self.game, Entry::SaveRam)? else {
+        let stored = self
+            .store
+            .read(&self.game, Entry::SaveRam)
+            .inspect_err(|_| self.backup_policy.inhibit())?;
+
+        let Some(bytes) = stored else {
             return Ok(false);
         };
 
         if !core.load_save_ram(&bytes) {
+            self.backup_policy.inhibit();
             return Err(SessionError::SaveRamMismatch { len: bytes.len() });
         }
 
@@ -227,6 +272,10 @@ impl<S: SaveStore> Session<S> {
     }
 
     pub fn persist_save_ram<C: Core + ?Sized>(&self, core: &C) -> Result<bool, SessionError> {
+        if !self.backup_policy.allow_persist() {
+            return Err(SessionError::SaveRamPersistenceInhibited);
+        }
+
         let Some(bytes) = core.save_ram() else {
             return Ok(false);
         };
@@ -238,6 +287,8 @@ impl<S: SaveStore> Session<S> {
 
 #[derive(Debug, Error)]
 pub enum SessionError {
+    #[error("Save RAM persistence is disabled because restoring the existing backup failed")]
+    SaveRamPersistenceInhibited,
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]

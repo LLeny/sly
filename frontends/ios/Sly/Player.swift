@@ -10,11 +10,11 @@ public final class Player: Identifiable {
     let currentRom: URL
     let core: EmulatorCore
 
-    private let romCRC32: UInt32
-    private let saveRAMSize: Int
+    private let statePath: String
+    private let saveRAMPath: String
+    private let backupCapacity: Int
     private var lastSaveRAMFlush: TimeInterval
     private var lastPersistedSaveRAM: Data?
-    private var canPersistSaveRAM = true
 
     init(system: System, rom: URL) throws {
         let buffer = try Data(contentsOf: rom)
@@ -22,15 +22,16 @@ public final class Player: Identifiable {
         currentSystem = system
         currentRom = rom
         core = try EmulatorCore(system: system, rom: buffer)
-        romCRC32 = core.cartridge.romCRC32
-        saveRAMSize = core.cartridge.saveRAMSize
+        statePath = try core.statePath()
+        saveRAMPath = try core.saveRAMPath()
+        backupCapacity = core.cartridge.backupCapacity
         lastSaveRAMFlush = ProcessInfo.processInfo.systemUptime
         lastPersistedSaveRAM = core.saveRAM()
 
         do {
             try restoreSaveRAM()
         } catch {
-            canPersistSaveRAM = false
+            core.inhibitSaveRAMPersistence()
             print("Failed to restore save RAM:", error)
         }
     }
@@ -43,14 +44,12 @@ public final class Player: Identifiable {
         try persistSaveRAM()
         try AppFiles.saveState(
             core.saveState(),
-            romCRC32: romCRC32
+            path: statePath
         )
     }
 
     func loadState() throws {
-        guard let state = try AppFiles.loadState(
-            romCRC32: romCRC32
-        ) else {
+        guard let state = try AppFiles.loadState(path: statePath) else {
             return
         }
 
@@ -58,12 +57,11 @@ public final class Player: Identifiable {
     }
 
     var hasState: Bool {
-        AppFiles.hasState(romCRC32: romCRC32)
+        AppFiles.hasState(path: statePath)
     }
 
     func persistSaveRAM() throws {
-        guard canPersistSaveRAM,
-              let saveRAM = core.saveRAM(),
+        guard let saveRAM = core.persistableSaveRAM(),
               saveRAM != lastPersistedSaveRAM
         else {
             return
@@ -71,7 +69,7 @@ public final class Player: Identifiable {
 
         try AppFiles.saveRAM(
             saveRAM,
-            romCRC32: romCRC32
+            path: saveRAMPath
         )
         lastPersistedSaveRAM = saveRAM
     }
@@ -84,15 +82,13 @@ public final class Player: Identifiable {
 
     private func restoreSaveRAM() throws {
         guard lastPersistedSaveRAM != nil,
-              let saveRAM = try AppFiles.loadSaveRAM(
-                romCRC32: romCRC32
-              ) else {
+              let saveRAM = try AppFiles.loadSaveRAM(path: saveRAMPath) else {
             return
         }
 
         guard core.loadSaveRAM(saveRAM) else {
-            throw PlayerError.saveRAMSizeMismatch(
-                expected: saveRAMSize,
+            throw PlayerError.backupCapacityMismatch(
+                expected: backupCapacity,
                 actual: saveRAM.count
             )
         }
@@ -115,11 +111,11 @@ public final class Player: Identifiable {
 }
 
 private enum PlayerError: LocalizedError {
-    case saveRAMSizeMismatch(expected: Int, actual: Int)
+    case backupCapacityMismatch(expected: Int, actual: Int)
 
     var errorDescription: String? {
         switch self {
-        case let .saveRAMSizeMismatch(expected, actual):
+        case let .backupCapacityMismatch(expected, actual):
             "Stored save RAM is \(actual) bytes; this cartridge expects \(expected) bytes."
         }
     }

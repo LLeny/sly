@@ -49,6 +49,9 @@ struct MetalPlayerView: UIViewRepresentable {
         private var player: Player
         private var framesPerSecond: Int
         private var imageFiltering: ImageFiltering
+        private var lastFrameTime: TimeInterval?
+        private var frameDebt: TimeInterval = 0
+        private var isPaused = false
 
         let bufferedFrameCount = 3
         let device: MTLDevice
@@ -85,20 +88,30 @@ struct MetalPlayerView: UIViewRepresentable {
                 mtlDevice: device,
                 options: [.cacheIntermediates: false]
             )
-            audioOutput = AudioOutput(
-                core: player.core,
-                framesPerSecond: framesPerSecond
-            )
+            audioOutput = AudioOutput(core: player.core)
         }
 
         func draw(in view: MTKView) {
-            guard let drawable = view.currentDrawable,
-                  let frame = player.runFrame()
-            else {
-                return
-            }
+            guard !isPaused,
+                  let intervalNS = player.core.frameIntervalNanoseconds,
+                  intervalNS > 0,
+                  let drawable = view.currentDrawable
+            else { return }
 
-            audioOutput?.enqueue(from: player.core)
+            let interval = Double(intervalNS) / 1_000_000_000
+            let now = ProcessInfo.processInfo.systemUptime
+            let elapsed = lastFrameTime.map { max(0, now - $0) } ?? interval
+            frameDebt = min(interval * 3, frameDebt + elapsed)
+            lastFrameTime = now
+            let framesDue = Int(frameDebt / interval)
+            guard framesDue > 0 else { return }
+            frameDebt -= Double(framesDue) * interval
+            var newestFrame: Frame?
+            for _ in 0..<framesDue {
+                newestFrame = player.runFrame()
+                audioOutput?.enqueue(from: player.core)
+            }
+            guard let frame = newestFrame else { return }
 
             guard let image = upload(frame),
                   let commandBuffer = commandQueue.makeCommandBuffer()
@@ -181,19 +194,25 @@ struct MetalPlayerView: UIViewRepresentable {
             if self.player !== player ||
                 self.framesPerSecond != framesPerSecond {
                 audioOutput?.stop()
+                lastFrameTime = nil
+                frameDebt = 0
                 self.player = player
                 self.framesPerSecond = framesPerSecond
-                audioOutput = AudioOutput(
-                    core: player.core,
-                    framesPerSecond: framesPerSecond
-                )
+                audioOutput = AudioOutput(core: player.core)
             }
 
+            if self.isPaused != isPaused {
+                lastFrameTime = nil
+                frameDebt = 0
+            }
+            self.isPaused = isPaused
             self.imageFiltering = imageFiltering
             audioOutput?.setPaused(isPaused)
         }
 
         func stop() {
+            lastFrameTime = nil
+            frameDebt = 0
             audioOutput?.stop()
             audioOutput = nil
         }

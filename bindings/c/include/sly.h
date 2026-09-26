@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define SLY_ABI_VERSION 1
+#define SLY_ABI_VERSION 2
 
 // Anything but `Ok` leaves a description in `sly_last_error()`.
 typedef enum SlyStatus {
@@ -55,7 +55,16 @@ typedef enum SlyRegion {
 typedef enum SlyTvSystem {
   SLY_TV_SYSTEM_NTSC = 0,
   SLY_TV_SYSTEM_PAL,
+  SLY_TV_SYSTEM_UNSPECIFIED,
 } SlyTvSystem;
+
+typedef enum SlyBackupKind {
+  SLY_BACKUP_KIND_NONE = 0,
+  SLY_BACKUP_KIND_SRAM,
+  SLY_BACKUP_KIND_FRAM,
+  SLY_BACKUP_KIND_EEPROM,
+  SLY_BACKUP_KIND_FLASH,
+} SlyBackupKind;
 
 typedef enum SlyButton {
   SLY_BUTTON_UP = 0,
@@ -106,8 +115,11 @@ typedef struct SlyCartridgeInfo {
   struct SlyBuffer region_name;
   enum SlyTvSystem tv_system;
   uint32_t rom_crc32;
-  bool has_battery;
-  size_t sram_size;
+  struct SlyBuffer rom_sha1;
+  size_t rom_size;
+  enum SlyBackupKind backup_kind;
+  size_t backup_capacity;
+  bool backup_battery_backed;
 } SlyCartridgeInfo;
 
 typedef struct SlyAudioSpec {
@@ -135,7 +147,8 @@ enum SlyStatus sly_artwork_query(enum SlySystem system,
                                  struct SlyArtworkQuery *out_query);
 
 // Resolve art.layle.dev metadata into region-preferred artwork URLs without performing network I/O.
-enum SlyStatus sly_artwork_resolve(const uint8_t *sha1,
+enum SlyStatus sly_artwork_resolve(enum SlySystem system,
+                                   const uint8_t *sha1,
                                    size_t sha1_len,
                                    enum SlyRegion preferred_region,
                                    enum SlyRegion rom_region,
@@ -176,6 +189,29 @@ enum SlyStatus sly_cartridge_inspect(enum SlySystem system,
 
 // NULL is a no-op.
 void sly_cartridge_info_free(struct SlyCartridgeInfo *info);
+
+size_t sly_core_controller_count(const struct SlyCore *core);
+
+// The descriptor's port can differ from `index`.
+bool sly_core_controller_port(const struct SlyCore *core, size_t index, uint32_t *out_port);
+
+// Owned by the core, don't free it.
+const char *sly_core_controller_name(const struct SlyCore *core, size_t index);
+
+bool sly_core_supports_button(const struct SlyCore *core, uint32_t port, enum SlyButton button);
+
+// Owned by the core, don't free it.
+const char *sly_core_rom_sha1(const struct SlyCore *core);
+
+size_t sly_core_rom_size(const struct SlyCore *core);
+
+enum SlyBackupKind sly_core_backup_kind(const struct SlyCore *core);
+
+void sly_core_inhibit_save_ram_persistence(const struct SlyCore *core);
+
+bool sly_core_persistable_save_ram(const struct SlyCore *core,
+                                   const uint8_t **out_data,
+                                   size_t *out_len);
 
 // Never NULL; empty when no error has occurred. Valid until the next failing
 // `sly_*` call on the same thread. Do not free.
@@ -218,14 +254,20 @@ enum SlyStatus sly_core_save_state(const struct SlyCore *core, struct SlyBuffer 
 // Invalidates every pointer borrowed from this core.
 enum SlyStatus sly_core_load_state(struct SlyCore *core, const uint8_t *data, size_t len);
 
+// Index 0 is the quick slot, 1 to 10 are the numbered slots. Free with sly_buffer_free.
+enum SlyStatus sly_core_state_path(const struct SlyCore *core,
+                                   uint8_t index,
+                                   struct SlyBuffer *out_path);
+
+// Free with sly_buffer_free.
+enum SlyStatus sly_core_save_ram_path(const struct SlyCore *core, struct SlyBuffer *out_path);
+
 // Safe to call with NULL or an already-freed buffer.
 void sly_buffer_free(struct SlyBuffer *buf);
 
-// False when the cartridge has no battery or the SRAM is empty. The pointer is
-// valid until the next mutating call on this core.
+// The pointer is valid until the next mutating call.
 bool sly_core_save_ram(const struct SlyCore *core, const uint8_t **out_data, size_t *out_len);
 
-// False when the cartridge has no battery or the size does not match.
 bool sly_core_load_save_ram(struct SlyCore *core, const uint8_t *data, size_t len);
 
 // UTF-8, from the ROM header. Owned by the core; do not free.
@@ -234,7 +276,7 @@ const char *sly_core_title(const struct SlyCore *core);
 // System slug, e.g. "snes". Owned by the core; do not free.
 const char *sly_core_system(const struct SlyCore *core);
 
-// Human-readable, e.g. "North America (NTSC)". Owned by the core; do not free.
+// Owned by the core, don't free it.
 const char *sly_core_region_name(const struct SlyCore *core);
 
 enum SlyTvSystem sly_core_tv_system(const struct SlyCore *core);
@@ -242,10 +284,10 @@ enum SlyTvSystem sly_core_tv_system(const struct SlyCore *core);
 // Copier header stripped.
 uint32_t sly_core_rom_crc32(const struct SlyCore *core);
 
-bool sly_core_has_battery(const struct SlyCore *core);
+bool sly_core_backup_battery_backed(const struct SlyCore *core);
 
 // Declared size in bytes, 0 when none.
-size_t sly_core_sram_size(const struct SlyCore *core);
+size_t sly_core_backup_capacity(const struct SlyCore *core);
 
 #ifdef __cplusplus
 }  // extern "C"

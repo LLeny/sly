@@ -1,31 +1,13 @@
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Div, FontWeight, ObjectFit, SharedString, Window, div, img, px, svg};
+use gpui::{App, ClickEvent, FontWeight, ObjectFit, Window, div, img, px, svg};
 
 use crate::assets::icon;
-use crate::components::{ClickHandler, Copyable, Panel, label_text};
+use crate::components::{ClickHandler, Copyable, Panel};
 use crate::theme::Theme;
 
-/// One labeled cartridge field (e.g. "Mapper" / "LoROM").
-pub type CartridgeField = super::field::Field;
-
-#[derive(Clone)]
-pub struct CartridgeView {
-    pub title: SharedString,
-    pub fields: Vec<CartridgeField>,
-    pub cover: Option<SharedString>,
-}
-
-impl From<debugger_model::CartridgeView> for CartridgeView {
-    fn from(view: debugger_model::CartridgeView) -> Self {
-        Self {
-            title: view.title.into(),
-            fields: view.fields.into_iter().map(Into::into).collect(),
-            cover: view.cover.map(Into::into),
-        }
-    }
-}
+pub use debugger_model::CartridgeView;
 
 #[derive(IntoElement)]
 pub struct CartridgeWidget {
@@ -35,7 +17,7 @@ pub struct CartridgeWidget {
 }
 
 impl CartridgeWidget {
-    pub const ID: &'static str = "cartridge";
+    pub const ID: &'static str = debugger_model::panel::CARTRIDGE;
 
     pub fn new(view: Arc<CartridgeView>) -> Self {
         Self {
@@ -64,7 +46,7 @@ impl RenderOnce for CartridgeWidget {
         let theme = Theme::global(cx);
         let t = &*theme;
 
-        let title = self.view.title.clone();
+        let title = gpui::SharedString::from(self.view.title.clone());
         let title_block = Copyable::new("cart-title", title.clone()).child(
             div()
                 .font_family(t.mono_font)
@@ -86,8 +68,13 @@ impl RenderOnce for CartridgeWidget {
             .border_color(t.border_subtle)
             .rounded_md()
             .overflow_hidden();
+
         let art_box = match cover {
-            Some(url) => art_box.child(img(url).size_full().object_fit(ObjectFit::Contain)),
+            Some(url) => art_box.child(
+                img(gpui::SharedString::from(url))
+                    .size_full()
+                    .object_fit(ObjectFit::Contain),
+            ),
             None => art_box.child(
                 svg()
                     .path(icon::CARTRIDGE)
@@ -106,12 +93,7 @@ impl RenderOnce for CartridgeWidget {
             .child(art_box)
             .child(title_block);
 
-        let fields = div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .pt_1()
-            .children(self.view.fields.iter().map(|f| self::field_row(t, f)));
+        let fields = super::structured::content(t, &self.view.details, &Default::default(), &None);
 
         let body = div()
             .flex()
@@ -126,28 +108,4 @@ impl RenderOnce for CartridgeWidget {
             .on_toggle_opt(self.on_toggle)
             .child(body)
     }
-}
-
-fn field_row(theme: &Theme, f: &CartridgeField) -> Div {
-    let value_color = if f.accent {
-        theme.accent
-    } else {
-        theme.text_secondary
-    };
-
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .px_1()
-        .child(label_text(theme, f.label.clone()))
-        .child(
-            Copyable::new(format!("cart-{}", f.label), f.value.clone()).child(
-                div()
-                    .font_family(theme.mono_font)
-                    .text_xs()
-                    .text_color(value_color)
-                    .child(f.value.clone()),
-            ),
-        )
 }

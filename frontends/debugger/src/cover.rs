@@ -6,8 +6,8 @@ use gpui::http_client::http::HeaderValue;
 use gpui::http_client::{AsyncBody, HttpClient, Request, Response, Result, Url, http};
 
 pub(crate) struct ArtQuery {
-    pub sha1: String,
-    pub region: core_model::Region,
+    pub game: core_model::GameId,
+    pub region: Option<core_model::Region>,
     pub fallback: Option<Arc<str>>,
 }
 
@@ -22,7 +22,7 @@ pub(crate) async fn resolve(client: Arc<dyn HttpClient>, query: &ArtQuery) -> Op
 }
 
 async fn fetch_sly_cover(client: Arc<dyn HttpClient>, query: &ArtQuery) -> Result<String> {
-    let url = artwork::layle::metadata_url(&query.sha1);
+    let url = artwork::layle::metadata_url(&query.game);
     let mut response = client.get(&url, AsyncBody::empty(), true).await?;
     let mut body = Vec::new();
     response.body_mut().read_to_end(&mut body).await?;
@@ -31,9 +31,9 @@ async fn fetch_sly_cover(client: Arc<dyn HttpClient>, query: &ArtQuery) -> Resul
     }
 
     let metadata = artwork::layle::parse_metadata(&body)?;
-    let art = artwork::layle::select_art(&metadata.art, "box-front", &[query.region])
-        .ok_or_else(|| gpui::http_client::anyhow!("no box front art for {}", query.sha1))?;
-    Ok(artwork::layle::art_url(&query.sha1, &art))
+    let art = artwork::layle::select_art(&metadata.art, "box-front", query.region.as_slice())
+        .ok_or_else(|| gpui::http_client::anyhow!("no box front art for {}", query.game.sha1))?;
+    Ok(artwork::layle::art_url(&query.game, &art))
 }
 
 pub(crate) struct ArtAuthClient(pub Arc<dyn HttpClient>);

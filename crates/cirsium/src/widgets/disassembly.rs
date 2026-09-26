@@ -128,6 +128,7 @@ pub struct DisassemblyWidget {
     view_mode: ViewMode,
     graph_offset: Point<Pixels>,
     on_set_view: Option<ViewCallback>,
+    decode: Option<(SharedString, ClickHandler)>,
     on_pan_begin: Option<PanCallback>,
     on_pan_drag: Option<PanCallback>,
     follow: bool,
@@ -156,6 +157,7 @@ impl DisassemblyWidget {
             view_mode: ViewMode::Linear,
             graph_offset: Point::default(),
             on_set_view: None,
+            decode: None,
             on_pan_begin: None,
             on_pan_drag: None,
             follow: false,
@@ -165,6 +167,15 @@ impl DisassemblyWidget {
             on_edge_hover: None,
             on_jump: None,
         }
+    }
+
+    pub fn decode_mode(
+        mut self,
+        label: Option<SharedString>,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.decode = label.map(|label| (label, Box::new(handler) as ClickHandler));
+        self
     }
 
     pub fn current(mut self, current: Option<usize>) -> Self {
@@ -318,6 +329,7 @@ impl RenderOnce for DisassemblyWidget {
             on_select,
             on_context,
             on_set_view,
+            decode,
             on_pan_begin,
             on_pan_drag,
             follow,
@@ -331,7 +343,7 @@ impl RenderOnce for DisassemblyWidget {
         let current_addr = rows
             .current
             .and_then(|ix| view.lines.get(ix))
-            .map(|l| l.address.clone());
+            .map(|l| SharedString::from(l.address.clone()));
 
         let selector = Segmented::new(SharedString::from(format!("{id}-view")))
             .option("linear", icon::LIST, "Linear")
@@ -382,13 +394,29 @@ impl RenderOnce for DisassemblyWidget {
             .into_any_element(),
         };
 
+        let mut actions = div().flex().items_center().gap_1();
+        if let Some((label, handler)) = decode {
+            actions = actions.child(
+                div()
+                    .id("decode-mode")
+                    .text_xs()
+                    .px_1()
+                    .cursor_pointer()
+                    .child(label)
+                    .on_click(handler),
+            );
+        }
+
+        actions = actions.child(selector);
+
         let mut panel = Panel::new(id, title)
             .glyph(icon::CODE)
             .collapsed(collapsed)
             .grow(true)
             .on_toggle_opt(on_toggle)
-            .header_action(selector)
+            .header_action(actions)
             .child(body);
+
         if let Some(addr) = current_addr {
             panel = panel.meta(addr);
         }

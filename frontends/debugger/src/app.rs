@@ -12,18 +12,24 @@ use cirsium::components::{
 use cirsium::widgets::{
     AudioScopeView, AudioScopeWidget, AudioScopesView, BreakpointKind, BreakpointsWidget,
     CallStackView, CallStackWidget, CartridgeView, CartridgeWidget, ChannelScopesWidget,
-    ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, DmaView, DmaWidget,
-    FramebufferView, FramebufferWidget, GridPanel, LogWidget, MemoryWidget, MmioView, MmioWidget,
-    PaletteView, PaletteWidget, PpuView, PpuWidget, RowProvider, SavestatesWidget,
-    ScriptBuiltinsWidget, ScriptConsoleWidget, ScriptEditorWidget, SpritesView, SpritesWidget,
-    StructuredPanel, StructuredView, TablePanel, TableView, TilemapView, TilemapWidget,
-    TilesetLayer, TilesetView, TilesetWidget, ViewMode,
+    ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, FramebufferView, FramebufferWidget,
+    GridPanel, LogWidget, MemoryWidget, MmioView, MmioWidget, PaletteView, PaletteWidget,
+    RasterView, RasterWidget, RowProvider, SavestatesWidget, ScriptBuiltinsWidget,
+    ScriptConsoleWidget, ScriptEditorWidget, SpritesView, SpritesWidget, StructuredPanel,
+    StructuredView, TablePanel, TableView, TilemapView, TilemapWidget, TilesetView, TilesetWidget,
+    ViewMode,
 };
+
 use cirsium::{
     ACCENT_PRESETS, ChangeTracker, GUEST_COLORS, Highlight, Theme, ThemeMode, accent_at, set_theme,
 };
+
 use core_model::{Button, ExecutionState};
-use debugger_model::{BreakpointMark, CpuId, CpuView, DebugCore, RunOutcome, VideoGenerations};
+use debugger_model::{
+    BreakpointMark, CpuId, CpuView, DebugCore, PaletteSelection, RunOutcome, VideoResource,
+    VideoResourceId, VideoResourceKind, VideoRevision,
+};
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClickEvent, ClipboardItem, Context, Entity, FocusHandle, KeyDownEvent,
@@ -60,23 +66,52 @@ struct ProcessorPane {
 
 #[derive(Default)]
 struct GridState {
-    layer: usize,
-    selected: HashMap<usize, usize>,
+    resource: Option<VideoResourceId>,
+    selected: HashMap<VideoResourceId, usize>,
     hovered: Option<usize>,
     viewport: Size<f32>,
     show_window_overlays: bool,
 }
 
 impl GridState {
+    fn sync(&mut self, resources: &[VideoResource], kind: VideoResourceKind) {
+        if !resources
+            .iter()
+            .any(|r| r.kind == kind && Some(&r.id) == self.resource.as_ref())
+        {
+            self.resource = resources
+                .iter()
+                .find(|r| r.kind == kind && r.enabled)
+                .or_else(|| resources.iter().find(|r| r.kind == kind))
+                .map(|r| r.id.clone());
+
+            self.hovered = None;
+        }
+    }
+
+    fn index(&self, resources: &[VideoResource]) -> usize {
+        resources
+            .iter()
+            .position(|r| Some(&r.id) == self.resource.as_ref())
+            .unwrap_or(0)
+    }
+
     fn selected(&self) -> Option<usize> {
-        self.selected.get(&self.layer).copied()
+        self.resource
+            .as_ref()
+            .and_then(|id| self.selected.get(id))
+            .copied()
     }
 
     fn toggle_selected(&mut self, index: usize) {
-        if self.selected.get(&self.layer) == Some(&index) {
-            self.selected.remove(&self.layer);
+        let Some(resource) = self.resource.clone() else {
+            return;
+        };
+
+        if self.selected.get(&resource) == Some(&index) {
+            self.selected.remove(&resource);
         } else {
-            self.selected.insert(self.layer, index);
+            self.selected.insert(resource, index);
         }
     }
 
@@ -100,6 +135,34 @@ impl GridState {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct VideoCacheKey {
+    resource: VideoResourceId,
+    revision: VideoRevision,
+    palette: Option<PaletteSelection>,
+    palette_revision: Option<VideoRevision>,
+}
+
+impl VideoCacheKey {
+    fn read(
+        video: &dyn debugger_model::VideoDebug,
+        resource: &VideoResourceId,
+        palette: Option<PaletteSelection>,
+    ) -> Option<Self> {
+        let palette_revision = match &palette {
+            Some(selection) => Some(video.revision(&selection.resource)?),
+            None => None,
+        };
+
+        Some(Self {
+            resource: resource.clone(),
+            revision: video.revision(resource)?,
+            palette,
+            palette_revision,
+        })
+    }
+}
+
 pub(crate) struct Debugger {
     target: Box<dyn DebugCore>,
     session: storage::Session<storage::PlatformStore>,
@@ -108,7 +171,6 @@ pub(crate) struct Debugger {
     savestates_view: Arc<cirsium::widgets::SavestatesView>,
     cartridge: Arc<CartridgeView>,
     mmio_view: Arc<MmioView>,
-    dma_view: Arc<DmaView>,
     palette_view: Arc<PaletteView>,
     palette_selected: Option<(usize, usize)>,
     structured_views: HashMap<SharedString, Arc<StructuredView>>,
@@ -119,9 +181,12 @@ pub(crate) struct Debugger {
     scope_samples: Vec<f32>,
     scope_view: AudioScopeView,
     audio_samples: Vec<i16>,
-    ppu_view: Arc<PpuView>,
     tileset: Option<TilesetView>,
-    tileset_layers: Vec<TilesetLayer>,
+    video_resources: Vec<VideoResource>,
+    palette_ui: GridState,
+    raster: Option<RasterView>,
+    raster_ui: GridState,
+    raster_key: Option<VideoCacheKey>,
     tileset_ui: GridState,
     tilemap: Option<TilemapView>,
     tilemap_ui: GridState,
@@ -130,12 +195,12 @@ pub(crate) struct Debugger {
     framebuffer: Option<FramebufferView>,
     framebuffer_staged: Vec<u8>,
     framebuffer_dirty: bool,
-    palette_key: Option<u64>,
-    tileset_key: Option<(u64, usize, usize)>,
-    tilemap_key: Option<(u64, usize)>,
-    tilemap_overlay_key: Option<(u64, usize)>,
-    sprites_key: Option<u64>,
-    expanded: HashMap<&'static str, HashSet<SharedString>>,
+    palette_key: Option<VideoCacheKey>,
+    tileset_key: Option<VideoCacheKey>,
+    tilemap_key: Option<VideoCacheKey>,
+    tilemap_overlay_key: Option<VideoCacheKey>,
+    sprites_key: Option<VideoCacheKey>,
+    expanded: HashMap<SharedString, HashSet<SharedString>>,
     registry: cirsium::PanelRegistry,
     step_targets: Vec<cirsium::widgets::StepTargetView>,
     panel_frames: PanelFrames,
@@ -213,7 +278,7 @@ impl Debugger {
             .into_iter()
             .map(|desc| {
                 let mut pane = ProcessorPane {
-                    disasm: Disasm::new(desc.id.clone(), desc.pc_mask()),
+                    disasm: Disasm::new(&desc),
                     id: desc.id,
                     title: desc.title.into(),
                     space: desc.space,
@@ -293,11 +358,10 @@ impl Debugger {
         let mut status: StatusView = target.session_info().into();
         status.state = target.caption("paused").into();
 
-        Self {
+        let mut debugger = Self {
             cartridge: Arc::new(target.cartridge().clone().into()),
             mmio_view: Arc::new(target.mmio_view().into()),
-            dma_view: Arc::new(target.dma_view().into()),
-            palette_view: Arc::new(target.palette_view().into()),
+            palette_view: Arc::new(PaletteView::default()),
             palette_selected: None,
             structured_views: HashMap::new(),
             panel_scrolls,
@@ -307,17 +371,16 @@ impl Debugger {
             scope_samples: Vec::new(),
             scope_view: AudioScopeView::default(),
             audio_samples: Vec::new(),
-            ppu_view: Arc::new(target.ppu_view().into()),
-            tileset: target.tileset(0, 0).map(Into::into),
-            tileset_layers: target
-                .tileset_layers()
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            tileset: None,
+            video_resources: Vec::new(),
+            palette_ui: GridState::default(),
+            raster: None,
+            raster_ui: GridState::default(),
+            raster_key: None,
             tileset_ui: GridState::default(),
-            tilemap: target.tilemap(0).map(Into::into),
+            tilemap: None,
             tilemap_ui: GridState::default(),
-            sprites: target.sprites().map(Into::into),
+            sprites: None,
             sprites_ui: GridState::default(),
             framebuffer: target.software_frame().map(Into::into),
             framebuffer_staged: Vec::new(),
@@ -371,7 +434,10 @@ impl Debugger {
             accent: 0,
             #[cfg(target_family = "wasm")]
             web_tick_armed: false,
-        }
+        };
+
+        debugger.refresh_panes(CpuRefresh::Baseline, false, cx);
+        debugger
     }
 
     fn scroll_for(&self, id: &str) -> ScrollHandle {

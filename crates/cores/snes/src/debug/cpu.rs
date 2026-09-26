@@ -70,6 +70,42 @@ pub(super) fn cpu_view(cpu: &crate::Cpu) -> CpuView {
     }
 }
 
+/// ID, label, emulation flag and M/X bits for each decode mode.
+const DECODE_MODES: [(&str, &str, bool, u8); 5] = [
+    ("emulation", "Emulation", true, 0x30),
+    ("m8x8", "M8 X8", false, 0x30),
+    ("m8x16", "M8 X16", false, 0x20),
+    ("m16x8", "M16 X8", false, 0x10),
+    ("m16x16", "M16 X16", false, 0),
+];
+
+pub(super) fn decode_modes() -> Vec<DecodeMode> {
+    DECODE_MODES
+        .iter()
+        .map(|&(id, label, ..)| DecodeMode::new(id, label))
+        .collect()
+}
+
+pub(super) fn decode_cpu(cpu: &crate::Cpu, request: &DisassemblyRequest) -> Option<crate::Cpu> {
+    let mut decoded = crate::Cpu::new(request.base as u16);
+    decoded.acc = cpu.acc;
+    decoded.index_x = cpu.index_x;
+    decoded.index_y = cpu.index_y;
+    decoded.data_bank = cpu.data_bank;
+    decoded.direct_page = cpu.direct_page;
+    decoded.program_bank = (request.base >> 16) as u8;
+    decoded.stack_pointer = cpu.stack_pointer;
+    decoded.flags = crate::cpu::Flags::from_raw(cpu.flags.raw());
+    decoded.emulation = cpu.emulation;
+    if let Some(mode) = request.mode.as_deref() {
+        let &(.., emulation, bits) = DECODE_MODES.iter().find(|(id, ..)| *id == mode)?;
+        decoded.emulation = emulation;
+        decoded.flags = crate::cpu::Flags::from_raw((cpu.flags.raw() & !0x30) | bits);
+    }
+
+    Some(decoded)
+}
+
 pub(super) fn disasm_line_on<B: CpuPeek>(
     cpu: &crate::Cpu,
     bus: &B,
@@ -81,10 +117,11 @@ pub(super) fn disasm_line_on<B: CpuPeek>(
     let len = d.length.max(1);
     let text = strip_symbol_sigils(&d.text, &SNES_SYNTAX);
     let tokens = tokenize(&text, self::mnemonic_kind(d.class), &SNES_SYNTAX);
-    let note = self::disasm_note(&tokens, &d, bank, ea);
+    let note = self::disasm_note(&tokens, &d, ea);
 
     let line = DisasmLine::new(
-        addr as u32,
+        Address::new(bank, addr).as_24bit(),
+        len,
         format!("{bank:02X}:{addr:04X}"),
         self::format_bytes(len, |offset| {
             bus.peek8(Address::new(bank, addr.wrapping_add(offset)))
@@ -94,6 +131,7 @@ pub(super) fn disasm_line_on<B: CpuPeek>(
     )
     .target(d.target)
     .flow(self::map_flow(d.flow))
+    .conditional(matches!(d.flow, CoreFlow::CondBranch))
     .note(note);
 
     (line, len)
@@ -123,10 +161,6 @@ pub(super) fn disasm_view_on<B: CpuPeek>(
     }
 
     lines
-}
-
-pub(super) fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
-    self::disasm_view_on(&snes.cpu, &snes.bus, base, count)
 }
 
 pub(super) fn fingerprint_65c816<B: CpuPeek>(
@@ -189,6 +223,7 @@ pub(super) fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> Vec<DisasmL
         lines.push(
             DisasmLine::new(
                 addr as u32,
+                len,
                 format!("{addr:04X}"),
                 self::spc_read_bytes(apu, addr, len),
                 &*text,
@@ -196,6 +231,7 @@ pub(super) fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> Vec<DisasmL
             )
             .target(target.map(|t| t as u32))
             .flow(self::map_flow(flow))
+            .conditional(matches!(flow, CoreFlow::CondBranch))
             .note(note),
         );
 
@@ -265,12 +301,7 @@ pub(super) fn format_bytes(len: u8, mut byte_at: impl FnMut(u16) -> u8) -> Strin
     out
 }
 
-pub(super) fn disasm_note(
-    tokens: &[DisasmToken],
-    d: &Disasm,
-    bank: u8,
-    ea: Option<Address>,
-) -> String {
+pub(super) fn disasm_note(tokens: &[DisasmToken], d: &Disasm, ea: Option<Address>) -> String {
     let mut parts: Vec<String> = tokens
         .iter()
         .filter(|t| t.kind == TokenKind::Symbol)
@@ -287,7 +318,7 @@ pub(super) fn disasm_note(
         && d.class == InstructionClass::ControlFlow
         && let Some(target) = d.target
     {
-        parts.push(format!("→ {bank:02X}:{target:04X}"));
+        parts.push(format!("→ {:?}", Address::from_24bit(target)));
     }
 
     parts.join("  ")
@@ -307,7 +338,7 @@ pub(super) fn mnemonic_kind(class: InstructionClass) -> TokenKind {
 pub(super) fn map_flow(flow: CoreFlow) -> FlowKind {
     match flow {
         CoreFlow::None => FlowKind::None,
-        CoreFlow::CondBranch => FlowKind::CondBranch,
+        CoreFlow::CondBranch => FlowKind::Branch,
         CoreFlow::Branch => FlowKind::Branch,
         CoreFlow::Jump => FlowKind::Jump,
         CoreFlow::Call => FlowKind::Call,
@@ -321,26 +352,37 @@ pub(super) const SNES_SYNTAX: SyntaxSpec = SyntaxSpec {
 };
 
 impl SnesDebug {
-    pub(super) fn fingerprint(&self, cpu: &CpuId, base: u32, count: usize) -> Option<u64> {
+    pub(super) fn fingerprint(&self, cpu: &CpuId, request: &DisassemblyRequest) -> Option<u64> {
         use std::hash::{DefaultHasher, Hasher};
-
-        let base = base as u16;
-        let fingerprint = match cpu.as_str() {
-            sa1::CPU => sa1::fingerprint(&self.core, base, count),
-            superfx::CPU_GSU => superfx::fingerprint(&self.core, base, count),
-            CPU_SPC => {
-                let mut hasher = DefaultHasher::new();
-                let mut addr = base;
-                for _ in 0..count * 3 {
-                    hasher.write_u8(self.core.apu.peek(addr));
-                    addr = addr.wrapping_add(1);
+        let base = request.base as u16;
+        let count = request.count;
+        Some(match cpu.as_str() {
+            sa1::CPU => sa1::fingerprint(&self.core, request)?,
+            superfx::CPU_GSU => {
+                if request.mode.is_some() {
+                    return None;
                 }
+
+                superfx::fingerprint(&self.core, request.base, count)
+            }
+            CPU_SPC => {
+                if request.mode.is_some() {
+                    return None;
+                }
+
+                let mut hasher = DefaultHasher::new();
+                for offset in 0..count.saturating_mul(3) {
+                    hasher.write_u8(self.core.apu.peek(base.wrapping_add(offset as u16)));
+                }
+
                 hasher.finish()
             }
-            _ => self::fingerprint_65c816(&self.core.cpu, &self.core.bus, base, count),
-        };
-
-        Some(fingerprint)
+            CPU_MAIN => {
+                let decoded = decode_cpu(&self.core.cpu, request)?;
+                fingerprint_65c816(&decoded, &self.core.bus, base, count)
+            }
+            _ => return None,
+        })
     }
 
     pub(super) fn set_register(&mut self, cpu: &CpuId, name: &str, value: u32) -> bool {

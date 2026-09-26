@@ -89,7 +89,7 @@ pub(super) fn mmio_field_view(field: &crate::mmio::FieldInfo, parent: u32) -> Mm
     }
 }
 
-pub(super) fn dma_view(core: &Snes) -> DmaView {
+pub(super) fn dma_view(core: &Snes) -> StructuredView {
     use crate::mmio::dma::transfer_pattern_offsets;
     use crate::mmio::regs::{AddressAdjustMode, Direction};
 
@@ -128,10 +128,10 @@ pub(super) fn dma_view(core: &Snes) -> DmaView {
 
             let line = ch.line_counter;
             let details = vec![
-                DmaChannelDetail::new("B-bus", b_bus),
-                DmaChannelDetail::new("Pattern", format!("{} ({offsets})", pattern as u8)),
-                DmaChannelDetail::new("Step", step),
-                DmaChannelDetail::new(
+                Field::new("B-bus", b_bus),
+                Field::new("Pattern", format!("{} ({offsets})", pattern as u8)),
+                Field::new("Step", step),
+                Field::new(
                     "HDMA mode",
                     if ch.params.indirect() {
                         "indirect"
@@ -139,14 +139,14 @@ pub(super) fn dma_view(core: &Snes) -> DmaView {
                         "direct"
                     },
                 ),
-                DmaChannelDetail::new(
+                Field::new(
                     "HDMA table",
                     format!(
                         "${:?}",
                         Address::new(ch.a_bus_addr.table_bank(), ch.table_addr)
                     ),
                 ),
-                DmaChannelDetail::new(
+                Field::new(
                     "HDMA lines",
                     format!(
                         "{}{}",
@@ -154,7 +154,7 @@ pub(super) fn dma_view(core: &Snes) -> DmaView {
                         if line.repeat() { " (repeat)" } else { "" }
                     ),
                 ),
-                DmaChannelDetail::new(
+                Field::new(
                     "Indirect address",
                     format!(
                         "${:?}",
@@ -166,20 +166,29 @@ pub(super) fn dma_view(core: &Snes) -> DmaView {
                 ),
             ];
 
-            DmaChannelView {
+            let active = (mdmaen | hdmaen) & (1 << i) != 0;
+            Row::Group {
                 id: format!("dma-{i}").into(),
-                name: format!("{i}").into(),
-                dma_enabled: mdmaen & (1 << i) != 0,
-                hdma_enabled: hdmaen & (1 << i) != 0,
-                source: source.into(),
-                dest: dest.into(),
-                count: hex(ch.byte_count.amount() as u32, 16).into(),
-                details,
+                title: format!("Channel {i}").into(),
+                active,
+                summary: format!(
+                    "{source} -> {dest}  {}{}",
+                    hex(ch.byte_count.amount() as u32, 16),
+                    if hdmaen & (1 << i) != 0 { " HDMA" } else { "" }
+                )
+                .into(),
+                rows: details.into_iter().map(Row::Field).collect(),
             }
         })
         .collect();
 
-    DmaView { channels }
+    StructuredView {
+        sections: vec![Section {
+            rows: channels,
+            ..Default::default()
+        }],
+        meta: Some(format!("{} active", (mdmaen | hdmaen).count_ones()).into()),
+    }
 }
 
 pub(super) fn mmio_view(core: &Snes) -> MmioView {

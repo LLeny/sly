@@ -33,12 +33,21 @@ pub fn game_input(keyboard: Res<ButtonInput<KeyCode>>, session: Option<ResMut<Ga
         return;
     };
 
+    let Some(controller) = session.controller.clone() else {
+        return;
+    };
+
     for (key, button) in GAME_KEYMAP {
-        if keyboard.just_pressed(key) {
-            session.core.set_button(0, button, true);
+        if !controller.supports(button) {
+            continue;
         }
+
+        if keyboard.just_pressed(key) {
+            session.core.set_button(controller.port, button, true);
+        }
+
         if keyboard.just_released(key) {
-            session.core.set_button(0, button, false);
+            session.core.set_button(controller.port, button, false);
         }
     }
 }

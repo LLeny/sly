@@ -2,8 +2,8 @@ use std::cell::Cell;
 
 use debugger_model::{
     Cell as TableCell, ColWidth, Column, CpuDescriptor, CpuView, DisasmLine, Field, FlagView,
-    FlowKind, RegisterView, Row, Section, StructuredView, SyntaxSpec, TableRow, TableView, Tilemap,
-    TilemapEntry, TokenKind, Tone, hex, strip_symbol_sigils, tokenize,
+    FlowKind, RasterImage, RegisterView, Row, Section, StructuredView, SyntaxSpec, TableRow,
+    TableView, TokenKind, Tone, hex, strip_symbol_sigils, tokenize,
 };
 
 use super::{field, format_bytes, section};
@@ -25,7 +25,7 @@ pub const GSU_SYNTAX: SyntaxSpec = SyntaxSpec {
 };
 
 pub fn descriptor() -> CpuDescriptor {
-    CpuDescriptor::new(CPU_GSU, "GSU", "gsu", 16)
+    CpuDescriptor::new(CPU_GSU, "GSU", "gsu")
 }
 
 pub fn bus_peek(snes: &Snes, bank: u8, addr: u16) -> u8 {
@@ -136,7 +136,7 @@ fn flow_kind(m: decoder::Mnemonic, id: usize) -> FlowKind {
         | M::Bcs
         | M::Bvc
         | M::Bvs
-        | M::Loop => FlowKind::CondBranch,
+        | M::Loop => FlowKind::Branch,
         _ => FlowKind::None,
     }
 }
@@ -177,19 +177,20 @@ fn mnemonic_kind(m: decoder::Mnemonic, id: usize) -> TokenKind {
     }
 }
 
-pub fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
+pub fn disasm_view(snes: &Snes, base: u32, count: usize) -> Vec<DisasmLine> {
     let fx = &snes.superfx;
+    let bank = (base >> 16) as u8;
     let reader = Reader {
         snes,
-        bank: fx.pbr,
+        bank,
         modes: Cell::new((fx.sfr.alt1(), fx.sfr.alt2(), fx.sfr.with())),
     };
 
-    let mut addr = base;
+    let mut addr = base as u16;
     let mut lines = Vec::with_capacity(count);
 
     for _ in 0..count {
-        let op = self::bus_peek(snes, fx.pbr, addr);
+        let op = self::bus_peek(snes, bank, addr);
         let (m, id) = self::mnemonic(op, reader.modes.get());
 
         let (text, length) = decoder::disasm_ctx(addr as u64, &reader);
@@ -200,23 +201,26 @@ pub fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
         let flow = self::flow_kind(m, id);
         let target = match op {
             0x05..=0x0F => {
-                let disp = self::bus_peek(snes, fx.pbr, addr.wrapping_add(1)) as i8;
+                let disp = self::bus_peek(snes, bank, addr.wrapping_add(1)) as i8;
                 Some(addr.wrapping_add(2).wrapping_add_signed(disp as i16) as u32)
             }
             _ => None,
         };
-        let note = target.map_or(String::new(), |t| format!("→ {:02X}:{t:04X}", fx.pbr));
+
+        let note = target.map_or(String::new(), |t| format!("→ {:02X}:{t:04X}", bank));
 
         lines.push(
             DisasmLine::new(
-                addr as u32,
-                format!("{:02X}:{addr:04X}", fx.pbr),
-                self::read_bytes(snes, fx.pbr, addr, length),
+                Address::new(bank, addr).as_24bit(),
+                length,
+                format!("{:02X}:{addr:04X}", bank),
+                self::read_bytes(snes, bank, addr, length),
                 &*text,
                 tokens,
             )
-            .target(target)
+            .target(target.map(|target| (u32::from(bank) << 16) | target))
             .flow(flow)
+            .conditional(matches!(op, 0x06..=0x0F | 0x3C))
             .note(note),
         );
 
@@ -233,19 +237,21 @@ fn read_bytes(snes: &Snes, bank: u8, addr: u16, len: u8) -> String {
     })
 }
 
-pub fn fingerprint(snes: &Snes, base: u16, count: usize) -> u64 {
+pub fn fingerprint(snes: &Snes, base: u32, count: usize) -> u64 {
     use std::hash::{DefaultHasher, Hasher};
 
     let fx = &snes.superfx;
+    let bank = (base >> 16) as u8;
     let mut hasher = DefaultHasher::new();
-    hasher.write_u8(fx.pbr);
+    hasher.write_u8(bank);
     hasher.write_u16(fx.sfr.raw());
 
-    let mut addr = base;
+    let mut addr = base as u16;
     for _ in 0..count * 3 {
-        hasher.write_u8(self::bus_peek(snes, fx.pbr, addr));
+        hasher.write_u8(self::bus_peek(snes, bank, addr));
         addr = addr.wrapping_add(1);
     }
+
     hasher.finish()
 }
 
@@ -364,7 +370,7 @@ pub fn state_view(snes: &Snes) -> StructuredView {
         ],
     );
 
-    let next_op = self::disasm_view(snes, fx.pipeline_addr, 1)
+    let next_op = self::disasm_view(snes, Address::new(fx.pbr, fx.pipeline_addr).as_24bit(), 1)
         .into_iter()
         .next()
         .map(|line| line.text.to_string())
@@ -391,13 +397,11 @@ pub fn state_view(snes: &Snes) -> StructuredView {
             Row::BitHeader { bits: 8 },
             Row::BitGrid {
                 label: format!("1st ({}, {})", fx.pixel_primary.x, fx.pixel_primary.y).into(),
-                bits: 8,
-                on_mask: fx.pixel_primary.valid,
+                mask: fx.pixel_primary.valid.into(),
             },
             Row::BitGrid {
                 label: format!("2nd ({}, {})", fx.pixel_secondary.x, fx.pixel_secondary.y).into(),
-                bits: 8,
-                on_mask: fx.pixel_secondary.valid,
+                mask: fx.pixel_secondary.valid.into(),
             },
         ],
     );
@@ -461,61 +465,36 @@ pub fn cache_view(snes: &Snes) -> TableView {
     }
 }
 
-pub fn bitmap_tilemap(snes: &Snes) -> Option<Tilemap> {
-    let fx = &snes.superfx;
-    let screen = bitmap::Screen::at_last_stop(fx);
+pub fn bitmap_raster(snes: &Snes) -> RasterImage {
+    let screen = bitmap::Screen::at_last_stop(&snes.superfx);
     let (cols, rows) = screen.tile_grid();
-
-    let palette: Vec<(u8, u8, u8)> = (0..16)
+    let (width, height) = (cols * 8, rows * 8);
+    let palette: Vec<_> = (0..16)
         .flat_map(|p| snes.ppu.palette(p))
         .map(crate::ppu::cgram::rgb)
         .collect();
 
-    let mut entries = Vec::with_capacity((cols * rows) as usize);
-    for row in 0..rows {
-        for col in 0..cols {
-            let (x, y) = ((col * 8) as u8, (row * 8) as u8);
-            let mut pixels = Vec::with_capacity(64);
-            let mut addr = u32::MAX;
-
-            let mut planes = [(0u32, 0u8); 8];
-            for y_in in 0..8u8 {
-                let tile_row = screen.tile_row(x, y.wrapping_add(y_in));
-                let mut count = 0;
-                for p in tile_row.planes() {
-                    addr = addr.min(p.addr);
-                    planes[count] = (p.index, snes.mmu.cartridge.sram_read(p.addr as usize));
-                    count += 1;
-                }
-
-                for x_in in 0..8u8 {
-                    let bit = bitmap::pixel_bit(x_in);
-                    let mut index = 0u8;
-                    for (plane, byte) in &planes[..count] {
-                        index |= ((byte >> bit) & 1) << plane;
-                    }
-                    pixels.push(palette[index as usize]);
-                }
+    let mut pixels = Vec::with_capacity((width * height) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            let mut index = 0;
+            for plane in screen.tile_row(x as u8, y as u8).planes() {
+                let byte = snes.mmu.cartridge.sram_read(plane.addr as usize);
+                index |= ((byte >> bitmap::pixel_bit(x as u8)) & 1) << plane.index;
             }
 
-            entries.push(TilemapEntry {
-                addr,
-                raw: 0,
-                tile_index: (row * cols + col) as u16,
-                palette: 0,
-                priority: false,
-                flip_h: false,
-                flip_v: false,
-                pixels,
-            });
+            let (r, g, b) = palette[index as usize];
+            pixels.push([r, g, b, 255]);
         }
     }
 
-    Some(Tilemap {
-        width: cols as usize,
-        height: rows as usize,
-        tile_px: 8,
-        entries,
-        viewport: None,
-    })
+    RasterImage {
+        width,
+        height,
+        pixels: pixels.into(),
+        details: vec![
+            Field::new("Source", "Game Pak RAM"),
+            Field::new("Depth", format!("{}bpp", screen.bpp())),
+        ],
+    }
 }

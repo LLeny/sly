@@ -1,5 +1,7 @@
 mod api;
 mod host;
+mod lua;
+pub use lua::*;
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -143,7 +145,8 @@ impl ScriptEngine {
                 if !self.has_hook(id) {
                     continue;
                 }
-                let args = self.hit_args(core, hit);
+
+                let args = self.hit_args(hit);
                 if !self.call_hook(core, id, &args, None) {
                     self.rebuild_marks();
                     return fired;
@@ -217,18 +220,17 @@ impl ScriptEngine {
         self.rebuild_marks();
     }
 
-    fn hit_args(&self, core: &mut dyn DebugCore, hit: &HookHit) -> Vec<i64> {
+    fn hit_args(&self, hit: &HookHit) -> Vec<i64> {
         if hit.kind == BreakpointKind::Execute {
             return vec![hit.addr as i64, hit.pc as i64];
         }
 
-        let value = core
-            .read_memory(&hit.region, hit.addr, 1)
-            .first()
-            .copied()
-            .unwrap_or(0);
-
-        vec![hit.addr as i64, value as i64, hit.pc as i64]
+        vec![
+            hit.addr as i64,
+            hit.value as i64,
+            hit.pc as i64,
+            hit.width.bytes() as i64,
+        ]
     }
 
     fn has_hook(&self, id: u64) -> bool {

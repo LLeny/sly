@@ -196,7 +196,7 @@ pub(super) fn render_graph(
                     .font_family(theme.mono_font)
                     .text_xs()
                     .text_color(theme.code_address)
-                    .child(view.lines[block.start].address.clone()),
+                    .child(SharedString::from(view.lines[block.start].address.clone())),
             );
 
         let mut body = div().flex().flex_col().flex_1().justify_center();
@@ -205,7 +205,7 @@ pub(super) fn render_graph(
             let current = rows.is_current(ix);
             let selected = rows.is_selected(ix);
             let breakpoint = rows.breakpoint(ix);
-            let note = rows.note(ix, line).clone();
+            let note = SharedString::from(rows.note(ix, line));
 
             let mut gutter = div()
                 .w(px(graph::BLOCK_GUTTER_W))

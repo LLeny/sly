@@ -33,13 +33,12 @@ pub enum PanelKind {
     CallStack { cpu: Arc<str> },
     Memory,
     Mmio,
-    Dma,
     Framebuffer,
     Palette,
-    Ppu,
     Tileset,
     Tilemap,
     Sprites,
+    Raster,
     Structured,
     Table,
     ChannelScopes,
@@ -87,7 +86,7 @@ impl WorkspaceDescriptor {
 pub struct PanelPlacement {
     pub workspace: Arc<str>,
     pub location: DockLocation,
-    pub after: PanelKind,
+    pub after: Arc<str>,
 }
 
 #[derive(Clone, Debug)]
@@ -230,12 +229,22 @@ impl ComponentManifest {
             None => true,
         });
 
-        for (panel, anchor) in placed {
-            let ix = docked
+        let mut tails: std::collections::HashMap<Arc<str>, Arc<str>> =
+            std::collections::HashMap::new();
+        while !placed.is_empty() {
+            let Some(index) = placed
                 .iter()
-                .position(|p| p.kind == anchor)
-                .map_or(docked.len(), |ix| ix + 1);
-            docked.insert(ix, panel);
+                .position(|(_, anchor)| docked.iter().any(|p| p.id == *anchor))
+            else {
+                docked.extend(placed.into_iter().map(|(panel, _)| panel));
+                break;
+            };
+
+            let (panel, anchor) = placed.remove(index);
+            let after = tails.get(&anchor).unwrap_or(&anchor);
+            let index = docked.iter().position(|p| p.id == *after).unwrap() + 1;
+            tails.insert(anchor, panel.id.clone());
+            docked.insert(index, panel);
         }
 
         docked.into_iter()
@@ -248,13 +257,20 @@ impl ComponentManifest {
             .map(|c| c.host.as_ref())
     }
 
-    pub fn insert_after(&mut self, anchor: PanelKind, panel: PanelDescriptor) {
+    pub fn insert_after(
+        &mut self,
+        anchor: &str,
+        panel: PanelDescriptor,
+    ) -> Result<(), ManifestError> {
         let ix = self
             .panels
             .iter()
-            .position(|p| p.kind == anchor)
-            .map_or(self.panels.len(), |ix| ix + 1);
+            .position(|p| p.id.as_ref() == anchor)
+            .ok_or_else(|| ManifestError::new(format!("unknown panel anchor `{anchor}`")))?
+            + 1;
+
         self.panels.insert(ix, panel);
+        Ok(())
     }
 
     pub fn compose_in(
@@ -268,87 +284,132 @@ impl ComponentManifest {
             .push(PanelComposition::new(workspace, host, companion, layout));
     }
 
-    /// Tag the panel with the given id for a workspace, if not already tagged.
-    pub fn tag(&mut self, id: &str, workspace: impl Into<Arc<str>>) {
-        if let Some(panel) = self.panels.iter_mut().find(|p| &*p.id == id) {
-            let workspace = workspace.into();
-            if !panel.workspaces.contains(&workspace) {
-                panel.workspaces.push(workspace);
-            }
+    fn panel_mut(&mut self, id: &str) -> Result<&mut PanelDescriptor, ManifestError> {
+        self.panels
+            .iter_mut()
+            .find(|p| p.id.as_ref() == id)
+            .ok_or_else(|| ManifestError::new(format!("unknown panel `{id}`")))
+    }
+
+    pub fn tag(&mut self, id: &str, workspace: impl Into<Arc<str>>) -> Result<(), ManifestError> {
+        let panel = self.panel_mut(id)?;
+        let workspace = workspace.into();
+        if !panel.workspaces.contains(&workspace) {
+            panel.workspaces.push(workspace);
         }
+
+        Ok(())
     }
 
-    pub fn untag(&mut self, id: &str, workspace: &str) {
-        let Some(panel) = self.panels.iter_mut().find(|p| &*p.id == id) else {
-            return;
-        };
+    pub fn untag(&mut self, id: &str, workspace: &str) -> Result<(), ManifestError> {
+        self.panel_mut(id)?
+            .workspaces
+            .retain(|w| w.as_ref() != workspace);
+        self.compositions.retain(|c| {
+            c.workspace.as_ref() != workspace
+                || (c.host.as_ref() != id && c.companion.as_ref() != id)
+        });
 
-        panel.workspaces.retain(|w| &**w != workspace);
-        self.compositions
-            .retain(|c| &*c.workspace != workspace || (&*c.host != id && &*c.companion != id));
+        Ok(())
     }
 
-    /// Move the panel with the given id to `location`, re-inserting it right
-    /// after the first panel of `anchor` kind (or at the end if absent).
-    pub fn relocate_after(&mut self, id: &str, anchor: PanelKind, location: DockLocation) {
-        let Some(pos) = self.panels.iter().position(|p| &*p.id == id) else {
-            return;
-        };
+    fn check_anchor(&self, id: &str, anchor: &str) -> Result<(), ManifestError> {
+        if id == anchor || !self.panels.iter().any(|p| p.id.as_ref() == anchor) {
+            return Err(ManifestError::new(format!(
+                "invalid panel anchor `{anchor}`"
+            )));
+        }
+
+        Ok(())
+    }
+
+    pub fn relocate_after(
+        &mut self,
+        id: &str,
+        anchor: &str,
+        location: DockLocation,
+    ) -> Result<(), ManifestError> {
+        self.check_anchor(id, anchor)?;
+        let pos = self
+            .panels
+            .iter()
+            .position(|p| &*p.id == id)
+            .ok_or_else(|| ManifestError::new(format!("unknown panel `{id}`")))?;
 
         let mut panel = self.panels.remove(pos);
         panel.location = location;
-        self.insert_after(anchor, panel);
+        self.insert_after(anchor, panel)
     }
 
-    /// Dock the panel with the given id somewhere else in one workspace only,
-    /// under the first panel of `anchor` kind in that dock.
+    /// Like `relocate_after`, but only in one workspace.
     pub fn place_after(
         &mut self,
         id: &str,
         workspace: impl Into<Arc<str>>,
-        anchor: PanelKind,
+        anchor: &str,
         location: DockLocation,
-    ) {
-        if let Some(panel) = self.panels.iter_mut().find(|p| &*p.id == id) {
-            panel.placements.push(PanelPlacement {
-                workspace: workspace.into(),
-                location,
-                after: anchor,
-            });
-        }
+    ) -> Result<(), ManifestError> {
+        self.check_anchor(id, anchor)?;
+        self.panel_mut(id)?.placements.push(PanelPlacement {
+            workspace: workspace.into(),
+            location,
+            after: anchor.into(),
+        });
+
+        Ok(())
     }
 
-    pub fn restrict(&mut self, kind: PanelKind, workspace: impl Into<Arc<str>>) {
-        if let Some(panel) = self.panels.iter_mut().find(|p| p.kind == kind) {
-            debug_assert!(
-                panel.workspaces.is_empty(),
-                "restrict() on already-tagged panel `{}`",
-                panel.id,
-            );
-            panel.workspaces.push(workspace.into());
-        }
+    pub fn restrict(
+        &mut self,
+        id: &str,
+        workspace: impl Into<Arc<str>>,
+    ) -> Result<(), ManifestError> {
+        let panel = self.panel_mut(id)?;
+        panel.workspaces.clear();
+        panel.workspaces.push(workspace.into());
+        Ok(())
     }
 
-    pub fn workspace_last(&mut self, id: &str) {
-        if let Some(ix) = self.workspaces.iter().position(|w| &*w.id == id) {
-            let workspace = self.workspaces.remove(ix);
-            self.workspaces.push(workspace);
-        }
+    pub fn workspace_last(&mut self, id: &str) -> Result<(), ManifestError> {
+        let index = self
+            .workspaces
+            .iter()
+            .position(|w| w.id.as_ref() == id)
+            .ok_or_else(|| ManifestError::new(format!("unknown workspace `{id}`")))?;
+
+        let workspace = self.workspaces.remove(index);
+        self.workspaces.push(workspace);
+        Ok(())
     }
 
-    pub fn remove(&mut self, id: &str) {
+    pub fn remove(&mut self, id: &str) -> Result<(), ManifestError> {
+        self.panel_mut(id)?;
         self.panels.retain(|p| &*p.id != id);
         self.compositions
             .retain(|c| &*c.host != id && &*c.companion != id);
+        for panel in &mut self.panels {
+            panel.placements.retain(|p| p.after.as_ref() != id);
+            if panel.selection_from.as_deref() == Some(id) {
+                panel.selection_from = None;
+            }
+        }
+
+        Ok(())
     }
 
-    pub fn insert_before(&mut self, anchor: PanelKind, panel: PanelDescriptor) {
+    pub fn insert_before(
+        &mut self,
+        anchor: &str,
+        panel: PanelDescriptor,
+    ) -> Result<(), ManifestError> {
         let ix = self
             .panels
             .iter()
-            .position(|p| p.kind == anchor)
-            .unwrap_or(self.panels.len());
+            .position(|p| p.id.as_ref() == anchor)
+            .ok_or_else(|| ManifestError::new(format!("unknown panel anchor `{anchor}`")))?;
+
         self.panels.insert(ix, panel);
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<(), ManifestError> {
@@ -380,7 +441,15 @@ impl ComponentManifest {
                 }
             }
 
+            let mut placement_workspaces = HashSet::new();
             for placement in &panel.placements {
+                if !placement_workspaces.insert(placement.workspace.as_ref()) {
+                    return Err(ManifestError::new(format!(
+                        "duplicate placement for `{}`",
+                        panel.id
+                    )));
+                }
+
                 let workspace = placement.workspace.as_ref();
                 if !workspace_ids.contains(workspace) {
                     return Err(ManifestError::new(format!(
@@ -396,13 +465,61 @@ impl ComponentManifest {
                 }
             }
 
-            if let Some(link) = &panel.selection_from
-                && !self.panels.iter().any(|p| p.id == *link)
-            {
-                return Err(ManifestError::new(format!(
-                    "panel `{}` links to unknown panel `{link}`",
-                    panel.id
-                )));
+            if let Some(link) = &panel.selection_from {
+                let provider = self.panels.iter().find(|p| p.id == *link).ok_or_else(|| {
+                    ManifestError::new(format!(
+                        "panel `{}` links to unknown panel `{link}`",
+                        panel.id
+                    ))
+                })?;
+
+                if !matches!(
+                    provider.kind,
+                    PanelKind::Table
+                        | PanelKind::Tileset
+                        | PanelKind::Tilemap
+                        | PanelKind::Sprites
+                        | PanelKind::Raster
+                ) {
+                    return Err(ManifestError::new(format!(
+                        "panel `{link}` cannot provide selection"
+                    )));
+                }
+            }
+
+            for placement in &panel.placements {
+                let anchor = self
+                    .panels
+                    .iter()
+                    .find(|p| p.id == placement.after)
+                    .ok_or_else(|| {
+                        ManifestError::new(format!(
+                            "unknown placement anchor `{}`",
+                            placement.after
+                        ))
+                    })?;
+
+                if anchor.id == panel.id
+                    || !anchor.visible_in(&placement.workspace)
+                    || anchor.location_in(&placement.workspace) != placement.location
+                {
+                    return Err(ManifestError::new(format!(
+                        "invalid placement anchor `{}` for `{}`",
+                        anchor.id, panel.id
+                    )));
+                }
+
+                let mut visited = HashSet::from([panel.id.as_ref()]);
+                let mut next = Some(anchor);
+                while let Some(current) = next {
+                    if !visited.insert(current.id.as_ref()) {
+                        return Err(ManifestError::new("cyclic panel placements"));
+                    }
+
+                    next = current
+                        .placement_in(&placement.workspace)
+                        .and_then(|p| self.panels.iter().find(|candidate| candidate.id == p.after));
+                }
             }
         }
 

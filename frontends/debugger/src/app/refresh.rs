@@ -13,15 +13,28 @@ impl Debugger {
         pane.call_stack = Arc::new(target.call_stack(&pane.id).into());
     }
 
-    pub(super) fn selected_color(&self) -> usize {
-        self.palette_selected.map_or(0, |(palette, color)| {
-            let row = self
-                .palette_view
-                .palettes
-                .get(palette)
-                .map_or(16, |row| row.len());
-            palette * row + color
+    fn selected_palette(&self) -> Option<PaletteSelection> {
+        let (bank, color) = self.palette_selected?;
+        Some(PaletteSelection {
+            resource: self.palette_ui.resource.clone()?,
+            color: self.palette_view.color_index(bank, color)?,
         })
+    }
+
+    pub(super) fn resources_of(&self, kind: VideoResourceKind) -> Vec<VideoResource> {
+        self.video_resources
+            .iter()
+            .filter(|r| r.kind == kind)
+            .cloned()
+            .collect()
+    }
+
+    fn video_key(
+        &self,
+        resource: Option<&VideoResourceId>,
+        palette: Option<PaletteSelection>,
+    ) -> Option<VideoCacheKey> {
+        VideoCacheKey::read(self.target.video()?, resource?, palette)
     }
 
     pub(super) fn invalidate_video_keys(&mut self) {
@@ -30,6 +43,7 @@ impl Debugger {
         self.tilemap_key = None;
         self.tilemap_overlay_key = None;
         self.sprites_key = None;
+        self.raster_key = None;
     }
 
     pub(super) fn drop_grid_image(cx: &mut Context<Self>, image: Option<Arc<RenderImage>>) {
@@ -38,89 +52,126 @@ impl Debugger {
         }
     }
 
-    pub(super) fn refresh_tileset(&mut self, cx: &mut Context<Self>) {
-        self.refresh_tileset_keyed(self.target.video_generations(), cx);
+    pub(super) fn refresh_palette(&mut self) {
+        let key = self.video_key(self.palette_ui.resource.as_ref(), None);
+        if key.is_some() && key == self.palette_key {
+            return;
+        }
+
+        self.palette_key = key;
+        self.palette_view = Arc::new(
+            self.target
+                .video()
+                .and_then(|v| v.palette(self.palette_ui.resource.as_ref()?))
+                .unwrap_or_default(),
+        );
+
+        if self
+            .palette_selected
+            .is_some_and(|(p, c)| self.palette_view.color_index(p, c).is_none())
+        {
+            self.palette_selected = None;
+        }
     }
 
-    pub(super) fn refresh_tileset_keyed(
-        &mut self,
-        gens: Option<VideoGenerations>,
-        cx: &mut Context<Self>,
-    ) {
-        let key = gens.map(|g| (g.tileset, self.tileset_ui.layer, self.selected_color()));
+    pub(super) fn refresh_tileset(&mut self, cx: &mut Context<Self>) {
+        let palette = self.selected_palette();
+        let key = self.video_key(self.tileset_ui.resource.as_ref(), palette.clone());
         if key.is_some() && key == self.tileset_key && self.tileset.is_some() {
             return;
         }
-        self.tileset_key = key;
 
-        Self::drop_grid_image(cx, self.tileset.take().and_then(|view| view.image));
+        self.tileset_key = key;
+        Self::drop_grid_image(cx, self.tileset.take().and_then(|v| v.image));
         self.tileset = self
             .target
-            .tileset(self.tileset_ui.layer, self.selected_color())
+            .video()
+            .and_then(|v| v.tileset(self.tileset_ui.resource.as_ref()?, palette.as_ref()))
             .map(Into::into);
     }
 
     pub(super) fn refresh_tilemap(&mut self, cx: &mut Context<Self>) {
-        self.refresh_tilemap_keyed(self.target.video_generations(), cx);
-    }
+        let overlay_key = self.video_key(self.tilemap_ui.resource.as_ref(), None);
+        let key = overlay_key.clone().map(|mut key| {
+            key.revision.overlay = 0;
+            key
+        });
 
-    pub(super) fn refresh_tilemap_keyed(
-        &mut self,
-        gens: Option<VideoGenerations>,
-        cx: &mut Context<Self>,
-    ) {
-        let key = gens.map(|g| (g.tilemap, self.tilemap_ui.layer));
-        let overlay_key = gens.map(|g| (g.tilemap_overlay, self.tilemap_ui.layer));
         if key.is_some() && key == self.tilemap_key && self.tilemap.is_some() {
-            self.refresh_tilemap_overlay_keyed(gens);
+            self.apply_tilemap_overlay(overlay_key);
             return;
         }
-        self.tilemap_key = key;
-        self.tilemap_overlay_key = overlay_key;
 
-        Self::drop_grid_image(cx, self.tilemap.take().and_then(|view| view.image));
-        self.tilemap = self.target.tilemap(self.tilemap_ui.layer).map(Into::into);
-        if let Some(view) = &mut self.tilemap {
-            view.set_overlays(self.target.tilemap_overlays(self.tilemap_ui.layer));
-        }
+        self.tilemap_key = key;
+        Self::drop_grid_image(cx, self.tilemap.take().and_then(|v| v.image));
+        self.tilemap = self
+            .target
+            .video()
+            .and_then(|v| v.tilemap(self.tilemap_ui.resource.as_ref()?))
+            .map(Into::into);
+
+        self.tilemap_overlay_key = None;
+        self.apply_tilemap_overlay(overlay_key);
     }
 
-    fn refresh_tilemap_overlay_keyed(&mut self, gens: Option<VideoGenerations>) {
-        let key = gens.map(|g| (g.tilemap_overlay, self.tilemap_ui.layer));
-        let viewport = self.target.tilemap_viewport(self.tilemap_ui.layer);
-        let overlays = (key != self.tilemap_overlay_key)
-            .then(|| self.target.tilemap_overlays(self.tilemap_ui.layer));
+    fn refresh_tilemap_overlay(&mut self) {
+        let key = self.video_key(self.tilemap_ui.resource.as_ref(), None);
+        self.apply_tilemap_overlay(key);
+    }
+
+    fn apply_tilemap_overlay(&mut self, key: Option<VideoCacheKey>) {
+        let Some(video) = self.target.video() else {
+            return;
+        };
+
+        let Some(resource) = self.tilemap_ui.resource.as_ref() else {
+            return;
+        };
 
         if let Some(view) = &mut self.tilemap {
-            view.viewport = viewport.map(Into::into);
-            if let Some(overlays) = overlays {
-                view.set_overlays(overlays);
+            let viewport = video.tilemap_viewport(resource);
+            view.viewport = viewport.filter(|v| v.transform.is_none()).map(Into::into);
+            view.footprint = viewport.filter(|v| v.transform.is_some());
+            if key.is_none() || key != self.tilemap_overlay_key {
+                view.set_overlays(video.tilemap_overlays(resource));
             }
         }
+
         self.tilemap_overlay_key = key;
     }
 
     pub(super) fn refresh_sprites(&mut self, cx: &mut Context<Self>) {
-        self.refresh_sprites_keyed(self.target.video_generations(), cx);
-    }
-
-    pub(super) fn refresh_sprites_keyed(
-        &mut self,
-        gens: Option<VideoGenerations>,
-        cx: &mut Context<Self>,
-    ) {
         if self.is_collapsed(SpritesWidget::ID) {
             return;
         }
 
-        let key = gens.map(|g| g.sprites);
+        let key = self.video_key(self.sprites_ui.resource.as_ref(), None);
         if key.is_some() && key == self.sprites_key && self.sprites.is_some() {
             return;
         }
-        self.sprites_key = key;
 
-        Self::drop_grid_image(cx, self.sprites.take().and_then(|view| view.image));
-        self.sprites = self.target.sprites().map(Into::into);
+        self.sprites_key = key;
+        Self::drop_grid_image(cx, self.sprites.take().and_then(|v| v.image));
+        self.sprites = self
+            .target
+            .video()
+            .and_then(|v| v.sprites(self.sprites_ui.resource.as_ref()?))
+            .map(Into::into);
+    }
+
+    pub(super) fn refresh_raster(&mut self, cx: &mut Context<Self>) {
+        let key = self.video_key(self.raster_ui.resource.as_ref(), None);
+        if key.is_some() && key == self.raster_key && self.raster.is_some() {
+            return;
+        }
+
+        self.raster_key = key;
+        Self::drop_grid_image(cx, self.raster.take().and_then(|v| v.image));
+        self.raster = self
+            .target
+            .video()
+            .and_then(|v| v.raster(self.raster_ui.resource.as_ref()?))
+            .map(Into::into);
     }
 
     pub(super) fn refresh_framebuffer(&mut self, cx: &mut Context<Self>) {
@@ -174,10 +225,6 @@ impl Debugger {
             self.mmio_view = Arc::new(self.target.mmio_view().into());
         }
 
-        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Dma)) {
-            self.dma_view = Arc::new(self.target.dma_view().into());
-        }
-
         if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Framebuffer)) {
             self.refresh_framebuffer(cx);
         }
@@ -200,57 +247,42 @@ impl Debugger {
     }
 
     pub(super) fn refresh_video_panes(&mut self, live: bool, cx: &mut Context<Self>) {
-        let wants_palette = self.wants_refresh(live, |kind| matches!(kind, PanelKind::Palette));
-        let wants_tileset = self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tileset));
-        let wants_tilemap = self.wants_refresh(live, |kind| matches!(kind, PanelKind::Tilemap));
-        let wants_sprites = self.wants_refresh(live, |kind| matches!(kind, PanelKind::Sprites));
-        let live_window_overlay = live
-            && self.tilemap_ui.show_window_overlays
-            && !self.is_collapsed(TilemapWidget::ID)
-            && self
-                .registry
-                .manifest()
-                .in_workspace(&self.workspace)
-                .any(|panel| matches!(panel.kind, PanelKind::Tilemap));
+        self.video_resources = self
+            .target
+            .video()
+            .map(|v| v.resources())
+            .unwrap_or_default();
 
-        let gens = (wants_palette
-            || wants_tileset
-            || wants_tilemap
-            || wants_sprites
-            || live_window_overlay)
-            .then(|| self.target.video_generations())
-            .flatten();
-
-        if wants_palette {
-            let key = gens.map(|g| g.palette);
-            if key.is_none() || key != self.palette_key {
-                self.palette_key = key;
-                self.palette_view = Arc::new(self.target.palette_view().into());
-            }
+        self.palette_ui
+            .sync(&self.video_resources, VideoResourceKind::Palette);
+        self.tileset_ui
+            .sync(&self.video_resources, VideoResourceKind::Tileset);
+        self.tilemap_ui
+            .sync(&self.video_resources, VideoResourceKind::Tilemap);
+        self.sprites_ui
+            .sync(&self.video_resources, VideoResourceKind::Sprites);
+        self.raster_ui
+            .sync(&self.video_resources, VideoResourceKind::Raster);
+        if self.wants_refresh(live, |k| matches!(k, PanelKind::Palette)) {
+            self.refresh_palette();
         }
 
-        if self.wants_refresh(live, |kind| matches!(kind, PanelKind::Ppu)) {
-            self.ppu_view = Arc::new(self.target.ppu_view().into());
+        if self.wants_refresh(live, |k| matches!(k, PanelKind::Tileset)) {
+            self.refresh_tileset(cx);
         }
 
-        if wants_tileset {
-            self.tileset_layers = self
-                .target
-                .tileset_layers()
-                .into_iter()
-                .map(Into::into)
-                .collect();
-            self.refresh_tileset_keyed(gens, cx);
+        if self.wants_refresh(live, |k| matches!(k, PanelKind::Tilemap)) {
+            self.refresh_tilemap(cx);
+        } else if live && self.tilemap_ui.show_window_overlays && self.tilemap.is_some() {
+            self.refresh_tilemap_overlay();
         }
 
-        if wants_tilemap {
-            self.refresh_tilemap_keyed(gens, cx);
-        } else if live_window_overlay {
-            self.refresh_tilemap_overlay_keyed(gens);
+        if self.wants_refresh(live, |k| matches!(k, PanelKind::Sprites)) {
+            self.refresh_sprites(cx);
         }
 
-        if wants_sprites {
-            self.refresh_sprites_keyed(gens, cx);
+        if self.wants_refresh(live, |k| matches!(k, PanelKind::Raster)) {
+            self.refresh_raster(cx);
         }
     }
 
@@ -288,7 +320,8 @@ impl Debugger {
                     let selection = panel
                         .selection_from
                         .as_ref()
-                        .map(|table| self.table_selected(table.as_ref()));
+                        .and_then(|source| self.panel_selection(source.as_ref()));
+
                     refresh.structured.push((id, selection));
                 }
                 PanelKind::ChannelScopes => refresh.scopes.push(id),
@@ -299,15 +332,29 @@ impl Debugger {
         refresh
     }
 
+    fn panel_selection(&self, id: &str) -> Option<usize> {
+        match id {
+            TilesetWidget::ID => self.tileset_ui.selected(),
+            TilemapWidget::ID => self.tilemap_ui.selected(),
+            SpritesWidget::ID => self.sprites_ui.selected(),
+            RasterWidget::ID => self.raster_ui.selected(),
+            _ => self.table_selection.get(id).copied().or(Some(0)),
+        }
+    }
+
     pub(super) fn table_selected(&self, id: &str) -> usize {
         self.table_selection.get(id).copied().unwrap_or(0)
     }
 
-    pub(super) fn push_scope(buffer: &mut Vec<f32>, samples: &[i16]) {
+    pub(super) fn push_scope(buffer: &mut Vec<f32>, samples: &[i16], channels: u8) {
         const SCOPE_LEN: usize = 512;
 
-        for pair in samples.chunks_exact(2) {
-            let mono = (pair[0] as f32 + pair[1] as f32) * 0.5 / 32768.0;
+        if channels == 0 {
+            return;
+        }
+
+        for frame in samples.chunks_exact(channels as usize) {
+            let mono = frame.iter().map(|&s| s as f32).sum::<f32>() / channels as f32 / 32768.0;
             buffer.push(mono);
         }
 
@@ -364,7 +411,8 @@ impl Debugger {
 
         if !self.collapsed.contains(&id) {
             self.refresh_framebuffer(cx);
-            self.refresh_sprites(cx);
+            self.refresh_video_panes(false, cx);
+            self.refresh_generic_panels(false);
         }
 
         cx.notify();
@@ -376,11 +424,11 @@ impl Debugger {
 
     pub(super) fn toggle_expanded(
         &mut self,
-        widget: &'static str,
+        widget: impl Into<SharedString>,
         id: SharedString,
         cx: &mut Context<Self>,
     ) {
-        Self::toggle_in(self.expanded.entry(widget).or_default(), id);
+        Self::toggle_in(self.expanded.entry(widget.into()).or_default(), id);
         cx.notify();
     }
 
@@ -424,13 +472,15 @@ impl Debugger {
         panel: GridPanel,
         id: &'static str,
         state: &GridState,
+        resources: Vec<VideoResource>,
         ui: fn(&mut Self) -> &mut GridState,
         refresh: fn(&mut Self, &mut Context<Self>),
         cx: &mut Context<Self>,
     ) -> GridPanel {
         let this = cx.entity();
         panel
-            .layer(state.layer)
+            .layer(state.index(&resources))
+            .layers(resources.clone())
             .selected(state.selected())
             .hovered(state.hovered)
             .viewport(state.viewport)
@@ -441,8 +491,10 @@ impl Debugger {
                 let this = this.clone();
                 move |layer, _, cx| {
                     this.update(cx, |d, cx| {
-                        ui(d).layer = layer;
+                        ui(d).resource = resources.get(layer).map(|r| r.id.clone());
+                        ui(d).hovered = None;
                         refresh(d, cx);
+                        d.refresh_generic_panels(false);
                         cx.notify();
                     })
                 }
@@ -452,6 +504,7 @@ impl Debugger {
                 move |index, _, cx| {
                     this.update(cx, |d, cx| {
                         ui(d).toggle_selected(index);
+                        d.refresh_generic_panels(false);
                         cx.notify();
                     })
                 }

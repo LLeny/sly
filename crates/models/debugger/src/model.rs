@@ -30,7 +30,6 @@ pub enum TokenKind {
 pub enum FlowKind {
     #[default]
     None,
-    CondBranch,
     Branch,
     Jump,
     Call,
@@ -52,9 +51,11 @@ impl DisasmToken {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct DisasmLine {
     pub addr: u32,
+    pub length: u8,
+    pub conditional: bool,
     pub address: Arc<str>,
     pub bytes: Arc<str>,
     pub text: Arc<str>,
@@ -68,6 +69,7 @@ pub struct DisasmLine {
 impl DisasmLine {
     pub fn new(
         addr: u32,
+        length: u8,
         address: impl Into<Arc<str>>,
         bytes: impl Into<Arc<str>>,
         text: impl Into<Arc<str>>,
@@ -75,6 +77,8 @@ impl DisasmLine {
     ) -> Self {
         Self {
             addr,
+            length,
+            conditional: false,
             address: address.into(),
             bytes: bytes.into(),
             text: text.into(),
@@ -83,6 +87,15 @@ impl DisasmLine {
             target: None,
             flow: FlowKind::None,
         }
+    }
+
+    pub fn conditional(mut self, conditional: bool) -> Self {
+        self.conditional = conditional;
+        self
+    }
+
+    pub fn has_fallthrough(&self) -> bool {
+        self.conditional || matches!(self.flow, FlowKind::None | FlowKind::Call)
     }
 
     pub fn target(mut self, target: Option<u32>) -> Self {
@@ -188,12 +201,10 @@ impl Field {
     }
 }
 
-pub type CartridgeField = Field;
-
 #[derive(Clone)]
 pub struct CartridgeView {
     pub title: Arc<str>,
-    pub fields: Vec<CartridgeField>,
+    pub details: StructuredView,
     pub cover: Option<Arc<str>>,
 }
 
@@ -227,182 +238,6 @@ pub struct MmioGroup {
 #[derive(Clone, Default)]
 pub struct MmioView {
     pub groups: Vec<MmioGroup>,
-}
-
-#[derive(Clone)]
-pub struct DmaChannelDetail {
-    pub label: Arc<str>,
-    pub value: Arc<str>,
-}
-
-impl DmaChannelDetail {
-    pub fn new(label: impl Into<Arc<str>>, value: impl Into<Arc<str>>) -> Self {
-        Self {
-            label: label.into(),
-            value: value.into(),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct DmaChannelView {
-    pub id: Arc<str>,
-    pub name: Arc<str>,
-    pub dma_enabled: bool,
-    pub hdma_enabled: bool,
-    pub source: Arc<str>,
-    pub dest: Arc<str>,
-    pub count: Arc<str>,
-    pub details: Vec<DmaChannelDetail>,
-}
-
-#[derive(Clone, Default)]
-pub struct DmaView {
-    pub channels: Vec<DmaChannelView>,
-}
-
-pub type PpuProperty = Field;
-
-#[derive(Clone)]
-pub struct PpuGroup {
-    pub id: Arc<str>,
-    pub name: Arc<str>,
-    pub summary: Arc<str>,
-    pub properties: Vec<PpuProperty>,
-}
-
-impl PpuGroup {
-    pub fn new(
-        id: impl Into<Arc<str>>,
-        name: impl Into<Arc<str>>,
-        properties: Vec<PpuProperty>,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            name: name.into(),
-            summary: Arc::from(""),
-            properties,
-        }
-    }
-
-    pub fn summary(mut self, summary: impl Into<Arc<str>>) -> Self {
-        self.summary = summary.into();
-        self
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct PpuView {
-    pub properties: Vec<PpuProperty>,
-    pub groups: Vec<PpuGroup>,
-}
-
-#[derive(Clone)]
-pub struct TilesetTile {
-    pub addr: u32,
-    pub pixels: Vec<(u8, u8, u8)>,
-}
-
-#[derive(Clone)]
-pub struct Tileset {
-    pub bpp: u8,
-    pub tile_bytes: u32,
-    pub tiles: Vec<TilesetTile>,
-}
-
-#[derive(Clone)]
-pub struct TilesetLayer {
-    pub name: Arc<str>,
-    pub enabled: bool,
-}
-
-#[derive(Clone)]
-pub struct TilemapEntry {
-    pub addr: u32,
-    pub raw: u16,
-    pub tile_index: u16,
-    pub palette: u8,
-    pub priority: bool,
-    pub flip_h: bool,
-    pub flip_v: bool,
-    pub pixels: Vec<(u8, u8, u8)>,
-}
-
-#[derive(Clone, Copy)]
-pub struct TilemapViewport {
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
-}
-
-#[derive(Clone)]
-pub struct TilemapOverlayBand {
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
-    pub inverted: bool,
-    pub active: bool,
-}
-
-#[derive(Clone)]
-pub struct TilemapOverlay {
-    pub label: Arc<str>,
-    pub slot: usize,
-    pub bands: Vec<TilemapOverlayBand>,
-}
-
-#[derive(Clone)]
-pub struct Tilemap {
-    pub width: usize,
-    pub height: usize,
-    pub tile_px: u8,
-    pub entries: Vec<TilemapEntry>,
-    pub viewport: Option<TilemapViewport>,
-}
-
-#[derive(Clone)]
-pub struct SpriteEntry {
-    pub x: i32,
-    pub y: u8,
-    pub width: u32,
-    pub height: u32,
-    pub tile: u16,
-    pub tile_addr: u32,
-    pub palette: u8,
-    pub priority: u8,
-    pub flip_h: bool,
-    pub flip_v: bool,
-    pub pixels: Vec<(u8, u8, u8)>,
-}
-
-#[derive(Clone)]
-pub struct Sprites {
-    pub small: (u32, u32),
-    pub large: (u32, u32),
-    pub entries: Vec<SpriteEntry>,
-}
-
-#[derive(Clone, Copy)]
-pub struct PaletteColor {
-    pub raw: u16,
-    pub rgb: (u8, u8, u8),
-}
-
-#[derive(Clone, Default)]
-pub struct PaletteView {
-    pub palettes: Vec<Vec<PaletteColor>>,
-    pub meta: Arc<str>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-pub struct VideoGenerations {
-    pub palette: u64,
-    pub tileset: u64,
-    pub tilemap: u64,
-    pub tilemap_overlay: u64,
-    pub sprites: u64,
 }
 
 #[derive(Clone, Default)]
@@ -445,9 +280,49 @@ pub struct Section {
     pub rows: Vec<Row>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BitMask {
+    bits: u8,
+    value: u32,
+}
+
+impl BitMask {
+    pub const fn new(bits: u8, value: u32) -> Option<Self> {
+        if bits == 0 || bits > 32 || (bits < 32 && value >> bits != 0) {
+            None
+        } else {
+            Some(Self { bits, value })
+        }
+    }
+
+    pub const fn bits(self) -> u8 {
+        self.bits
+    }
+
+    pub const fn is_set(self, bit: u8) -> bool {
+        bit < self.bits && self.value & (1u32 << bit) != 0
+    }
+}
+
+impl From<u8> for BitMask {
+    fn from(value: u8) -> Self {
+        Self {
+            bits: 8,
+            value: value.into(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum Row {
     Field(Field),
+    Group {
+        id: Arc<str>,
+        title: Arc<str>,
+        summary: Arc<str>,
+        active: bool,
+        rows: Vec<Row>,
+    },
     Flags {
         flags: Vec<FlagView>,
         note: Option<(Arc<str>, Tone)>,
@@ -457,8 +332,7 @@ pub enum Row {
     },
     BitGrid {
         label: Arc<str>,
-        bits: u8,
-        on_mask: u8,
+        mask: BitMask,
     },
     Meter {
         label: Arc<str>,
@@ -513,15 +387,35 @@ pub struct MemoryRegion {
     pub name: Arc<str>,
     pub base: u32,
     pub size: u32,
+    /// Empty means data watchpoints aren't supported here.
+    pub watch_sources: Vec<crate::AccessSource>,
 }
 
 impl MemoryRegion {
+    pub fn watch_sources(mut self, sources: Vec<crate::AccessSource>) -> Self {
+        self.watch_sources = sources;
+        self
+    }
+
+    pub fn end(&self) -> u64 {
+        (u64::from(self.base) + u64::from(self.size)).min(1_u64 << 32)
+    }
+
+    pub fn addresses(&self) -> impl Iterator<Item = u32> + '_ {
+        (u64::from(self.base)..self.end()).map(|addr| addr as u32)
+    }
+
+    pub fn contains(&self, addr: u32) -> bool {
+        u64::from(addr) >= u64::from(self.base) && u64::from(addr) < self.end()
+    }
+
     pub fn new(id: impl Into<Arc<str>>, name: impl Into<Arc<str>>, base: u32, size: u32) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
             base,
             size,
+            watch_sources: Vec::new(),
         }
     }
 }

@@ -135,7 +135,7 @@ impl Snes {
 
 impl<M: MemoryMap> Snes<M> {
     pub fn with_mmu(mmu: Mmio<M>) -> Self {
-        let tv_system = mmu.cartridge.region().tv_system();
+        let tv_system = cartridge::tv_system(mmu.cartridge.region());
         let mut snes = Self {
             cpu: Cpu::new(0),
             bus: Bus {
@@ -159,7 +159,7 @@ impl<M: MemoryMap> Snes<M> {
         const RESET_VECTOR_ADDR: u16 = 0xFFFC;
         const BANK_ZERO: u8 = 0x00;
 
-        let tv_system = self.mmu.cartridge.region().tv_system();
+        let tv_system = cartridge::tv_system(self.mmu.cartridge.region());
 
         self.cpu = Cpu::new(0);
         self.irq = Irq::default();
@@ -290,6 +290,16 @@ impl<M: MemoryMap> core_model::Core for Snes<M> {
         self.joypads.set_button(player, button, pressed);
     }
 
+    fn controllers(&self) -> Vec<core_model::ControllerDescriptor> {
+        (0..2)
+            .map(|port| core_model::ControllerDescriptor {
+                port,
+                name: format!("Controller {}", port + 1).into(),
+                buttons: core_model::Button::CLASSIC.to_vec(),
+            })
+            .collect()
+    }
+
     fn session_info(&self) -> core_model::SessionInfo {
         core_model::SessionInfo {
             system: "SNES".into(),
@@ -299,6 +309,10 @@ impl<M: MemoryMap> core_model::Core for Snes<M> {
                 format!("{} KB", self.mmu.cartridge.rom.len() / 1024).into(),
             ],
         }
+    }
+
+    fn cartridge_info(&self) -> Option<core_model::CartridgeInfo> {
+        Some(self.mmu.cartridge.info())
     }
 
     fn software_frame(&self) -> Option<core_model::SoftwareFrame<'_>> {

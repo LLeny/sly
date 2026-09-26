@@ -60,7 +60,7 @@ pub struct BreakpointsWidget {
 }
 
 impl BreakpointsWidget {
-    pub const ID: &'static str = "breakpoints";
+    pub const ID: &'static str = debugger_model::panel::BREAKPOINTS;
 
     pub fn new(view: BreakpointsView, draft_kind: BreakpointKind) -> Self {
         Self {

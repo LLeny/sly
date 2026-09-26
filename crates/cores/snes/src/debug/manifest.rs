@@ -1,4 +1,5 @@
 use super::*;
+use debugger_model::panel;
 
 pub(super) fn sa1_manifest(manifest: &mut ComponentManifest) {
     use sa1::{CPU, STATE_ID, WORKSPACE};
@@ -11,30 +12,32 @@ pub(super) fn sa1_manifest(manifest: &mut ComponentManifest) {
     let callstack_id = format!("{CPU}.callstack");
 
     for id in [CPU, disasm_id.as_str(), callstack_id.as_str()] {
-        manifest.untag(id, CPU_WORKSPACE);
+        manifest.untag(id, CPU_WORKSPACE).expect("shipped panel id");
     }
 
-    manifest.insert_before(
-        PanelKind::Mmio,
-        PanelDescriptor::new(
-            STATE_ID,
-            "SA-1 State",
-            PanelKind::Structured,
-            DockLocation::Right,
-            RefreshPolicy::OnPause,
+    manifest
+        .insert_before(
+            panel::MMIO,
+            PanelDescriptor::new(
+                STATE_ID,
+                "SA-1 State",
+                PanelKind::Structured,
+                DockLocation::Right,
+                RefreshPolicy::OnPause,
+            )
+            .tag(WORKSPACE),
         )
-        .tag(WORKSPACE),
-    );
+        .expect("shipped panel id");
 
     for id in [
         CPU,
         disasm_id.as_str(),
         callstack_id.as_str(),
-        "breakpoints",
-        "memory",
-        "log",
+        panel::BREAKPOINTS,
+        panel::MEMORY,
+        panel::LOG,
     ] {
-        manifest.tag(id, WORKSPACE);
+        manifest.tag(id, WORKSPACE).expect("shipped panel id");
     }
 
     manifest.compose_in(
@@ -43,7 +46,13 @@ pub(super) fn sa1_manifest(manifest: &mut ComponentManifest) {
         callstack_id,
         PanelGroupLayout::CompanionRail,
     );
-    manifest.compose_in(WORKSPACE, "memory", "mmio", PanelGroupLayout::CompanionRail);
+
+    manifest.compose_in(
+        WORKSPACE,
+        panel::MEMORY,
+        panel::MMIO,
+        PanelGroupLayout::CompanionRail,
+    );
 }
 
 pub(super) fn superfx_manifest(manifest: &mut ComponentManifest) {
@@ -53,46 +62,53 @@ pub(super) fn superfx_manifest(manifest: &mut ComponentManifest) {
         WorkspaceDescriptor::new(WORKSPACE, "Super FX", WorkspaceIcon::Chip).mmio_group("GSU"),
     );
 
-    manifest.remove(&format!("{CPU_GSU}.callstack"));
+    manifest
+        .remove(&format!("{CPU_GSU}.callstack"))
+        .expect("shipped panel id");
 
     let disasm_id = format!("{CPU_GSU}.disasm");
 
     for id in [CPU_GSU, disasm_id.as_str()] {
-        manifest.untag(id, CPU_WORKSPACE);
+        manifest.untag(id, CPU_WORKSPACE).expect("shipped panel id");
     }
 
-    manifest.insert_before(
-        PanelKind::Mmio,
-        PanelDescriptor::new(
-            STATE_ID,
-            "GSU State",
-            PanelKind::Structured,
-            DockLocation::Right,
-            RefreshPolicy::OnPause,
+    manifest
+        .insert_before(
+            panel::MMIO,
+            PanelDescriptor::new(
+                STATE_ID,
+                "GSU State",
+                PanelKind::Structured,
+                DockLocation::Right,
+                RefreshPolicy::OnPause,
+            )
+            .tag(WORKSPACE),
         )
-        .tag(WORKSPACE),
-    );
-    manifest.insert_after(
-        PanelKind::Memory,
-        PanelDescriptor::new(
-            CACHE_ID,
-            "Code Cache",
-            PanelKind::Table,
-            DockLocation::Center,
-            RefreshPolicy::OnPause,
+        .expect("shipped panel id");
+
+    manifest
+        .insert_after(
+            panel::MEMORY,
+            PanelDescriptor::new(
+                CACHE_ID,
+                "Code Cache",
+                PanelKind::Table,
+                DockLocation::Center,
+                RefreshPolicy::OnPause,
+            )
+            .tag(WORKSPACE),
         )
-        .tag(WORKSPACE),
-    );
+        .expect("shipped panel id");
 
     for id in [
         CPU_GSU,
         disasm_id.as_str(),
-        "breakpoints",
-        "memory",
-        "tilemap",
-        "log",
+        panel::BREAKPOINTS,
+        panel::MEMORY,
+        panel::RASTER,
+        panel::LOG,
     ] {
-        manifest.tag(id, WORKSPACE);
+        manifest.tag(id, WORKSPACE).expect("shipped panel id");
     }
 
     manifest.compose_in(
@@ -101,7 +117,13 @@ pub(super) fn superfx_manifest(manifest: &mut ComponentManifest) {
         CACHE_ID,
         PanelGroupLayout::CompanionRail,
     );
-    manifest.compose_in(WORKSPACE, "memory", "mmio", PanelGroupLayout::CompanionRail);
+
+    manifest.compose_in(
+        WORKSPACE,
+        panel::MEMORY,
+        panel::MMIO,
+        PanelGroupLayout::CompanionRail,
+    );
 }
 
 impl SnesDebug {
@@ -112,204 +134,266 @@ impl SnesDebug {
                 .mmio_group("PPU"),
         );
 
-        manifest.insert_after(
-            PanelKind::Memory,
-            PanelDescriptor::new(
-                "framebuffer",
-                "Screen",
-                PanelKind::Framebuffer,
-                DockLocation::Center,
-                RefreshPolicy::Continuous,
-            ),
-        );
-        manifest.insert_after(
-            PanelKind::Breakpoints,
-            PanelDescriptor::new(
-                "palette",
-                "Palettes",
-                PanelKind::Palette,
-                DockLocation::Left,
-                RefreshPolicy::OnPause,
+        manifest
+            .insert_after(
+                panel::MEMORY,
+                PanelDescriptor::new(
+                    panel::FRAMEBUFFER,
+                    "Screen",
+                    PanelKind::Framebuffer,
+                    DockLocation::Center,
+                    RefreshPolicy::Continuous,
+                ),
             )
-            .tag(VIDEO_WORKSPACE),
-        );
-        manifest.insert_after(
-            PanelKind::Mmio,
-            PanelDescriptor::new(
-                "dma",
-                "DMA",
-                PanelKind::Dma,
-                DockLocation::Right,
-                RefreshPolicy::OnPause,
+            .expect("shipped panel id");
+
+        manifest
+            .insert_after(
+                panel::BREAKPOINTS,
+                PanelDescriptor::new(
+                    panel::PALETTE,
+                    "Palettes",
+                    PanelKind::Palette,
+                    DockLocation::Left,
+                    RefreshPolicy::OnPause,
+                )
+                .tag(VIDEO_WORKSPACE),
             )
-            .tag(CPU_WORKSPACE)
-            .tag(VIDEO_WORKSPACE),
-        );
-        manifest.insert_before(
-            PanelKind::Mmio,
-            PanelDescriptor::new(
-                "ppu",
-                "PPU",
-                PanelKind::Ppu,
-                DockLocation::Right,
-                RefreshPolicy::OnPause,
+            .expect("shipped panel id");
+
+        manifest
+            .insert_after(
+                panel::MMIO,
+                PanelDescriptor::new(
+                    panel::DMA,
+                    "DMA",
+                    PanelKind::Structured,
+                    DockLocation::Right,
+                    RefreshPolicy::OnPause,
+                )
+                .tag(CPU_WORKSPACE)
+                .tag(VIDEO_WORKSPACE),
             )
-            .tag(VIDEO_WORKSPACE),
-        );
-        manifest.insert_before(
-            PanelKind::Memory,
-            PanelDescriptor::new(
-                "tileset",
-                "Tileset",
-                PanelKind::Tileset,
-                DockLocation::Center,
-                RefreshPolicy::OnPause,
+            .expect("shipped panel id");
+
+        manifest
+            .insert_before(
+                panel::MMIO,
+                PanelDescriptor::new(
+                    panel::PPU,
+                    "PPU",
+                    PanelKind::Structured,
+                    DockLocation::Right,
+                    RefreshPolicy::OnPause,
+                )
+                .tag(VIDEO_WORKSPACE),
             )
-            .tag(VIDEO_WORKSPACE),
-        );
-        manifest.insert_after(
-            PanelKind::Tileset,
-            PanelDescriptor::new(
-                "tilemap",
-                "Tilemap",
-                PanelKind::Tilemap,
-                DockLocation::Center,
-                RefreshPolicy::OnPause,
+            .expect("shipped panel id");
+
+        manifest
+            .insert_before(
+                panel::MEMORY,
+                PanelDescriptor::new(
+                    panel::TILESET,
+                    "Tileset",
+                    PanelKind::Tileset,
+                    DockLocation::Center,
+                    RefreshPolicy::OnPause,
+                )
+                .tag(VIDEO_WORKSPACE),
             )
-            .tag(VIDEO_WORKSPACE),
-        );
-        manifest.insert_after(
-            PanelKind::Tilemap,
-            PanelDescriptor::new(
-                "sprites",
-                "Sprites",
-                PanelKind::Sprites,
-                DockLocation::Center,
-                RefreshPolicy::OnPause,
+            .expect("shipped panel id");
+
+        manifest
+            .insert_after(
+                panel::TILESET,
+                PanelDescriptor::new(
+                    panel::TILEMAP,
+                    "Tilemap",
+                    PanelKind::Tilemap,
+                    DockLocation::Center,
+                    RefreshPolicy::OnPause,
+                )
+                .tag(VIDEO_WORKSPACE),
             )
-            .tag(VIDEO_WORKSPACE),
-        );
+            .expect("shipped panel id");
+
+        manifest
+            .insert_after(
+                panel::TILEMAP,
+                PanelDescriptor::new(
+                    panel::SPRITES,
+                    "Sprites",
+                    PanelKind::Sprites,
+                    DockLocation::Center,
+                    RefreshPolicy::OnPause,
+                )
+                .tag(VIDEO_WORKSPACE),
+            )
+            .expect("shipped panel id");
 
         // The sprites panel takes the memory viewer's place in the PPU workspace.
-        manifest.restrict(PanelKind::Memory, CPU_WORKSPACE);
+        manifest
+            .restrict(panel::MEMORY, CPU_WORKSPACE)
+            .expect("shipped panel id");
 
         manifest.workspaces.push(
             WorkspaceDescriptor::new(SOUND_WORKSPACE, "APU", WorkspaceIcon::Sound)
                 .mmio_group("APU"),
         );
 
-        manifest.insert_before(
-            PanelKind::Memory,
-            PanelDescriptor::new(
-                "audio_scope",
-                "Output",
-                PanelKind::AudioScope,
-                DockLocation::Center,
-                RefreshPolicy::Continuous,
+        manifest
+            .insert_before(
+                panel::MEMORY,
+                PanelDescriptor::new(
+                    panel::AUDIO_SCOPE,
+                    "Output",
+                    PanelKind::AudioScope,
+                    DockLocation::Center,
+                    RefreshPolicy::Continuous,
+                )
+                .tag(SOUND_WORKSPACE),
             )
-            .tag(SOUND_WORKSPACE),
-        );
-        manifest.insert_after(
-            PanelKind::AudioScope,
-            PanelDescriptor::new(
-                dsp::INSPECTOR_ID,
-                "Audio Inspector",
-                PanelKind::Structured,
-                DockLocation::Center,
-                RefreshPolicy::Continuous,
+            .expect("shipped panel id");
+
+        manifest
+            .insert_after(
+                panel::AUDIO_SCOPE,
+                PanelDescriptor::new(
+                    dsp::INSPECTOR_ID,
+                    "Audio Inspector",
+                    PanelKind::Structured,
+                    DockLocation::Center,
+                    RefreshPolicy::Continuous,
+                )
+                .selection_from(dsp::VOICES_ID)
+                .tag(SOUND_WORKSPACE),
             )
-            .selection_from(dsp::VOICES_ID)
-            .tag(SOUND_WORKSPACE),
-        );
+            .expect("shipped panel id");
+
         manifest.compose_in(
             SOUND_WORKSPACE,
-            "audio_scope",
+            panel::AUDIO_SCOPE,
             dsp::INSPECTOR_ID,
             PanelGroupLayout::CompactColumns,
         );
-        manifest.insert_after(
-            PanelKind::AudioScope,
-            PanelDescriptor::new(
-                dsp::SCOPES_ID,
-                "Voice Scopes",
-                PanelKind::ChannelScopes,
-                DockLocation::Center,
-                RefreshPolicy::Continuous,
-            )
-            .tag(SOUND_WORKSPACE),
-        );
 
-        manifest.insert_before(
-            PanelKind::Mmio,
-            PanelDescriptor::new(
-                dsp::VOICES_ID,
-                "DSP Voices",
-                PanelKind::Table,
-                DockLocation::Right,
-                RefreshPolicy::Continuous,
+        manifest
+            .insert_after(
+                panel::AUDIO_SCOPE,
+                PanelDescriptor::new(
+                    dsp::SCOPES_ID,
+                    "Voice Scopes",
+                    PanelKind::ChannelScopes,
+                    DockLocation::Center,
+                    RefreshPolicy::Continuous,
+                )
+                .tag(SOUND_WORKSPACE),
             )
-            .tag(SOUND_WORKSPACE),
-        );
+            .expect("shipped panel id");
 
-        manifest.relocate_after("framebuffer", PanelKind::Controls, DockLocation::Left);
-        manifest.insert_after(
-            PanelKind::Framebuffer,
-            PanelDescriptor::new(
-                dsp::REGISTERS_ID,
-                "DSP Registers",
-                PanelKind::Structured,
-                DockLocation::Left,
-                RefreshPolicy::Continuous,
+        manifest
+            .insert_before(
+                panel::MMIO,
+                PanelDescriptor::new(
+                    dsp::VOICES_ID,
+                    "DSP Voices",
+                    PanelKind::Table,
+                    DockLocation::Right,
+                    RefreshPolicy::Continuous,
+                )
+                .tag(SOUND_WORKSPACE),
             )
-            .tag(SOUND_WORKSPACE),
-        );
+            .expect("shipped panel id");
+
+        manifest
+            .relocate_after(panel::FRAMEBUFFER, panel::CONTROLS, DockLocation::Left)
+            .expect("shipped panel id");
+        manifest
+            .insert_after(
+                panel::FRAMEBUFFER,
+                PanelDescriptor::new(
+                    dsp::REGISTERS_ID,
+                    "DSP Registers",
+                    PanelKind::Structured,
+                    DockLocation::Left,
+                    RefreshPolicy::Continuous,
+                )
+                .tag(SOUND_WORKSPACE),
+            )
+            .expect("shipped panel id");
 
         for id in [
             CPU_SPC,
             &format!("{CPU_SPC}.disasm"),
             &format!("{CPU_SPC}.callstack"),
-            "log",
+            panel::LOG,
         ] {
-            manifest.tag(id, SOUND_WORKSPACE);
+            manifest.tag(id, SOUND_WORKSPACE).expect("shipped panel id");
         }
-        manifest.place_after(
-            "savestates",
-            SOUND_WORKSPACE,
-            PanelKind::Mmio,
-            DockLocation::Right,
-        );
+
+        manifest
+            .place_after(
+                panel::SAVESTATES,
+                SOUND_WORKSPACE,
+                panel::MMIO,
+                DockLocation::Right,
+            )
+            .expect("shipped panel id");
+
         manifest.compose_in(
             SOUND_WORKSPACE,
             format!("{CPU_SPC}.disasm"),
             format!("{CPU_SPC}.callstack"),
             PanelGroupLayout::CompanionRail,
         );
+
         manifest.compose_in(
             CPU_WORKSPACE,
-            "memory",
-            "framebuffer",
+            panel::MEMORY,
+            panel::FRAMEBUFFER,
             PanelGroupLayout::CompanionRail,
         );
+
         manifest.compose_in(
             VIDEO_WORKSPACE,
-            "tileset",
-            "tilemap",
+            panel::TILESET,
+            panel::TILEMAP,
             PanelGroupLayout::EqualColumns,
         );
+
         manifest.compose_in(
             VIDEO_WORKSPACE,
-            "sprites",
-            "framebuffer",
+            panel::SPRITES,
+            panel::FRAMEBUFFER,
             PanelGroupLayout::EqualColumns,
         );
 
         if self.has_gsu() {
+            manifest
+                .insert_after(
+                    panel::SPRITES,
+                    PanelDescriptor::new(
+                        panel::RASTER,
+                        "Raster",
+                        PanelKind::Raster,
+                        DockLocation::Center,
+                        RefreshPolicy::OnPause,
+                    )
+                    .tag(VIDEO_WORKSPACE),
+                )
+                .expect("shipped panel id");
+
             self::superfx_manifest(&mut manifest);
         }
+
         if self.has_sa1() {
             self::sa1_manifest(&mut manifest);
         }
-        manifest.workspace_last(debugger_model::SCRIPT_WORKSPACE);
+
+        manifest
+            .workspace_last(debugger_model::SCRIPT_WORKSPACE)
+            .expect("shipped workspace id");
 
         manifest
     }

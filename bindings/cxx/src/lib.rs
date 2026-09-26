@@ -24,10 +24,22 @@ mod ffi {
         title: String,
         system: String,
         region_name: String,
-        pal: bool,
         rom_crc32: u32,
-        has_battery: bool,
-        sram_size: usize,
+        backup_battery_backed: bool,
+        backup_capacity: usize,
+        rom_sha1: String,
+        rom_size: usize,
+        /// 0 = NTSC, 1 = PAL, 2 = none.
+        tv_system: u8,
+        /// 0 = none, 1 = SRAM, 2 = FRAM, 3 = EEPROM, 4 = flash.
+        backup_kind: u8,
+    }
+
+    #[derive(Clone, Debug)]
+    struct ControllerInfo {
+        port: u32,
+        name: String,
+        buttons: Vec<u8>,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -76,6 +88,8 @@ mod ffi {
         /// `player` is 0-based.
         fn set_button(self: &mut SlyCore, player: u32, button: Button, pressed: bool);
 
+        fn controllers(self: &SlyCore) -> Vec<ControllerInfo>;
+
         fn audio_spec(self: &SlyCore) -> AudioSpec;
         /// Pending interleaved i16 samples, borrowed from the core's buffer:
         /// consume before the next non-const call.
@@ -91,12 +105,19 @@ mod ffi {
         fn copy_frame_rgba(self: &SlyCore, out: &mut [u8]) -> bool;
 
         fn save_state(self: &SlyCore) -> Result<Vec<u8>>;
+
         fn load_state(self: &mut SlyCore, bytes: &[u8]) -> Result<()>;
-        /// Battery-backed SRAM borrowed from the core, empty when there is
-        /// none. Valid until the next non-const call.
+        /// Only valid until the next non-const call.
         fn save_ram(self: &SlyCore) -> &[u8];
-        /// False when the cartridge has no battery or the size does not match.
         fn load_save_ram(self: &mut SlyCore, bytes: &[u8]) -> bool;
+
+        fn persistable_save_ram(self: &SlyCore) -> &[u8];
+
+        fn inhibit_save_ram_persistence(self: &SlyCore);
+
+        fn state_path(self: &SlyCore, index: u8) -> Result<String>;
+
+        fn save_ram_path(self: &SlyCore) -> String;
 
         fn cartridge_info(self: &SlyCore) -> CartridgeInfo;
     }
@@ -150,18 +171,21 @@ fn system_extensions(system: ffi::System) -> Result<Vec<String>, String> {
 }
 
 fn rom_sha1(system: ffi::System, rom: &[u8]) -> Result<String, String> {
-    Ok(artwork::rom_sha1(core_system(system)?, rom))
+    Ok(core_loader::identity(core_system(system)?, rom).sha1)
 }
 
 fn binding_cartridge_info(meta: &core_model::CartridgeInfo) -> ffi::CartridgeInfo {
     ffi::CartridgeInfo {
         title: meta.title.clone(),
         system: meta.system.slug().to_owned(),
-        region_name: meta.region.to_string(),
-        pal: matches!(meta.region.tv_system(), core_model::TvSystem::Pal),
-        rom_crc32: meta.rom_crc32,
-        has_battery: meta.has_battery,
-        sram_size: meta.sram_size,
+        region_name: sly::runtime::region_name(meta),
+        rom_crc32: meta.rom.crc32,
+        backup_battery_backed: meta.backup.is_some_and(|backup| backup.battery_backed),
+        backup_capacity: meta.backup.map_or(0, |backup| backup.capacity),
+        rom_sha1: meta.rom.sha1.clone(),
+        rom_size: meta.rom.len,
+        tv_system: sly::capi::binding_tv(meta.tv_system) as u8,
+        backup_kind: sly::capi::binding_backup(meta.backup.map(|backup| backup.kind)) as u8,
     }
 }
 
@@ -174,8 +198,7 @@ fn inspect_cartridge(system: ffi::System, rom: &[u8]) -> Result<ffi::CartridgeIn
 fn fetch_wheel_artwork(system: ffi::System, rom: &[u8]) -> Result<Vec<u8>, String> {
     let system = core_system(system)?;
     let meta = inspect_runtime_cartridge(system, rom.to_vec())?;
-    let sha1 = artwork::rom_sha1(system, rom);
-    Ok(artwork::layle::fetch_wheel(&sha1, meta.region)?.unwrap_or_default())
+    Ok(artwork::layle::fetch_wheel(&meta.game_id(), meta.region)?.unwrap_or_default())
 }
 
 fn create_core(system: ffi::System, rom: &[u8]) -> Result<Box<SlyCore>, String> {
@@ -205,6 +228,22 @@ impl SlyCore {
         if let Some(button) = button_from_index(button.repr as usize) {
             self.rt.set_button(player as usize, button, pressed);
         }
+    }
+
+    fn controllers(&self) -> Vec<ffi::ControllerInfo> {
+        self.rt
+            .controllers()
+            .iter()
+            .map(|controller| ffi::ControllerInfo {
+                port: controller.port as u32,
+                name: controller.name.to_string(),
+                buttons: controller
+                    .buttons
+                    .iter()
+                    .map(|button| *button as u8)
+                    .collect(),
+            })
+            .collect()
     }
 
     fn audio_spec(&self) -> ffi::AudioSpec {
@@ -261,8 +300,24 @@ impl SlyCore {
         self.rt.save_ram().unwrap_or_default()
     }
 
+    fn state_path(&self, index: u8) -> Result<String, String> {
+        self.rt.state_path(index)
+    }
+
+    fn save_ram_path(&self) -> String {
+        self.rt.save_ram_path()
+    }
+
     fn load_save_ram(&mut self, bytes: &[u8]) -> bool {
         self.rt.load_save_ram(bytes)
+    }
+
+    fn persistable_save_ram(&self) -> &[u8] {
+        self.rt.persistable_save_ram().unwrap_or_default()
+    }
+
+    fn inhibit_save_ram_persistence(&self) {
+        self.rt.inhibit_save_ram_persistence();
     }
 
     fn cartridge_info(&self) -> ffi::CartridgeInfo {

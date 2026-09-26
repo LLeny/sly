@@ -1,0 +1,7 @@
+[package]
+name = "game-database"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+core-model = { path = "../models/core" }

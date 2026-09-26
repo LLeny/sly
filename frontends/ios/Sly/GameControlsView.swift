@@ -9,62 +9,34 @@ private struct ControlButtonConfiguration: Sendable {
 }
 
 private struct FaceButtonConfiguration: Sendable {
-    let top: ControlButtonConfiguration
-    let trailing: ControlButtonConfiguration
-    let bottom: ControlButtonConfiguration
-    let leading: ControlButtonConfiguration
+    let buttons: [ControlButtonConfiguration]
 }
 
 private struct CoreControlConfiguration: Sendable {
-    let leftShoulder: ControlButtonConfiguration
-    let rightShoulder: ControlButtonConfiguration
+    let port: UInt32
+    let directions: Set<SlyKit.Button>
+    let leftShoulder: ControlButtonConfiguration?
+    let rightShoulder: ControlButtonConfiguration?
     let centerButtons: [ControlButtonConfiguration]
     let faceButtons: FaceButtonConfiguration
-}
 
-private extension System {
-    var controlConfiguration: CoreControlConfiguration {
-        switch self {
-        case .snes:
-            return .snes
-        @unknown default:
-            assertionFailure("Missing controls for a new emulator core")
-            return .snes
+    init(controller: SlyKit.ControllerDescriptor?) {
+        port = controller?.port ?? 0
+        let supported = Set(controller?.buttons ?? [])
+        directions = supported.intersection([.up, .down, .left, .right])
+        func control(_ button: SlyKit.Button, _ label: String, _ color: Color? = nil) -> ControlButtonConfiguration? {
+            supported.contains(button) ? ControlButtonConfiguration(label: label, button: button, color: color) : nil
         }
+        leftShoulder = control(.l, "L")
+        rightShoulder = control(.r, "R")
+        centerButtons = [control(.select, "SELECT"), control(.start, "START")].compactMap { $0 }
+        faceButtons = FaceButtonConfiguration(buttons: [
+            control(.x, "X", Color(red: 0.18, green: 0.38, blue: 0.72)),
+            control(.a, "A", Color(red: 0.78, green: 0.20, blue: 0.27)),
+            control(.b, "B", Color(red: 0.88, green: 0.68, blue: 0.12)),
+            control(.y, "Y", Color(red: 0.20, green: 0.56, blue: 0.34)),
+        ].compactMap { $0 })
     }
-}
-
-private extension CoreControlConfiguration {
-    static let snes = CoreControlConfiguration(
-        leftShoulder: ControlButtonConfiguration(label: "L", button: .l),
-        rightShoulder: ControlButtonConfiguration(label: "R", button: .r),
-        centerButtons: [
-            ControlButtonConfiguration(label: "SELECT", button: .select),
-            ControlButtonConfiguration(label: "START", button: .start),
-        ],
-        faceButtons: FaceButtonConfiguration(
-            top: ControlButtonConfiguration(
-                label: "X",
-                button: .x,
-                color: Color(red: 0.18, green: 0.38, blue: 0.72)
-            ),
-            trailing: ControlButtonConfiguration(
-                label: "A",
-                button: .a,
-                color: Color(red: 0.78, green: 0.20, blue: 0.27)
-            ),
-            bottom: ControlButtonConfiguration(
-                label: "B",
-                button: .b,
-                color: Color(red: 0.88, green: 0.68, blue: 0.12)
-            ),
-            leading: ControlButtonConfiguration(
-                label: "Y",
-                button: .y,
-                color: Color(red: 0.20, green: 0.56, blue: 0.34)
-            )
-        )
-    )
 }
 
 private enum ControlsLayout {
@@ -104,7 +76,7 @@ struct GameControlsView: View {
     let player: Player
 
     private var configuration: CoreControlConfiguration {
-        player.currentSystem.controlConfiguration
+        CoreControlConfiguration(controller: player.core.controllers.first)
     }
 
     var body: some View {
@@ -115,7 +87,9 @@ struct GameControlsView: View {
                 auxiliaryControls
 
                 HStack(spacing: ControlsLayout.padSpacing) {
-                    DirectionPad(size: padSize, onButtonChanged: setButton)
+                    if !configuration.directions.isEmpty {
+                        DirectionPad(size: padSize, allowed: configuration.directions, onButtonChanged: setButton)
+                    }
 
                     Spacer(minLength: 0)
 
@@ -139,7 +113,9 @@ struct GameControlsView: View {
 
     private var auxiliaryControls: some View {
         HStack(spacing: 12) {
-            shoulderButton(configuration.leftShoulder)
+            if let control = configuration.leftShoulder {
+                shoulderButton(control)
+            }
 
             HStack(spacing: 8) {
                 ForEach(configuration.centerButtons, id: \.label) { control in
@@ -147,7 +123,9 @@ struct GameControlsView: View {
                 }
             }
 
-            shoulderButton(configuration.rightShoulder)
+            if let control = configuration.rightShoulder {
+                shoulderButton(control)
+            }
         }
     }
 
@@ -177,7 +155,7 @@ struct GameControlsView: View {
     }
 
     private func setButton(_ button: SlyKit.Button, pressed: Bool) {
-        player.core.setButton(button, pressed: pressed)
+        player.core.setButton(button, pressed: pressed, player: configuration.port)
     }
 }
 
@@ -197,24 +175,21 @@ private struct FaceButtonLayout {
     }
 
     var placements: [FaceButtonPlacement] {
-        [
-            FaceButtonPlacement(
-                control: configuration.top,
-                center: CGPoint(x: size / 2, y: buttonSize / 2)
-            ),
-            FaceButtonPlacement(
-                control: configuration.trailing,
-                center: CGPoint(x: size - buttonSize / 2, y: size / 2)
-            ),
-            FaceButtonPlacement(
-                control: configuration.bottom,
-                center: CGPoint(x: size / 2, y: size - buttonSize / 2)
-            ),
-            FaceButtonPlacement(
-                control: configuration.leading,
-                center: CGPoint(x: buttonSize / 2, y: size / 2)
-            ),
-        ]
+        let centers: [CGPoint]
+        switch configuration.buttons.count {
+        case 0: return []
+        case 1: centers = [CGPoint(x: size / 2, y: size / 2)]
+        case 2:
+            centers = [CGPoint(x: size * 0.75, y: size * 0.35), CGPoint(x: size * 0.25, y: size * 0.65)]
+        default:
+            centers = [
+                CGPoint(x: size / 2, y: buttonSize / 2),
+                CGPoint(x: size - buttonSize / 2, y: size / 2),
+                CGPoint(x: size / 2, y: size - buttonSize / 2),
+                CGPoint(x: buttonSize / 2, y: size / 2),
+            ]
+        }
+        return zip(configuration.buttons, centers).map { FaceButtonPlacement(control: $0.0, center: $0.1) }
     }
 }
 
@@ -391,6 +366,7 @@ private final class FaceButtonTouchView: UIView {
 
 private struct DirectionPad: View {
     let size: CGFloat
+    let allowed: Set<SlyKit.Button>
     let onButtonChanged: (SlyKit.Button, Bool) -> Void
 
     @State private var pressedButtons: Set<SlyKit.Button> = []
@@ -465,7 +441,7 @@ private struct DirectionPad: View {
         if delta.dy < -deadZone { next.insert(.up) }
         if delta.dy > deadZone { next.insert(.down) }
 
-        setPressedButtons(next)
+        setPressedButtons(next.intersection(allowed))
     }
 
     private func setPressedButtons(_ next: Set<SlyKit.Button>) {

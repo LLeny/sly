@@ -14,9 +14,9 @@ use crate::shelf::{RowRoot, spawn_box};
 use crate::state::{LauncherMode, LauncherState};
 
 fn empty_library_message() -> String {
-    let extensions = core_model::System::Snes
-        .rom_extensions()
+    let extensions = core_model::System::ALL
         .iter()
+        .flat_map(|system| system.rom_extensions())
         .map(|extension| format!(".{extension}"))
         .collect::<Vec<_>>()
         .join(" or ");
@@ -102,12 +102,14 @@ pub fn poll_discovery(
                         spawn_box(&mut commands, *row, index, entry.box_style(), &models);
                     library.box_entities.push(box_entity);
 
-                    let sha1 = entry.sha1.clone();
+                    let game = core_model::GameId::new(entry.system, entry.sha1.clone());
                     let region = entry.region;
+                    let tv_system = entry.tv_system;
                     let task = IoTaskPool::get().spawn(async move {
-                        artwork::fetch_bundle(&sha1, region)
-                            .map(|bundle| process_artwork(bundle, region))
+                        artwork::fetch_bundle(&game, region)
+                            .map(|bundle| process_artwork(bundle, region, tv_system))
                     });
+
                     commands.spawn(ArtworkTask { index, task });
                 }
 

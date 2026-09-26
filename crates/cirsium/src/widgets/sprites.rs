@@ -1,32 +1,30 @@
-use std::sync::Arc;
-
-use gpui::prelude::*;
-use gpui::{Div, RenderImage, SharedString, div};
-
 use crate::assets::icon;
-use crate::components::{
-    divided, divided_mono, flip_label, footer_row, footer_row_el, hex, label_text,
-};
-use crate::theme::Theme;
+use crate::components::{footer_row, mono_text};
 use crate::widgets::grid::{GridContent, GridPanel, build_atlas};
-
+use gpui::prelude::*;
+use gpui::{RenderImage, div};
+use std::sync::Arc;
 const COLS: usize = 16;
 
 #[derive(Clone)]
 pub struct SpritesView {
     pub cell_px: u32,
-    pub meta: SharedString,
     pub entries: Arc<[debugger_model::SpriteEntry]>,
     pub image: Option<Arc<RenderImage>>,
+    detail_rows: usize,
 }
 
 impl From<debugger_model::Sprites> for SpritesView {
-    fn from(sprites: debugger_model::Sprites) -> Self {
-        let (small_w, small_h) = sprites.small;
-        let (large_w, large_h) = sprites.large;
-        let cell = large_w.max(large_h).max(8);
-        let rows = sprites.entries.len().div_ceil(COLS);
+    fn from(mut sprites: debugger_model::Sprites) -> Self {
+        let cell = sprites
+            .entries
+            .iter()
+            .map(|s| s.width.max(s.height))
+            .max()
+            .unwrap_or(1)
+            .max(1);
 
+        let rows = sprites.entries.len().div_ceil(COLS);
         let image = (rows > 0).then(|| {
             build_atlas(
                 COLS,
@@ -35,13 +33,19 @@ impl From<debugger_model::Sprites> for SpritesView {
                 sprites
                     .entries
                     .iter()
-                    .map(|sprite| (sprite.pixels.as_slice(), sprite.width, sprite.height)),
+                    .map(|s| (s.pixels.as_slice(), s.width, s.height)),
             )
         });
 
+        for sprite in &mut sprites.entries {
+            sprite.pixels = Vec::new();
+        }
+
         Self {
             cell_px: cell,
-            meta: format!("{small_w}×{small_h} / {large_w}×{large_h}").into(),
+            detail_rows: super::tileset::detail_rows(
+                sprites.entries.iter().map(|e| e.details.as_slice()),
+            ),
             entries: sprites.entries.into(),
             image,
         }
@@ -51,67 +55,41 @@ impl From<debugger_model::Sprites> for SpritesView {
 pub struct SpritesWidget;
 
 impl SpritesWidget {
-    pub const ID: &'static str = "sprites";
+    pub const ID: &'static str = debugger_model::panel::SPRITES;
 
     pub fn panel(view: Option<SpritesView>) -> GridPanel {
-        let content = view.as_ref().map(|view| GridContent {
-            image: view.image.clone(),
+        let content = view.as_ref().map(|v| GridContent {
+            image: v.image.clone(),
             cols: COLS,
-            rows: view.entries.len().div_ceil(COLS),
-            tile_px: view.cell_px,
-            count: view.entries.len(),
+            rows: v.entries.len().div_ceil(COLS),
+            tile_px: v.cell_px,
+            count: v.entries.len(),
             empty_message: "No sprites",
             overlay: None,
-            window_overlays: Vec::new(),
+            footprint: None,
+            window_overlays: vec![],
         });
 
         let mut panel = GridPanel::new(Self::ID, "Sprites", icon::GHOST, content)
-            .placeholder("Select a sprite to inspect")
-            .detail_rows(2);
+            .placeholder("Select a sprite to inspect");
         if let Some(view) = view {
             panel = panel
-                .meta(view.meta.clone())
-                .detail(move |theme, index| self::detail_row(theme, &view, index));
+                .meta(format!("{} objects", view.entries.len()))
+                .detail_rows(view.detail_rows)
+                .detail(move |theme, index| {
+                    let sprite = &view.entries[index];
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(footer_row(
+                            theme,
+                            format!("Sprite {index}, {}x{}", sprite.width, sprite.height),
+                            mono_text(theme, format!("({}, {})", sprite.x, sprite.y)),
+                        ))
+                        .child(super::tileset::details(theme, &sprite.details))
+                });
         }
+
         panel
     }
-}
-
-fn detail_row(theme: &Theme, view: &SpritesView, index: usize) -> Div {
-    let sprite = &view.entries[index];
-
-    let mut coords = vec![format!("({}, {})", sprite.x, sprite.y)];
-    if let Some(flip) = flip_label(sprite.flip_h, sprite.flip_v) {
-        coords.push(flip.to_string());
-    }
-
-    div()
-        .flex()
-        .flex_col()
-        .child(footer_row_el(
-            divided(
-                theme,
-                [
-                    label_text(theme, format!("Sprite {index}")).into_any_element(),
-                    label_text(theme, format!("{}×{}", sprite.width, sprite.height))
-                        .into_any_element(),
-                ],
-            ),
-            divided_mono(theme, coords),
-        ))
-        .child(footer_row(
-            theme,
-            format!("Tile {}", hex(sprite.tile as u32, 12)),
-            divided_mono(
-                theme,
-                [
-                    format!("pal {}", sprite.palette),
-                    format!(
-                        "prio {} @ VRAM {}",
-                        sprite.priority,
-                        hex(sprite.tile_addr, 16)
-                    ),
-                ],
-            ),
-        ))
 }

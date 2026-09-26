@@ -1,4 +1,6 @@
-use debugger_model::{CpuDescriptor, CpuView, DisasmLine, FlagView, Row, Section, StructuredView};
+use debugger_model::{
+    CpuDescriptor, CpuView, DisasmLine, DisassemblyRequest, FlagView, Row, Section, StructuredView,
+};
 
 use super::{disasm_view_on, field, fingerprint_65c816, flags_row, section};
 use crate::Snes;
@@ -21,7 +23,7 @@ impl CpuPeek for BusView<'_> {
 }
 
 pub fn descriptor() -> CpuDescriptor {
-    CpuDescriptor::new(CPU, "65C816", "sa1", 16)
+    CpuDescriptor::new(CPU, "65C816", "sa1").decode_modes(super::decode_modes())
 }
 
 pub fn bus_peek(snes: &Snes, addr: Address) -> u8 {
@@ -34,12 +36,27 @@ pub fn cpu_view(snes: &Snes) -> CpuView {
     view
 }
 
-pub fn disasm_view(snes: &Snes, base: u16, count: usize) -> Vec<DisasmLine> {
-    disasm_view_on(&snes.sa1.cpu, &BusView { snes }, base, count)
+pub fn disasm_view(snes: &Snes, request: &DisassemblyRequest) -> Vec<DisasmLine> {
+    let Some(decoded) = super::decode_cpu(&snes.sa1.cpu, request) else {
+        return Vec::new();
+    };
+
+    disasm_view_on(
+        &decoded,
+        &BusView { snes },
+        request.base as u16,
+        request.count,
+    )
 }
 
-pub fn fingerprint(snes: &Snes, base: u16, count: usize) -> u64 {
-    fingerprint_65c816(&snes.sa1.cpu, &BusView { snes }, base, count)
+pub fn fingerprint(snes: &Snes, request: &DisassemblyRequest) -> Option<u64> {
+    let decoded = super::decode_cpu(&snes.sa1.cpu, request)?;
+    Some(fingerprint_65c816(
+        &decoded,
+        &BusView { snes },
+        request.base as u16,
+        request.count,
+    ))
 }
 
 fn register16(sa1: &Sa1, addr: u16) -> u16 {
@@ -211,13 +228,11 @@ pub fn state_view(snes: &Snes) -> StructuredView {
             Row::BitHeader { bits: 8 },
             Row::BitGrid {
                 label: "SNES I-RAM".into(),
-                bits: 8,
-                on_mask: sa1.siwp.raw(),
+                mask: sa1.siwp.raw().into(),
             },
             Row::BitGrid {
                 label: "SA-1 I-RAM".into(),
-                bits: 8,
-                on_mask: sa1.ciwp.raw(),
+                mask: sa1.ciwp.raw().into(),
             },
         ],
     );

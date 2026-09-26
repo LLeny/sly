@@ -4,6 +4,8 @@ members = [
     "crates/artwork",
     "crates/audio",
     "crates/cirsium",
+    "crates/core-loader",
+    "crates/game-database",
     "crates/cores/snes",
     "bindings/c",
     "bindings/cxx",

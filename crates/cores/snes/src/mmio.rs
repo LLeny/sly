@@ -226,11 +226,20 @@ impl<M: MemoryMap> Bus<M> {
     }
 
     #[cfg(feature = "debug")]
-    fn record_access(&self, space: &AddressSpace, write: bool) {
+    fn record_access(
+        &self,
+        space: &AddressSpace,
+        addr: Address,
+        write: bool,
+        value: u8,
+        dma: bool,
+    ) {
         if self.mmu.access.active()
             && let Some(key) = self::space_key(space)
         {
-            self.mmu.access.record(key, write);
+            self.mmu
+                .access
+                .record(key, addr.as_24bit(), write, value, dma);
         }
     }
 
@@ -238,20 +247,21 @@ impl<M: MemoryMap> Bus<M> {
     pub fn read8(&mut self, addr: Address) -> u8 {
         self.mmu.clocks += self.mmu.waitstates(addr);
         self.sync();
-        self.read8_direct(addr)
+        self.read8_direct::<false>(addr)
     }
 
     /// Does not bill cycles or sync scheduler. Used by DMA.
-    pub(crate) fn read8_direct(&mut self, addr: Address) -> u8 {
+    pub(crate) fn read8_direct<const DMA: bool>(&mut self, addr: Address) -> u8 {
         let space = self.mmu.map(&self.sa1, addr);
-        self.read8_mapped(addr, &space)
+        self.read8_mapped::<DMA>(addr, &space)
     }
 
-    pub(crate) fn read8_mapped(&mut self, addr: Address, space: &AddressSpace) -> u8 {
-        #[cfg(feature = "debug")]
-        self.record_access(space, false);
-
-        match space {
+    pub(crate) fn read8_mapped<const DMA: bool>(
+        &mut self,
+        addr: Address,
+        space: &AddressSpace,
+    ) -> u8 {
+        let value = match space {
             AddressSpace::Wram(index) => self.mmu.wram[*index],
             AddressSpace::Iram(index) => self.sa1.iram[*index],
             AddressSpace::Sram(index) => self.mmu.cartridge.sram[*index],
@@ -262,7 +272,11 @@ impl<M: MemoryMap> Bus<M> {
                 tracing::error!(addr = format!("{addr:?}"), "Read from unmapped address");
                 OPEN_BUS
             }
-        }
+        };
+
+        #[cfg(feature = "debug")]
+        self.record_access(space, addr, false, value, DMA);
+        value
     }
 
     pub fn classify(&self, addr: Address) -> Option<(MemKind, u32)> {
@@ -285,18 +299,23 @@ impl<M: MemoryMap> Bus<M> {
     pub fn write8(&mut self, addr: Address, value: u8) {
         self.mmu.clocks += self.mmu.waitstates(addr);
         self.sync();
-        self.write8_direct(addr, value);
+        self.write8_direct::<false>(addr, value);
     }
 
     /// Does not bill cycles or sync scheduler. Used by DMA.
-    pub(crate) fn write8_direct(&mut self, addr: Address, value: u8) {
+    pub(crate) fn write8_direct<const DMA: bool>(&mut self, addr: Address, value: u8) {
         let space = self.mmu.map(&self.sa1, addr);
-        self.write8_mapped(addr, &space, value);
+        self.write8_mapped::<DMA>(addr, &space, value);
     }
 
-    pub(crate) fn write8_mapped(&mut self, addr: Address, space: &AddressSpace, value: u8) {
+    pub(crate) fn write8_mapped<const DMA: bool>(
+        &mut self,
+        addr: Address,
+        space: &AddressSpace,
+        value: u8,
+    ) {
         #[cfg(feature = "debug")]
-        self.record_access(space, true);
+        self.record_access(space, addr, true, value, DMA);
 
         match space {
             AddressSpace::Wram(index) => self.mmu.wram[*index] = value,

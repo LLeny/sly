@@ -64,7 +64,7 @@ pub struct SavestatesWidget {
 }
 
 impl SavestatesWidget {
-    pub const ID: &'static str = "savestates";
+    pub const ID: &'static str = debugger_model::panel::SAVESTATES;
 
     pub fn new(view: SavestatesView) -> Self {
         Self {

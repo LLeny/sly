@@ -146,7 +146,7 @@ pub(crate) fn default_script(system: core_model::System) -> &'static str {
 }
 
 pub(crate) fn api_completions() -> Vec<Completion> {
-    debugger_model::BUILTIN_GROUPS
+    scripting::BUILTIN_GROUPS
         .iter()
         .flat_map(|group| group.entries)
         .map(|builtin| {

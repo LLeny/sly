@@ -189,10 +189,30 @@ impl Debugger {
         }
     }
 
+    fn supports_watchpoint(&mut self, kind: BreakpointKind, region: &str) -> bool {
+        if kind == BreakpointKind::Execute
+            || self
+                .target
+                .memory_regions()
+                .iter()
+                .any(|r| r.id.as_ref() == region && !r.watch_sources.is_empty())
+        {
+            return true;
+        }
+
+        self.set_state("data watchpoints unsupported for this region");
+        false
+    }
+
     pub(super) fn bp_add(&mut self, cx: &mut Context<Self>) {
         let text = self.bp_input.read(cx).content().trim().to_string();
         if let Ok(addr) = u32::from_str_radix(&text, 16) {
             let (cpu, region) = self.pane_space(self.workspace_pane());
+            if !self.supports_watchpoint(self.breakpoints.draft_kind(), &region) {
+                cx.notify();
+                return;
+            }
+
             self.breakpoints
                 .add(addr, cpu, region, self.target.as_ref());
             self.bp_input.update(cx, |input, cx| input.clear(cx));
@@ -210,6 +230,11 @@ impl Debugger {
         cx: &mut Context<Self>,
     ) {
         let (cpu, region) = self.pane_space(pane);
+        if !self.supports_watchpoint(kind, &region) {
+            cx.notify();
+            return;
+        }
+
         self.panes[pane].disasm.close_menu();
         let end = addr.saturating_add(len.saturating_sub(1));
         self.breakpoints
@@ -229,17 +254,14 @@ impl Debugger {
         self.memory.close_menu();
         let (cpu, _) = self.pane_space(self.workspace_pane());
         let region: Arc<str> = self.memory.region_id().into();
+        if !self.supports_watchpoint(kind, &region) {
+            cx.notify();
+            return;
+        }
+
         let note = self.target.annotate(start).into();
-        self.breakpoints.add_labeled(
-            start,
-            end,
-            kind,
-            cpu,
-            region,
-            label,
-            note,
-            self.target.as_ref(),
-        );
+        self.breakpoints
+            .add_labeled(start, end, kind, cpu, region, label, note);
         self.sync_bp_markers();
         cx.notify();
     }
@@ -284,13 +306,8 @@ impl Debugger {
         for pane in &mut self.panes {
             pane.disasm.set_breakpoints(marks);
         }
-        let primary = &self.panes[self.workspace_pane()].id;
-        let mem_marks = marks
-            .iter()
-            .filter(|m| &m.cpu == primary)
-            .cloned()
-            .collect();
-        self.memory.set_breakpoints(mem_marks);
+
+        self.memory.set_breakpoints(marks.to_vec());
     }
 
     pub(super) fn bp_set_kind(&mut self, id: SharedString, cx: &mut Context<Self>) {

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use cirsium::components::ComboOption;
 use cirsium::widgets::{MemoryCell, MemoryRow, ascii_glyph};
-use debugger_model::{BreakpointKind, BreakpointMark, DebugCore, MemoryRegion, mark_at};
+use debugger_model::{BreakpointKind, BreakpointMark, DebugCore, MemoryRegion};
 use gpui::{Pixels, Point, ScrollStrategy, SharedString, UniformListScrollHandle};
 
 pub const BYTES_PER_ROW: usize = 16;
@@ -22,6 +22,7 @@ pub struct MemMenu {
     pub position: Point<Pixels>,
     pub range: (u32, u32),
     pub address: SharedString,
+    pub end_address: SharedString,
     pub hex: SharedString,
     pub raw: SharedString,
     pub ascii: SharedString,
@@ -63,6 +64,10 @@ impl Memory {
         memory
     }
 
+    pub fn supports_watchpoints(&self) -> bool {
+        !self.current.watch_sources.is_empty()
+    }
+
     pub fn set_breakpoints(&mut self, breakpoints: Vec<BreakpointMark>) {
         self.breakpoints = breakpoints;
     }
@@ -70,6 +75,7 @@ impl Memory {
     pub fn breakpoint_ranges(&self) -> Vec<(u32, u32, BreakpointKind)> {
         self.breakpoints
             .iter()
+            .filter(|m| m.region == self.current.id)
             .map(|m| (m.start, m.end, m.kind))
             .collect()
     }
@@ -94,7 +100,7 @@ impl Memory {
     }
 
     pub fn row_count(&self) -> usize {
-        (self.current.size as usize).div_ceil(BYTES_PER_ROW)
+        ((self.current.end() - u64::from(self.current.base)) as usize).div_ceil(BYTES_PER_ROW)
     }
 
     fn build_rows(&self, range: Range<usize>, target: &dyn DebugCore) -> Vec<MemoryRow> {
@@ -102,17 +108,22 @@ impl Memory {
         range
             .map(|row_ix| {
                 let offset = (row_ix * BYTES_PER_ROW) as u32;
-                let addr = self.current.base.wrapping_add(offset);
-                let len = (self.current.size.saturating_sub(offset) as usize).min(BYTES_PER_ROW);
-                let bytes = target.read_memory(region, addr, len);
+                let addr = self.current.base + offset;
+                let len = (self.current.end() - u64::from(addr)).min(BYTES_PER_ROW as u64) as usize;
+                let bytes = target.peek_memory(region, addr, len);
                 let highlights = target.memory_highlights(region, addr, len);
                 let cells = bytes
                     .iter()
                     .zip(highlights)
                     .enumerate()
                     .map(|(i, (value, highlight))| {
-                        let cell_addr = addr.wrapping_add(i as u32);
-                        let breakpoint = mark_at(&self.breakpoints, cell_addr, !0);
+                        let cell_addr = addr + i as u32;
+                        let breakpoint = self
+                            .breakpoints
+                            .iter()
+                            .find(|mark| mark.covers(mark.kind, &mark.cpu, region, cell_addr, 1))
+                            .map(|mark| mark.kind);
+
                         MemoryCell {
                             value: *value,
                             highlight,
@@ -196,7 +207,7 @@ impl Memory {
     }
 
     fn read_span(&self, target: &dyn DebugCore, lo: u32, hi: u32) -> Vec<u8> {
-        target.read_memory(&self.current.id, lo, (hi - lo + 1) as usize)
+        target.peek_memory(&self.current.id, lo, (hi - lo + 1) as usize)
     }
 
     pub fn dump(&self, target: &dyn DebugCore) -> Option<(String, Vec<u8>)> {
@@ -206,7 +217,7 @@ impl Memory {
 
         let (lo, hi) = self
             .normalized_selection()
-            .unwrap_or((self.current.base, self.current.base + self.current.size - 1));
+            .unwrap_or((self.current.base, (self.current.end() - 1) as u32));
         let bytes = self.read_span(target, lo, hi);
         let name = format!("{}_{lo:06X}-{hi:06X}.bin", self.current.id);
 
@@ -219,7 +230,7 @@ impl Memory {
             return None;
         }
 
-        let clamped = addr.clamp(base, base + self.current.size - 1);
+        let clamped = addr.clamp(base, (self.current.end() - 1) as u32);
         let row = ((clamped - base) as usize) / BYTES_PER_ROW;
         self.scroll.scroll_to_item_strict(row, ScrollStrategy::Top);
 
@@ -307,6 +318,7 @@ impl Memory {
             position,
             range: (lo, hi),
             address: target.format_address(&self.current.id, lo).into(),
+            end_address: target.format_address(&self.current.id, hi).into(),
             hex: hex.into(),
             raw: raw.into(),
             ascii: ascii.into(),

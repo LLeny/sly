@@ -113,7 +113,7 @@ pub struct LogWidget {
 }
 
 impl LogWidget {
-    pub const ID: &'static str = "log";
+    pub const ID: &'static str = debugger_model::panel::LOG;
 
     pub fn new(view: LogView, scroll: UniformListScrollHandle) -> Self {
         Self {

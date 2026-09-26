@@ -102,7 +102,29 @@ impl Debugger {
             .any(|p| matches!(p.kind, PanelKind::AudioScope) && !self.is_collapsed(p.id.as_ref()))
     }
 
+    fn update_access_tracking(&mut self) {
+        let visible = self
+            .registry
+            .manifest()
+            .in_workspace(&self.workspace)
+            .any(|p| {
+                matches!(p.kind, PanelKind::Memory | PanelKind::Mmio)
+                    && !self.is_collapsed(p.id.as_ref())
+            });
+
+        let tracking = if visible {
+            debugger_model::AccessTracking::Highlights
+        } else if self.memory.follow_enabled() {
+            debugger_model::AccessTracking::Latest
+        } else {
+            debugger_model::AccessTracking::Off
+        };
+
+        self.target.track_accesses(tracking);
+    }
+
     fn run_frame_hooked(&mut self) -> RunOutcome {
+        self.update_access_tracking();
         if !self.script.is_active() {
             self.target.watch_events(&[]);
             return self.target.debug_run_frame(self.breakpoints.marks());
@@ -150,26 +172,31 @@ impl Debugger {
                 return RunOutcome::Breakpoint;
             }
 
-            if outcome == RunOutcome::Done {
-                return RunOutcome::Done;
+            if outcome == RunOutcome::FrameComplete {
+                return RunOutcome::FrameComplete;
             }
 
-            if user_break || !script_stop {
+            if user_break {
                 return RunOutcome::Breakpoint;
+            }
+
+            if !script_stop {
+                return outcome;
             }
         }
 
         self.script
             .note("hook budget for this frame exhausted, pausing");
-        RunOutcome::Breakpoint
+        RunOutcome::BudgetExhausted
     }
 
     pub(super) fn emulate_frame(&mut self, scope_visible: bool) -> RunOutcome {
         let emu_start = Instant::now();
         let outcome = self.run_frame_hooked();
-        if outcome == RunOutcome::Done {
+        if outcome == RunOutcome::FrameComplete {
             self.script.on_frame(self.target.as_mut());
         }
+
         self.stats.record_frame(emu_start.elapsed());
         self.emu_clock += self.run_frame_interval();
 
@@ -178,7 +205,12 @@ impl Debugger {
         self.audio.queue(&self.audio_samples);
 
         if scope_visible {
-            Self::push_scope(&mut self.scope_samples, &self.audio_samples);
+            Self::push_scope(
+                &mut self.scope_samples,
+                &self.audio_samples,
+                self.target.audio_spec().map_or(0, |s| s.channels),
+            );
+
             self.scope_view = AudioScopeView {
                 samples: self.scope_samples.as_slice().into(),
             };
@@ -227,11 +259,11 @@ impl Debugger {
             return false;
         }
 
-        let mut outcome = RunOutcome::Done;
+        let mut outcome = RunOutcome::FrameComplete;
         let scope_visible = self.scope_visible();
         for _ in 0..self.frames_due() {
             outcome = self.emulate_frame(scope_visible);
-            if outcome != RunOutcome::Done {
+            if outcome != RunOutcome::FrameComplete {
                 break;
             }
         }
@@ -246,10 +278,11 @@ impl Debugger {
 
         self.flush_save_ram();
 
-        let keep_going = outcome == RunOutcome::Done;
+        let keep_going = outcome == RunOutcome::FrameComplete;
         if !keep_going {
             self.invalidate_video_keys();
         }
+
         self.refresh_panes(CpuRefresh::Highlight, keep_going, cx);
         self.follow_memory();
 
@@ -260,8 +293,12 @@ impl Debugger {
         }
 
         self.set_state(match outcome {
-            RunOutcome::Done => "running",
+            RunOutcome::FrameComplete => "running",
             RunOutcome::Breakpoint => "breakpoint",
+            RunOutcome::Event => "event",
+            RunOutcome::TargetReached => "target reached",
+            RunOutcome::BudgetExhausted => "execution budget exhausted",
+            RunOutcome::Unsupported => "unsupported operation",
         });
 
         cx.notify();
@@ -278,6 +315,7 @@ impl Debugger {
     }
 
     pub(super) fn step(&mut self, cx: &mut Context<Self>) {
+        self.update_access_tracking();
         self.target.debug_step();
         self.finish_manual_step("paused", cx);
     }
@@ -295,11 +333,16 @@ impl Debugger {
     }
 
     pub(super) fn run_until(&mut self, target: &str, cx: &mut Context<Self>) {
+        self.update_access_tracking();
         let outcome = self.target.run_until(target);
         self.finish_manual_step(
             match outcome {
-                RunOutcome::Breakpoint => "paused",
-                RunOutcome::Done => "no event",
+                RunOutcome::TargetReached => "target reached",
+                RunOutcome::Breakpoint => "breakpoint",
+                RunOutcome::Event => "event",
+                RunOutcome::FrameComplete => "frame complete",
+                RunOutcome::BudgetExhausted => "no event within execution budget",
+                RunOutcome::Unsupported => "unsupported step target",
             },
             cx,
         );

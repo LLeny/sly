@@ -3,11 +3,11 @@ use std::io::{BufWriter, Write};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use core_model::Core;
 use sdl3::event::Event;
 use sdl3::keyboard::{Keycode, Scancode};
 use sdl3::pixels::PixelFormat;
 use sdl3::render::ScaleMode;
-use snes::{Cartridge, Snes};
 
 const SCALE: u32 = 2;
 const SAVE_RAM_FLUSH: Duration = Duration::from_secs(60);
@@ -236,15 +236,15 @@ fn sanitize_name(title: &str) -> String {
     }
 }
 
-fn save_state(session: &storage::Session<storage::FsStore>, snes: &Snes) {
-    match session.save_state(snes, storage::Slot::Quick) {
+fn save_state(session: &storage::Session<storage::FsStore>, core: &dyn Core) {
+    match session.save_state(core, storage::Slot::Quick) {
         Ok(bytes) => println!("Saved state ({} KiB)", bytes.len() / 1024),
         Err(err) => eprintln!("Failed to save state: {err}"),
     }
 }
 
-fn load_state(session: &storage::Session<storage::FsStore>, snes: &mut Snes) {
-    match session.load_state(snes, storage::Slot::Quick) {
+fn load_state(session: &storage::Session<storage::FsStore>, core: &mut dyn Core) {
+    match session.load_state(core, storage::Slot::Quick) {
         Ok(true) => println!("Loaded state"),
         Ok(false) => println!("No quick save for this game"),
         Err(err) => eprintln!("Failed to load state: {err}"),
@@ -252,8 +252,6 @@ fn load_state(session: &storage::Session<storage::FsStore>, snes: &mut Snes) {
 }
 
 fn main() {
-    use core_model::Core;
-
     let mut rom_path = None;
     let mut uncapped = false;
     let mut record = false;
@@ -278,29 +276,30 @@ fn main() {
         .expect("Usage: runner <path-to-rom> [--uncapped] [--record-gif] [--record-mp4] [--mute]");
 
     let rom = std::fs::read(&path).expect("Failed to read ROM");
-    let session = storage::Session::new(
-        storage::FsStore::new(),
-        storage::GameId::new(
-            core_model::System::Snes,
-            artwork::rom_sha1(artwork::System::Snes, &rom),
-        ),
-    );
+    let system = core_loader::system_for_path(&path).expect("Unsupported ROM file");
+    let mut core = core_loader::load(system, rom).expect("Failed to load cartridge");
+    let cartridge = core
+        .cartridge_info()
+        .expect("Loaded core must provide cartridge metadata");
+    let session = storage::Session::new(storage::FsStore::new(), cartridge.game_id());
+    let title = cartridge.title.trim().to_string();
+    let display_timing = cartridge
+        .tv_system
+        .map(|system| system.to_string())
+        .unwrap_or_else(|| cartridge.system.name().to_string());
 
-    let cartridge = Cartridge::new(rom).expect("Failed to parse cartridge");
-    let title = cartridge.title().trim().to_string();
-    let tv_system = cartridge.region().tv_system();
-    let target_fps = snes::cartridge::frame_rate(tv_system);
-    let mut snes = Snes::new(cartridge);
+    let frame_duration = core.frame_interval().expect("Player requires a paced core");
+    let target_fps = 1.0 / frame_duration.as_secs_f64();
+    let controller = core.controllers().into_iter().next();
 
-    if let Err(err) = session.restore_save_ram(&mut snes) {
+    if let Err(err) = session.restore_save_ram(&mut *core) {
         eprintln!("Failed to restore save RAM: {err}");
     }
 
-    let initial_frame = snes.software_frame().expect("SNES must expose video");
+    let initial_frame = core
+        .software_frame()
+        .expect("Player requires software video");
     let (frame_width, frame_height) = (initial_frame.width, initial_frame.height);
-    let frame_duration = snes
-        .frame_interval()
-        .unwrap_or_else(|| Duration::from_secs_f64(1.0 / target_fps));
 
     let (record_width, record_height) = (frame_width * SCALE, frame_height * SCALE);
 
@@ -319,7 +318,7 @@ fn main() {
                 target_fps,
                 record_width,
                 record_height,
-                snes.audio_spec(),
+                core.audio_spec(),
             )
         })
         .flatten();
@@ -341,7 +340,7 @@ fn main() {
 
     let mut event_pump = sdl.event_pump().expect("Failed to get event pump");
 
-    let mut player = match (mute, snes.audio_spec()) {
+    let mut player = match (mute, core.audio_spec()) {
         (false, Some(spec)) => audio::AudioPlayer::new(spec)
             .inspect_err(|err| eprintln!("audio disabled: {err}"))
             .ok(),
@@ -375,11 +374,15 @@ fn main() {
                     repeat: false,
                     ..
                 } => match key {
-                    Scancode::F5 => save_state(&session, &snes),
-                    Scancode::F8 => load_state(&session, &mut snes),
+                    Scancode::F5 => save_state(&session, &*core),
+                    Scancode::F8 => load_state(&session, &mut *core),
                     _ => {
                         if let Some(button) = game_button(key) {
-                            snes.set_button(0, button, true);
+                            if let Some(port) =
+                                controller.as_ref().filter(|port| port.supports(button))
+                            {
+                                core.set_button(port.port, button, true);
+                            }
                         }
                     }
                 },
@@ -388,7 +391,10 @@ fn main() {
                     ..
                 } => {
                     if let Some(button) = game_button(key) {
-                        snes.set_button(0, button, false);
+                        if let Some(port) = controller.as_ref().filter(|port| port.supports(button))
+                        {
+                            core.set_button(port.port, button, false);
+                        }
                     }
                 }
                 _ => {}
@@ -396,29 +402,31 @@ fn main() {
         }
 
         let start = Instant::now();
-        snes.run_frame();
+        core.run_frame();
         core_time += start.elapsed();
         frames += 1;
 
         if sram_flushed.elapsed() >= SAVE_RAM_FLUSH {
             sram_flushed = Instant::now();
-            if let Err(err) = session.persist_save_ram(&snes) {
+            if let Err(err) = session.persist_save_ram(&*core) {
                 eprintln!("Failed to write save RAM: {err}");
             }
         }
 
         if player.is_some() || video_recorder.is_some() {
-            snes.drain_audio(&mut audio_buffer);
+            core.drain_audio(&mut audio_buffer);
             if let Some(player) = player.as_mut() {
                 player.queue(&audio_buffer);
             }
+
             if let Some(rec) = video_recorder.as_mut() {
                 rec.push_audio(&audio_buffer);
             }
+
             audio_buffer.clear();
         }
 
-        let frame = snes.software_frame().expect("SNES video disappeared");
+        let frame = core.software_frame().expect("Core video disappeared");
 
         if recording {
             frame.write_rgb8(&mut buffer);
@@ -461,9 +469,10 @@ fn main() {
             let frame_ms = core_time.as_secs_f64() * 1000.0 / f64::from(frames);
             let core_fps = f64::from(frames) / core_time.as_secs_f64();
             let stats = format!(
-                "{title} [{tv_system}{}] — core: {core_fps:.0} fps, {frame_ms:.2} ms/frame",
+                "{title} [{display_timing}{}] — core: {core_fps:.0} fps, {frame_ms:.2} ms/frame",
                 if uncapped { ", uncapped" } else { "" },
             );
+
             canvas
                 .window_mut()
                 .set_title(&stats)
@@ -476,7 +485,7 @@ fn main() {
         }
     }
 
-    if let Err(err) = session.persist_save_ram(&snes) {
+    if let Err(err) = session.persist_save_ram(&*core) {
         eprintln!("Failed to write save RAM: {err}");
     }
 

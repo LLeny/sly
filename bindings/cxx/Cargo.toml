@@ -10,6 +10,7 @@ crate-type = ["lib", "staticlib"]
 [dependencies]
 artwork = { path = "../../crates/artwork", features = ["fetch"] }
 core-model = { path = "../../crates/models/core" }
+core-loader = { path = "../../crates/core-loader" }
 sly-ffi = { path = "../c" }
 cxx = "1.0.198"
 

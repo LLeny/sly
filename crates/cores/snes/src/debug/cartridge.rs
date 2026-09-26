@@ -24,14 +24,23 @@ pub(super) fn cartridge_view(cart: &Cartridge) -> CartridgeView {
 
     CartridgeView {
         title: cart.title().into(),
-        fields: vec![
-            CartridgeField::new("Mapper", self::mapper_name(cart)).accented(),
-            CartridgeField::new("Speed", speed),
-            CartridgeField::new("Region", cart.region().to_string()),
-            CartridgeField::new("ROM size", self::human_size(cart.rom.len())),
-            CartridgeField::new("SRAM size", self::human_size(cart.sram.len())),
-            CartridgeField::new("Header", format!("${:06X}", cart.header_offset())),
-        ],
+        details: StructuredView {
+            sections: vec![Section {
+                rows: vec![
+                    Field::new("Mapper", self::mapper_name(cart)).accented(),
+                    Field::new("Speed", speed),
+                    Field::new("Region", cart.region().to_string()),
+                    Field::new("ROM size", self::human_size(cart.rom.len())),
+                    Field::new("SRAM size", self::human_size(cart.sram.len())),
+                    Field::new("Header", format!("${:06X}", cart.header_offset())),
+                ]
+                .into_iter()
+                .map(Row::Field)
+                .collect(),
+                ..Default::default()
+            }],
+            meta: None,
+        },
         cover: None,
     }
 }

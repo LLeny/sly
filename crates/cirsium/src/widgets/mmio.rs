@@ -12,96 +12,11 @@ use crate::components::{
     ClickHandler, DETAIL_INDENT, INDENT_STEP, Panel, RowCallback, chevron_slot, hex, label_text,
     row_toggle, vertical_scroll_area,
 };
-use crate::diff::{Highlight, highlight_color};
+
+use crate::diff::highlight_color;
 use crate::theme::Theme;
 
-#[derive(Clone)]
-pub struct MmioFieldView {
-    pub name: SharedString,
-    pub bit_label: SharedString,
-    pub value: u32,
-    pub display: SharedString,
-    pub is_bool: bool,
-    pub children: Vec<MmioFieldView>,
-}
-
-#[derive(Clone)]
-pub struct MmioRegisterView {
-    pub id: SharedString,
-    pub name: SharedString,
-    pub addr: SharedString,
-    pub value: u32,
-    pub bits: u8,
-    pub highlight: Highlight,
-    pub fields: Vec<MmioFieldView>,
-}
-
-impl MmioRegisterView {
-    fn hex(&self) -> String {
-        hex(self.value, self.bits)
-    }
-}
-
-#[derive(Clone)]
-pub struct MmioGroup {
-    pub name: SharedString,
-    pub registers: Vec<MmioRegisterView>,
-}
-
-#[derive(Clone, Default)]
-pub struct MmioView {
-    pub groups: Vec<MmioGroup>,
-}
-
-impl From<debugger_model::MmioFieldView> for MmioFieldView {
-    fn from(field: debugger_model::MmioFieldView) -> Self {
-        Self {
-            name: field.name.into(),
-            bit_label: field.bit_label.into(),
-            value: field.value,
-            display: field.display.into(),
-            is_bool: field.is_bool,
-            children: field.children.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl From<debugger_model::MmioRegisterView> for MmioRegisterView {
-    fn from(reg: debugger_model::MmioRegisterView) -> Self {
-        Self {
-            id: reg.id.into(),
-            name: reg.name.into(),
-            addr: reg.addr.into(),
-            value: reg.value,
-            bits: reg.bits,
-            highlight: reg.highlight,
-            fields: reg.fields.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl From<debugger_model::MmioGroup> for MmioGroup {
-    fn from(group: debugger_model::MmioGroup) -> Self {
-        Self {
-            name: group.name.into(),
-            registers: group.registers.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl From<debugger_model::MmioView> for MmioView {
-    fn from(view: debugger_model::MmioView) -> Self {
-        Self {
-            groups: view.groups.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl MmioView {
-    fn register_count(&self) -> usize {
-        self.groups.iter().map(|g| g.registers.len()).sum()
-    }
-}
+pub use debugger_model::{MmioFieldView, MmioGroup, MmioRegisterView, MmioView};
 
 #[derive(IntoElement)]
 pub struct MmioWidget {
@@ -115,7 +30,7 @@ pub struct MmioWidget {
 }
 
 impl MmioWidget {
-    pub const ID: &'static str = "mmio";
+    pub const ID: &'static str = debugger_model::panel::MMIO;
 
     pub fn new(view: Arc<MmioView>) -> Self {
         Self {
@@ -172,7 +87,12 @@ impl RenderOnce for MmioWidget {
         let t = &*theme;
         let scroll = self.scroll.clone();
 
-        let count = self.view.register_count();
+        let count = self
+            .view
+            .groups
+            .iter()
+            .map(|group| group.registers.len())
+            .sum::<usize>();
 
         let mut list = div()
             .id("mmio-list")
@@ -195,15 +115,15 @@ impl RenderOnce for MmioWidget {
         } else {
             let mut groups: Vec<_> = self.view.groups.iter().collect();
             if let Some(priority) = &self.priority
-                && groups.iter().any(|g| g.name == *priority)
+                && groups.iter().any(|g| g.name.as_ref() == priority.as_ref())
             {
-                groups.sort_by_key(|g| g.name != *priority);
+                groups.sort_by_key(|g| g.name.as_ref() != priority.as_ref());
             }
 
             for group in groups {
-                list = list.child(self::group_header(t, group.name.clone()));
+                list = list.child(self::group_header(t, group.name.clone().into()));
                 for reg in &group.registers {
-                    let is_expanded = self.expanded.contains(&reg.id);
+                    let is_expanded = self.expanded.contains(reg.id.as_ref());
                     list = list.child(self::register_row(
                         t,
                         reg,
@@ -252,19 +172,19 @@ fn register_row(
     let name = div()
         .text_xs()
         .text_color(theme.text_secondary)
-        .child(reg.name.clone());
+        .child(SharedString::from(reg.name.clone()));
 
     let addr = div()
         .font_family(theme.mono_font)
         .text_xs()
         .text_color(theme.text_dim)
-        .child(reg.addr.clone());
+        .child(SharedString::from(reg.addr.clone()));
 
     let value = div()
         .font_family(theme.mono_font)
         .text_xs()
         .text_color(highlight_color(theme, reg.highlight))
-        .child(reg.hex());
+        .child(hex(reg.value, reg.bits));
 
     let mut row = div()
         .id(reg.id.clone())
@@ -280,7 +200,7 @@ fn register_row(
         .child(value);
 
     if expandable && let Some(handler) = on_toggle {
-        row = row_toggle(row, theme, reg.id.clone(), handler);
+        row = row_toggle(row, theme, reg.id.clone().into(), handler);
     }
 
     row
@@ -306,7 +226,7 @@ fn field_row(theme: &Theme, field: &MmioFieldView, depth: usize) -> Div {
         .text_color(theme.text_dim)
         .w(px(44.))
         .flex_none()
-        .child(field.bit_label.clone());
+        .child(SharedString::from(field.bit_label.clone()));
 
     let name = label_text(theme, field.name.clone());
 
@@ -319,7 +239,7 @@ fn field_row(theme: &Theme, field: &MmioFieldView, depth: usize) -> Div {
         .font_family(theme.mono_font)
         .text_xs()
         .text_color(value_color)
-        .child(field.display.clone());
+        .child(SharedString::from(field.display.clone()));
 
     div()
         .flex()

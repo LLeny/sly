@@ -12,7 +12,6 @@ struct Breakpoint {
     kind: BreakpointKind,
     cpu: CpuId,
     region: Arc<str>,
-    pc_mask: u32,
     enabled: bool,
     label: SharedString,
     note: SharedString,
@@ -76,7 +75,7 @@ impl Breakpoints {
     ) {
         let label = format!("${}", target.format_address(&region, start)).into();
         let note = target.annotate(start).into();
-        self.add_labeled(start, end, kind, cpu, region, label, note, target);
+        self.add_labeled(start, end, kind, cpu, region, label, note);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -89,7 +88,6 @@ impl Breakpoints {
         region: Arc<str>,
         label: SharedString,
         note: SharedString,
-        target: &dyn DebugCore,
     ) {
         let (start, end) = (start.min(end), start.max(end));
         if self.entries.iter().any(|b| {
@@ -98,12 +96,6 @@ impl Breakpoints {
             return;
         }
 
-        let pc_mask = target
-            .cpus()
-            .into_iter()
-            .find(|desc| desc.id == cpu)
-            .map_or(u32::MAX, |desc| desc.pc_mask());
-
         self.entries.push(Breakpoint {
             id: self.next_id,
             start,
@@ -111,7 +103,6 @@ impl Breakpoints {
             kind,
             cpu,
             region,
-            pc_mask,
             enabled: true,
             label,
             note,
@@ -156,7 +147,6 @@ impl Breakpoints {
                 kind: b.kind,
                 cpu: b.cpu.clone(),
                 region: b.region.clone(),
-                pc_mask: b.pc_mask,
             })
             .collect();
     }

@@ -4,6 +4,8 @@ use core_model::state::{Envelope, StateError, Thumbnail};
 use crate::mmio::MemoryMap;
 use crate::{Snes, ppu};
 
+const PAYLOAD_VERSION: u16 = 1;
+
 impl<M: MemoryMap> Snes<M> {
     pub fn save_state(&self) -> Result<Vec<u8>, StateError> {
         let payload = postcard::to_allocvec(self)
@@ -12,10 +14,11 @@ impl<M: MemoryMap> Snes<M> {
         let frame = self.ppu.frame_buffer_rgba();
         let cartridge = &self.mmu.cartridge;
 
-        Ok(Envelope {
+        Envelope {
             system: System::Snes,
             rom_crc32: cartridge.rom_crc32(),
             rom_len: cartridge.rom.len() as u32,
+            payload_version: PAYLOAD_VERSION,
             thumbnail: Some(Thumbnail {
                 width: ppu::SCREEN_WIDTH,
                 height: ppu::SCREEN_HEIGHT,
@@ -23,7 +26,7 @@ impl<M: MemoryMap> Snes<M> {
             }),
             payload: &payload,
         }
-        .encode())
+        .encode()
     }
 
     pub fn load_state(&mut self, bytes: &[u8]) -> Result<(), StateError> {
@@ -32,13 +35,19 @@ impl<M: MemoryMap> Snes<M> {
             return Err(StateError::SystemMismatch);
         }
 
+        envelope.check_payload_version(PAYLOAD_VERSION)?;
+
         let cartridge = &self.mmu.cartridge;
         envelope.check_rom(cartridge.rom_crc32(), cartridge.rom.len())?;
 
         let mut restored: Snes<M> = postcard::from_bytes(envelope.payload)
             .map_err(|err| StateError::Corrupt(format!("decoding state: {err}")))?;
 
-        restored.mmu.cartridge.rom = std::mem::take(&mut self.mmu.cartridge.rom);
+        restored
+            .mmu
+            .cartridge
+            .restore_rom_from(&mut self.mmu.cartridge);
+
         restored.rebuild_devices();
         restored
             .ppu

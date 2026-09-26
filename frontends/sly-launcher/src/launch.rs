@@ -2,8 +2,7 @@ use bevy::camera::primitives::Aabb;
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{IoTaskPool, Task};
-use core_model::Core;
-use snes::Snes;
+use core_loader::PlayerCore;
 
 use crate::assets::UiSounds;
 use crate::camera::DetailCamera;
@@ -33,7 +32,7 @@ const LAUNCH_VIEWPORT_Z: i32 = 10;
 
 #[derive(Resource, Default)]
 pub struct PendingGame {
-    pub core: Option<(Snes, storage::GameId)>,
+    pub core: Option<(PlayerCore, storage::GameId)>,
     pub error: Option<String>,
 }
 
@@ -41,7 +40,7 @@ pub struct PendingGame {
 pub struct Blackout;
 
 #[derive(Component)]
-pub struct GameLoadTask(pub Task<Result<(Snes, storage::GameId), String>>);
+pub struct GameLoadTask(pub Task<Result<(PlayerCore, storage::GameId), String>>);
 
 pub fn begin_launch(
     commands: &mut Commands,
@@ -57,9 +56,17 @@ pub fn begin_launch(
     };
 
     let path = entry.path.clone();
-    let game = storage::GameId::new(core_model::System::Snes, entry.sha1.clone());
-    let task = IoTaskPool::get()
-        .spawn(async move { library::load_cartridge(&path).map(|cart| (Snes::new(cart), game)) });
+    let system = entry.system;
+    let task = IoTaskPool::get().spawn(async move {
+        let core = library::load_core(system, &path)?;
+        let game = core
+            .cartridge_info()
+            .ok_or("loaded core did not provide cartridge metadata")?
+            .game_id();
+
+        Ok((core, game))
+    });
+
     commands.spawn(GameLoadTask(task));
     commands.spawn(ui_sound(ui_sounds.game_start.clone()));
 
@@ -136,20 +143,21 @@ pub fn advance_launch(
     };
 
     let session = storage::Session::new(config.save_store(), game);
-    if let Err(err) = session.restore_save_ram(&mut core) {
+    if let Err(err) = session.restore_save_ram(&mut *core) {
         warn!("failed to restore save RAM: {err}");
     }
 
     let frame_interval = core
         .frame_interval()
-        .expect("SNES core reports a region-correct frame interval");
+        .expect("loaded core reports a frame interval");
     fixed_time.set_timestep(frame_interval);
-    audio_state.open(&core);
+    audio_state.open(&*core);
     commands.insert_resource(GameSession {
-        core: Box::new(core),
+        controller: core.controllers().into_iter().next(),
+        core,
         session,
         audio_samples: Vec::new(),
-        frame_dirty: false,
+        frame_dirty: true,
     });
 
     next_mode.set(LauncherMode::Playing);

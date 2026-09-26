@@ -277,6 +277,10 @@ pub fn step<M: MemoryMap>(snes: &mut Snes<M>) -> u64 {
 }
 
 fn step_main<M: MemoryMap>(cpu: &mut Cpu, snes: &mut Bus<M>) -> u64 {
+    #[cfg(feature = "debug")]
+    snes.mmu
+        .access
+        .instruction(Address::new(cpu.program_bank, cpu.pc).as_24bit());
     match cpu.execution {
         ExecutionState::Stopped => self::idle(snes),
         _ if snes.irq.take_nmi() => self::service_interrupt(cpu, snes, 0xFFEA, 0xFFFA),

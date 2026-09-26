@@ -1,47 +1,49 @@
+use crate::assets::icon;
+use crate::components::{footer_row, mono_text};
+use crate::widgets::grid::{GridContent, GridPanel, build_atlas};
+use debugger_model::{Tileset, TilesetTile};
+use gpui::prelude::*;
+use gpui::{Div, RenderImage, div};
 use std::sync::Arc;
 
-use gpui::RenderImage;
-
-use crate::assets::icon;
-use crate::components::{footer_row, hex, mono_text};
-use crate::widgets::grid::{GridContent, GridPanel, build_atlas};
-
-const TILE_SIZE: u32 = 8;
-const TILES_PER_ROW: usize = 16;
+const COLS: usize = 16;
 
 #[derive(Clone)]
 pub struct TilesetView {
     pub bpp: u8,
     pub tile_bytes: u32,
-    pub addrs: Arc<[u32]>,
+    pub cell_px: u32,
+    pub tiles: Arc<[TilesetTile]>,
     pub image: Option<Arc<RenderImage>>,
+    detail_rows: usize,
 }
 
-impl TilesetView {
-    fn rows(&self) -> usize {
-        self.addrs.len().div_ceil(TILES_PER_ROW)
-    }
-}
-
-impl From<debugger_model::Tileset> for TilesetView {
-    fn from(tileset: debugger_model::Tileset) -> Self {
-        let rows = tileset.tiles.len().div_ceil(TILES_PER_ROW);
+impl From<Tileset> for TilesetView {
+    fn from(mut tileset: Tileset) -> Self {
+        let rows = tileset.tiles.len().div_ceil(COLS);
+        let cell = tileset.tile_width.max(tileset.tile_height).max(1);
         let image = (rows > 0).then(|| {
             build_atlas(
-                TILES_PER_ROW,
+                COLS,
                 rows,
-                TILE_SIZE,
+                cell,
                 tileset
                     .tiles
                     .iter()
-                    .map(|tile| (tile.pixels.as_slice(), TILE_SIZE, TILE_SIZE)),
+                    .map(|t| (t.pixels.as_slice(), tileset.tile_width, tileset.tile_height)),
             )
         });
+
+        for tile in &mut tileset.tiles {
+            tile.pixels = Vec::new();
+        }
 
         Self {
             bpp: tileset.bpp,
             tile_bytes: tileset.tile_bytes,
-            addrs: tileset.tiles.iter().map(|tile| tile.addr).collect(),
+            cell_px: cell,
+            detail_rows: detail_rows(tileset.tiles.iter().map(|t| t.details.as_slice())),
+            tiles: tileset.tiles.into(),
             image,
         }
     }
@@ -50,18 +52,19 @@ impl From<debugger_model::Tileset> for TilesetView {
 pub struct TilesetWidget;
 
 impl TilesetWidget {
-    pub const ID: &'static str = "tileset";
+    pub const ID: &'static str = debugger_model::panel::TILESET;
 
     pub fn panel(view: Option<TilesetView>) -> GridPanel {
-        let content = view.as_ref().map(|view| GridContent {
-            image: view.image.clone(),
-            cols: TILES_PER_ROW,
-            rows: view.rows(),
-            tile_px: TILE_SIZE,
-            count: view.addrs.len(),
+        let content = view.as_ref().map(|v| GridContent {
+            image: v.image.clone(),
+            cols: COLS,
+            rows: v.tiles.len().div_ceil(COLS),
+            tile_px: v.cell_px,
+            count: v.tiles.len(),
             empty_message: "No tiles",
             overlay: None,
-            window_overlays: Vec::new(),
+            footprint: None,
+            window_overlays: vec![],
         });
 
         let mut panel = GridPanel::new(Self::ID, "Tileset", icon::GRID, content)
@@ -69,21 +72,43 @@ impl TilesetWidget {
         if let Some(view) = view {
             panel = panel
                 .meta(format!("{}bpp", view.bpp))
+                .detail_rows(view.detail_rows)
                 .detail(move |theme, index| {
-                    footer_row(
-                        theme,
-                        format!("Tile {index} ({})", hex(index as u32, 8)),
-                        mono_text(
+                    let tile = &view.tiles[index];
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(footer_row(
                             theme,
-                            format!(
-                                "{} bytes @ VRAM {}",
-                                view.tile_bytes,
-                                hex(view.addrs[index], 16)
+                            format!("Tile {index}"),
+                            mono_text(
+                                theme,
+                                format!(
+                                    "{} bytes @ {} {}",
+                                    view.tile_bytes,
+                                    tile.address.region,
+                                    debugger_model::hex(tile.address.addr, 16)
+                                ),
                             ),
-                        ),
-                    )
+                        ))
+                        .child(details(theme, &tile.details))
                 });
         }
+
         panel
     }
+}
+
+pub(super) fn detail_rows<'a>(fields: impl Iterator<Item = &'a [debugger_model::Field]>) -> usize {
+    fields.map(|f| f.len() + 1).max().unwrap_or(1)
+}
+
+pub(super) fn details(theme: &crate::Theme, fields: &[debugger_model::Field]) -> Div {
+    fields.iter().fold(div().flex().flex_col(), |d, f| {
+        d.child(footer_row(
+            theme,
+            f.label.clone(),
+            mono_text(theme, f.value.clone()),
+        ))
+    })
 }

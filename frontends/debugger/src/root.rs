@@ -75,7 +75,7 @@ impl Root {
     }
 
     pub(crate) fn load_rom(&mut self, file_name: String, rom: Vec<u8>, cx: &mut Context<Self>) {
-        match crate::load_snes_rom(rom, file_name) {
+        match crate::load_rom(rom, file_name) {
             Ok((target, art, game)) => {
                 let logs = self.logs.clone();
                 let debugger = cx.new(|cx| Debugger::new(target, game, logs, cx));

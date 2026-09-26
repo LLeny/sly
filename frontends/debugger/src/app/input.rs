@@ -97,7 +97,15 @@ impl Debugger {
             return;
         };
 
-        self.target.set_button(0, button, pressed);
+        let Some(controller) = self.target.controllers().into_iter().next() else {
+            return;
+        };
+
+        if !controller.supports(button) {
+            return;
+        }
+
+        self.target.set_button(controller.port, button, pressed);
         if pressed {
             if !self.pressed_buttons.contains(&button) {
                 self.pressed_buttons.push(button);
@@ -115,8 +123,12 @@ impl Debugger {
         }
 
         if !self.game_focus.is_focused(window) && !self.pressed_buttons.is_empty() {
-            for button in self.pressed_buttons.drain(..) {
-                self.target.set_button(0, button, false);
+            if let Some(controller) = self.target.controllers().into_iter().next() {
+                for button in self.pressed_buttons.drain(..) {
+                    self.target.set_button(controller.port, button, false);
+                }
+            } else {
+                self.pressed_buttons.clear();
             }
         }
     }

@@ -94,15 +94,14 @@ pub(super) fn build(lines: &[DisasmLine]) -> GraphLayout {
     for (i, line) in lines.iter().enumerate() {
         if matches!(
             line.flow,
-            FlowKind::CondBranch | FlowKind::Branch | FlowKind::Jump | FlowKind::Return
+            FlowKind::Branch | FlowKind::Jump | FlowKind::Return
         ) && i + 1 < n
         {
             is_leader[i + 1] = true;
         }
-        if matches!(
-            line.flow,
-            FlowKind::CondBranch | FlowKind::Branch | FlowKind::Jump
-        ) && let Some(target) = line.target
+
+        if matches!(line.flow, FlowKind::Branch | FlowKind::Jump)
+            && let Some(target) = line.target
             && let Some(&j) = addr_index.get(&target)
         {
             is_leader[j] = true;
@@ -135,26 +134,30 @@ pub(super) fn build(lines: &[DisasmLine]) -> GraphLayout {
     for (bi, block) in blocks.iter().enumerate() {
         let last = &lines[block.end - 1];
 
-        match last.flow {
-            FlowKind::Return => {}
-            FlowKind::CondBranch => {
-                if let Some(target) = target_block(last) {
-                    edges.push((bi, target, EdgeKind::Taken));
-                }
-                if block.end < n {
-                    edges.push((bi, block_at_line[block.end], EdgeKind::FallThrough));
-                }
-            }
-            FlowKind::Branch | FlowKind::Jump => {
-                if let Some(target) = target_block(last) {
-                    edges.push((bi, target, EdgeKind::Normal));
-                }
-            }
-            FlowKind::None | FlowKind::Call => {
-                if block.end < n {
-                    edges.push((bi, block_at_line[block.end], EdgeKind::Normal));
-                }
-            }
+        if matches!(last.flow, FlowKind::Branch | FlowKind::Jump)
+            && let Some(target) = target_block(last)
+        {
+            edges.push((
+                bi,
+                target,
+                if last.conditional {
+                    EdgeKind::Taken
+                } else {
+                    EdgeKind::Normal
+                },
+            ));
+        }
+
+        if last.has_fallthrough() && block.end < n {
+            edges.push((
+                bi,
+                block_at_line[block.end],
+                if last.conditional {
+                    EdgeKind::FallThrough
+                } else {
+                    EdgeKind::Normal
+                },
+            ));
         }
     }
 

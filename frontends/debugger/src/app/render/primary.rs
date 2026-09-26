@@ -79,22 +79,22 @@ impl Debugger {
                 move |id, _, cx| this.update(cx, |d, cx| d.toggle_expanded(MmioWidget::ID, id, cx))
             });
 
-        let dma = visible.contains(DmaWidget::ID).then(|| {
-            DmaWidget::new(self.dma_view.clone())
-                .scroll(self.scroll_for(DmaWidget::ID))
-                .expanded(self.expanded_set(DmaWidget::ID))
-                .collapsed(self.is_collapsed(DmaWidget::ID))
-                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(DmaWidget::ID, cx)))
-                .on_toggle_channel({
+        let palette = visible.contains(PaletteWidget::ID).then(|| {
+            let resources = self.resources_of(VideoResourceKind::Palette);
+            PaletteWidget::new(self.palette_view.clone())
+                .resources(resources.clone(), self.palette_ui.index(&resources))
+                .on_resource_select({
                     let this = this.clone();
-                    move |id, _, cx| {
-                        this.update(cx, |d, cx| d.toggle_expanded(DmaWidget::ID, id, cx))
+                    move |index, _, cx| {
+                        this.update(cx, |d, cx| {
+                            d.palette_ui.resource = resources.get(index).map(|r| r.id.clone());
+                            d.palette_selected = None;
+                            d.refresh_palette();
+                            d.refresh_tileset(cx);
+                            cx.notify();
+                        })
                     }
                 })
-        });
-
-        let palette = visible.contains(PaletteWidget::ID).then(|| {
-            PaletteWidget::new(self.palette_view.clone())
                 .scroll(self.scroll_for(PaletteWidget::ID))
                 .selected(self.palette_selected)
                 .collapsed(self.is_collapsed(PaletteWidget::ID))
@@ -107,25 +107,12 @@ impl Debugger {
                 })
         });
 
-        let ppu = visible.contains(PpuWidget::ID).then(|| {
-            PpuWidget::new(self.ppu_view.clone())
-                .scroll(self.scroll_for(PpuWidget::ID))
-                .expanded(self.expanded_set(PpuWidget::ID))
-                .collapsed(self.is_collapsed(PpuWidget::ID))
-                .on_toggle(cx.listener(|this, _, _, cx| this.toggle(PpuWidget::ID, cx)))
-                .on_toggle_group({
-                    let this = this.clone();
-                    move |id, _, cx| {
-                        this.update(cx, |d, cx| d.toggle_expanded(PpuWidget::ID, id, cx))
-                    }
-                })
-        });
-
         let tileset = visible.contains(TilesetWidget::ID).then(|| {
             self.wire_grid(
-                TilesetWidget::panel(self.tileset.clone()).layers(self.tileset_layers.clone()),
+                TilesetWidget::panel(self.tileset.clone()),
                 TilesetWidget::ID,
                 &self.tileset_ui,
+                self.resources_of(VideoResourceKind::Tileset),
                 |d| &mut d.tileset_ui,
                 Self::refresh_tileset,
                 cx,
@@ -134,9 +121,10 @@ impl Debugger {
 
         let tilemap = visible.contains(TilemapWidget::ID).then(|| {
             self.wire_grid(
-                TilemapWidget::panel(self.tilemap.clone()).layers(self.tileset_layers.clone()),
+                TilemapWidget::panel(self.tilemap.clone()),
                 TilemapWidget::ID,
                 &self.tilemap_ui,
+                self.resources_of(VideoResourceKind::Tilemap),
                 |d| &mut d.tilemap_ui,
                 Self::refresh_tilemap,
                 cx,
@@ -148,8 +136,21 @@ impl Debugger {
                 SpritesWidget::panel(self.sprites.clone()),
                 SpritesWidget::ID,
                 &self.sprites_ui,
+                self.resources_of(VideoResourceKind::Sprites),
                 |d| &mut d.sprites_ui,
                 Self::refresh_sprites,
+                cx,
+            )
+        });
+
+        let raster = visible.contains(RasterWidget::ID).then(|| {
+            self.wire_grid(
+                RasterWidget::panel(self.raster.clone()),
+                RasterWidget::ID,
+                &self.raster_ui,
+                self.resources_of(VideoResourceKind::Raster),
+                |d| &mut d.raster_ui,
+                Self::refresh_raster,
                 cx,
             )
         });
@@ -227,6 +228,15 @@ impl Debugger {
                         let this = this.clone();
                         move |ix, pos, _, cx| {
                             this.update(cx, |d, cx| d.disasm_open_menu(pane_ix, ix, pos, cx))
+                        }
+                    })
+                    .decode_mode(pane.disasm.decode_label(), {
+                        let this = this.clone();
+                        move |_, _, cx| {
+                            this.update(cx, |d, cx| {
+                                d.panes[pane_ix].disasm.cycle_decode_mode(d.target.as_ref());
+                                cx.notify();
+                            })
                         }
                     })
                     .view_mode(pane.disasm.view_mode())
@@ -362,21 +372,19 @@ impl Debugger {
         if let Some(breakpoints) = breakpoints {
             panels.insert(BreakpointsWidget::ID.into(), breakpoints.into_any_element());
         }
-        if let Some(dma) = dma {
-            panels.insert(DmaWidget::ID.into(), dma.into_any_element());
-        }
+
         if let Some(palette) = palette {
             panels.insert(PaletteWidget::ID.into(), palette.into_any_element());
         }
-        if let Some(ppu) = ppu {
-            panels.insert(PpuWidget::ID.into(), ppu.into_any_element());
-        }
+
         if let Some(tileset) = tileset {
             panels.insert(TilesetWidget::ID.into(), tileset.into_any_element());
         }
+
         if let Some(tilemap) = tilemap {
             panels.insert(TilemapWidget::ID.into(), tilemap.into_any_element());
         }
+
         if let Some(cartridge) = cartridge {
             panels.insert(
                 CartridgeWidget::ID.into(),
@@ -387,9 +395,15 @@ impl Debugger {
         if let Some(sprites) = sprites {
             panels.insert(SpritesWidget::ID.into(), sprites.into_any_element());
         }
+
+        if let Some(raster) = raster {
+            panels.insert(RasterWidget::ID.into(), raster.into_any_element());
+        }
+
         if let Some(screen) = framebuffer {
             panels.insert(FramebufferWidget::ID.into(), screen);
         }
+
         panels.extend(cpu_panels);
         panels.extend(disasm_panels);
         panels.extend(call_stack_panels);

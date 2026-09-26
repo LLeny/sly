@@ -1,7 +1,7 @@
 use std::ops::Range;
 
-use debugger_model::{LUA_KEYWORDS, LuaTokenKind};
 use gpui::SharedString;
+use scripting::{LUA_KEYWORDS, LuaTokenKind};
 
 pub(super) const MAX_MATCHES: usize = 8;
 

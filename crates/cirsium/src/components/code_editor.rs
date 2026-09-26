@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use debugger_model::{LuaToken, tokenize_lua};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Bounds, ClipboardItem, Context, CursorStyle, EntityInputHandler, EventEmitter,
     FocusHandle, Focusable, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     Pixels, Point, ScrollHandle, SharedString, UTF16Selection, Window, actions, div, point, px,
 };
+
+use scripting::{LuaToken, tokenize_lua};
 
 use self::complete::Suggestions;
 use self::element::EditorElement;

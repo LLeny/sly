@@ -9,6 +9,7 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -19,8 +20,7 @@
 #include <stdexcept>
 
 namespace {
-sly::Core
-load_core(const sly::SystemDescriptor system, const QString& rom_path, std::string& game_id) {
+sly::Core load_core(const sly::SystemDescriptor system, const QString& rom_path) {
     QFile rom(rom_path);
     if (!rom.open(QIODevice::ReadOnly)) {
         throw sly::Error(std::format("Unable to open ROM: {}", rom.errorString().toStdString()));
@@ -29,11 +29,10 @@ load_core(const sly::SystemDescriptor system, const QString& rom_path, std::stri
     const auto bytes = rom.readAll();
     const auto rom_bytes =
         std::span(reinterpret_cast<const std::uint8_t*>(bytes.constData()), bytes.size());
-    game_id = system.rom_sha1(rom_bytes);
     return system.create(rom_bytes);
 }
 
-constexpr const char* QUICK_SLOT_FILE = "quick.sav";
+constexpr std::uint8_t QUICK_SLOT = 0;
 
 QString data_root() {
     const QString override = qEnvironmentVariable("SLY_DATA_DIR");
@@ -104,14 +103,16 @@ std::optional<sly::Button> button_for_key(const int key) {
 PlayerWindow::PlayerWindow(
     const sly::SystemDescriptor system, QString rom_path, QString title, QWidget* parent
 )
-    : QMainWindow(parent), core_(load_core(system, rom_path, game_id_)) {
+    : QMainWindow(parent), core_(load_core(system, rom_path)) {
     setWindowTitle(title);
 
     const auto cartridge_info = core_.cartridge_info();
-    save_directory_ = data_path(std::format("{}/states/{}", cartridge_info.system, game_id_));
-    if (cartridge_info.has_battery && cartridge_info.sram_size > 0) {
-        save_ram_path_ =
-            data_path(std::format("{}/saves/{}/sram.bin", cartridge_info.system, game_id_));
+    const auto controllers = core_.controllers();
+    if (!controllers.empty()) {
+        controller_ = controllers.front();
+    }
+    if (cartridge_info.backup_kind && cartridge_info.backup_capacity > 0) {
+        save_ram_path_ = data_path(core_.save_ram_path());
         restore_save_ram();
     }
 
@@ -153,7 +154,7 @@ PlayerWindow::PlayerWindow(
 
     const auto add_save_slot = [this, saves_menu](
                                    const QString& label,
-                                   std::string file_name,
+                                   std::uint8_t slot,
                                    const QString& save_text,
                                    const QString& load_text,
                                    const QKeySequence& save_shortcut = {},
@@ -161,23 +162,18 @@ PlayerWindow::PlayerWindow(
                                ) {
         auto* slot_menu = saves_menu->addMenu(label);
         auto* save_action =
-            slot_menu->addAction(save_text, this, [this, file_name] { save_state(file_name); });
+            slot_menu->addAction(save_text, this, [this, slot] { save_state(slot); });
         save_action->setShortcut(save_shortcut);
         auto* load_action =
-            slot_menu->addAction(load_text, this, [this, file_name] { load_state(file_name); });
+            slot_menu->addAction(load_text, this, [this, slot] { load_state(slot); });
         load_action->setShortcut(load_shortcut);
     };
     add_save_slot(
-        tr("Quick Slot"),
-        QUICK_SLOT_FILE,
-        tr("Save\tF5"),
-        tr("Load\tF8"),
-        Qt::Key_F5,
-        Qt::Key_F8
+        tr("Quick Slot"), QUICK_SLOT, tr("Save\tF5"), tr("Load\tF8"), Qt::Key_F5, Qt::Key_F8
     );
     for (int slot = 0; slot <= 9; ++slot) {
         add_save_slot(
-            tr("Slot %1").arg(slot), std::format("slot-{}.sav", slot), tr("Save"), tr("Load")
+            tr("Slot %1").arg(slot), static_cast<std::uint8_t>(slot + 1), tr("Save"), tr("Load")
         );
     }
 
@@ -240,7 +236,8 @@ bool PlayerWindow::handle_game_key(QKeyEvent* event, const bool pressed) {
     }
 
     const auto button = button_for_key(event->key());
-    if (!button) {
+    if (!button || !controller_ ||
+        std::ranges::find(controller_->buttons, *button) == controller_->buttons.end()) {
         return false;
     }
 
@@ -263,18 +260,24 @@ void PlayerWindow::poll_gamepad() {
     apply_input();
 
     if (state.quick_save) {
-        save_state(QUICK_SLOT_FILE);
+        save_state(QUICK_SLOT);
     }
     if (state.quick_load) {
-        load_state(QUICK_SLOT_FILE);
+        load_state(QUICK_SLOT);
     }
 }
 
 void PlayerWindow::apply_input() {
-    for (std::size_t index = 0; index < sly::BUTTON_COUNT; ++index) {
-        core_.set_button(
-            0, static_cast<sly::Button>(index), keyboard_state_[index] || gamepad_state_[index]
-        );
+    if (!controller_) {
+        return;
+    }
+    for (const auto button : controller_->buttons) {
+        const auto index = static_cast<std::size_t>(button);
+        if (index < keyboard_state_.size()) {
+            core_.set_button(
+                controller_->port, button, keyboard_state_[index] || gamepad_state_[index]
+            );
+        }
     }
 }
 
@@ -316,13 +319,12 @@ void PlayerWindow::resize_video(const sly::FrameView frame, const int scale) {
     );
 }
 
-QString PlayerWindow::state_path(const std::string_view file_name) const {
-    return QDir(save_directory_)
-        .filePath(QString::fromUtf8(file_name.data(), static_cast<qsizetype>(file_name.size())));
+QString PlayerWindow::state_path(const std::uint8_t slot) const {
+    return data_path(core_.state_path(slot));
 }
 
-void PlayerWindow::save_state(const std::string_view file_name) {
-    const QString path = state_path(file_name);
+void PlayerWindow::save_state(const std::uint8_t slot) {
+    const QString path = state_path(slot);
 
     try {
         if (const QString error = write_file(path, core_.save_state()); !error.isEmpty()) {
@@ -339,8 +341,8 @@ void PlayerWindow::save_state(const std::string_view file_name) {
     }
 }
 
-void PlayerWindow::load_state(const std::string_view file_name) {
-    const QString path = state_path(file_name);
+void PlayerWindow::load_state(const std::uint8_t slot) {
+    const QString path = state_path(slot);
 
     QFile file(path);
     if (!file.exists()) {
@@ -393,6 +395,7 @@ void PlayerWindow::restore_save_ram() {
 
     const QByteArray bytes = file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
     if (file.error() != QFileDevice::NoError) {
+        core_.inhibit_save_ram_persistence();
         std::println(
             stderr,
             "Failed to read save RAM from {}: {}",
@@ -420,7 +423,7 @@ void PlayerWindow::persist_save_ram() {
         return;
     }
 
-    const auto bytes = core_.save_ram();
+    const auto bytes = core_.persistable_save_ram();
     if (bytes.empty()) {
         return;
     }

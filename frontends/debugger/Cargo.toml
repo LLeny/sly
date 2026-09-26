@@ -4,17 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+game-database = { path = "../../crates/game-database" }
+core-loader = { path = "../../crates/core-loader", features = ["debug"] }
 gpui = { workspace = true }
 artwork = { path = "../../crates/artwork" }
 cirsium = { path = "../../crates/cirsium" }
 core-model = { path = "../../crates/models/core" }
 debugger-model = { path = "../../crates/models/debugger" }
 workspace-model = { path = "../../crates/models/workspace" }
-snes = { path = "../../crates/cores/snes", features = ["debug"] }
 scripting = { path = "../../crates/scripting" }
 storage = { path = "../../crates/storage" }
 audio = { path = "../../crates/audio" }
-crc32fast = "1.5.0"
 futures = "0.3.31"
 tracing.workspace = true
 tracing-subscriber.workspace = true

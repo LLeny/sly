@@ -29,6 +29,7 @@ pub enum FlowKind {
 pub struct Disasm {
     pub text: String,
     pub length: u8,
+    /// Full 24-bit address.
     pub target: Option<u32>,
     pub class: InstructionClass,
     pub flow: FlowKind,
@@ -133,16 +134,16 @@ fn control_target<B: CpuPeek>(
     let next = pc.wrapping_add(length as u16);
     let bank = reader.bank;
 
-    let same_bank = |full: u32| ((full >> 16) as u8 == bank).then_some(full & 0xFFFF);
+    let in_bank = |offset: u16| (u32::from(bank) << 16) | u32::from(offset);
 
     match (m, form, fetch_arg(inst, m, form, pc as u64, reader)) {
         (
             M::Bra | M::Brl | M::Beq | M::Bne | M::Bcc | M::Bcs | M::Bmi | M::Bpl | M::Bvc | M::Bvs,
             _,
             Arg::Rel(disp),
-        ) => Some(next.wrapping_add(disp as u16) as u32),
-        (M::Jmp | M::Jsr, Form::Abs, Arg::Abs(a)) => Some(a as u32),
-        (M::Jmp | M::Jsl, Form::Abl, Arg::Long(a)) => same_bank(a),
+        ) => Some(in_bank(next.wrapping_add(disp as u16))),
+        (M::Jmp | M::Jsr, Form::Abs, Arg::Abs(a)) => Some(in_bank(a)),
+        (M::Jmp | M::Jml | M::Jsl, Form::Abl, Arg::Long(a)) => Some(a),
         _ => None,
     }
 }

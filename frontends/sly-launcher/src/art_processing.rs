@@ -2,7 +2,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use core_model::Region;
+use core_model::{Region, TvSystem};
 
 use artwork::layle as artwork;
 
@@ -18,8 +18,12 @@ pub struct ProcessedArtwork {
     pub dominant_color: Option<Vec3>,
 }
 
-pub fn process_artwork(bundle: artwork::ArtworkBundle, region: Region) -> ProcessedArtwork {
-    let shell = CartShell::from_region(region);
+pub fn process_artwork(
+    bundle: artwork::ArtworkBundle,
+    region: Option<Region>,
+    tv_system: Option<TvSystem>,
+) -> ProcessedArtwork {
+    let shell = CartShell::from_region(region, tv_system);
     let style = BoxStyle::from_region(region);
 
     let front = decode_rgba(bundle.front.as_deref());

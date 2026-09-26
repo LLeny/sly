@@ -227,11 +227,12 @@ impl Debugger {
         let memory_menu = self.memory.menu.as_ref().map(|menu| {
             let (bp_start, bp_end) = menu.range;
             let bp_label: SharedString = if bp_end > bp_start {
-                format!("${}...{:04X}", menu.address, bp_end & 0xFFFF).into()
+                format!("${}...{}", menu.address, menu.end_address).into()
             } else {
                 format!("${}", menu.address).into()
             };
-            let items = vec![
+
+            let mut items = vec![
                 MenuItem::new(
                     "Copy Address",
                     super::clipboard_listener(
@@ -259,19 +260,23 @@ impl Debugger {
                         this.memory_close_menu(cx);
                     }),
                 ),
-                MenuItem::new("Add read breakpoint", {
-                    let label = bp_label.clone();
-                    cx.listener(move |this, _, _, cx| {
-                        this.bp_add_mem(bp_start, bp_end, BreakpointKind::Read, label.clone(), cx)
-                    })
-                }),
-                MenuItem::new("Add write breakpoint", {
-                    let label = bp_label.clone();
-                    cx.listener(move |this, _, _, cx| {
-                        this.bp_add_mem(bp_start, bp_end, BreakpointKind::Write, label.clone(), cx)
-                    })
-                }),
             ];
+
+            if self.memory.supports_watchpoints() {
+                for (title, kind) in [
+                    ("Add read breakpoint", BreakpointKind::Read),
+                    ("Add write breakpoint", BreakpointKind::Write),
+                ] {
+                    let label = bp_label.clone();
+                    items.push(MenuItem::new(
+                        title,
+                        cx.listener(move |this, _, _, cx| {
+                            this.bp_add_mem(bp_start, bp_end, kind, label.clone(), cx)
+                        }),
+                    ));
+                }
+            }
+
             context_menu(
                 t,
                 menu.position,

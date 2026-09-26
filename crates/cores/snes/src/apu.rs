@@ -107,14 +107,30 @@ impl<M: ApuMap> Apu<M> {
     }
 
     pub fn read(&mut self, addr: u16) -> u8 {
-        #[cfg(feature = "debug")]
-        self.access.record((MemKind::Spc, addr as u32), false);
-
-        match self.map.region(addr) {
+        let value = match self.map.region(addr) {
             Region::Register => self.read_io(addr as u8),
             Region::Ipl if self.control.ipl_rom_enable() => IPL_ROM[(addr - 0xFFC0) as usize],
             _ => self.ram[addr as usize],
-        }
+        };
+
+        #[cfg(feature = "debug")]
+        self.access.record(
+            (MemKind::Spc, addr as u32),
+            addr as u32,
+            false,
+            value,
+            false,
+        );
+
+        value
+    }
+
+    #[cfg(feature = "debug")]
+    pub(crate) fn patch_ram(&mut self, addr: u32, bytes: &[u8]) -> usize {
+        let start = (addr as usize).min(self.ram.len());
+        let end = start.saturating_add(bytes.len()).min(self.ram.len());
+        self.ram[start..end].copy_from_slice(&bytes[..end - start]);
+        end - start
     }
 
     pub fn cpu_read_port(&self, index: usize) -> u8 {
@@ -151,7 +167,8 @@ impl<M: ApuMap> Apu<M> {
 
     pub fn write(&mut self, addr: u16, value: u8) {
         #[cfg(feature = "debug")]
-        self.access.record((MemKind::Spc, addr as u32), true);
+        self.access
+            .record((MemKind::Spc, addr as u32), addr as u32, true, value, false);
 
         match self.map.region(addr) {
             Region::Register => self.write_io(addr as u8, value),

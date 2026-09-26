@@ -65,8 +65,7 @@ pub fn footer_row(theme: &Theme, label: impl Into<SharedString>, value: impl Int
 }
 
 /// [`footer_row`] with a pre-built element label, for labels that embed inline
-/// elements (such as a [`divided`](super::divided) segment run) instead of plain
-/// text.
+/// elements instead of plain text.
 pub fn footer_row_el(label: impl IntoElement, value: impl IntoElement) -> Div {
     div()
         .flex()

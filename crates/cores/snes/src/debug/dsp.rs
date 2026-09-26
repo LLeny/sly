@@ -226,8 +226,7 @@ pub fn registers_view(dsp: &Dsp) -> StructuredView {
 fn bit_grid(label: &str, mask: u8) -> Row {
     Row::BitGrid {
         label: label.into(),
-        bits: 8,
-        on_mask: mask,
+        mask: mask.into(),
     }
 }
 

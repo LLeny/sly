@@ -58,7 +58,7 @@ pub struct FramebufferWidget {
 }
 
 impl FramebufferWidget {
-    pub const ID: &'static str = "framebuffer";
+    pub const ID: &'static str = debugger_model::panel::FRAMEBUFFER;
 
     pub fn new(view: Option<FramebufferView>) -> Self {
         Self {

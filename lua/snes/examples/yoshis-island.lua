@@ -43,13 +43,13 @@ local function install_patch(patch)
     return false
   end
 
-  sly.write8(patch.offset, patch.patched, ROM)
+  sly.write(patch.offset, {patch.patched}, ROM)
   return true
 end
 
 local function restore_patch(patch)
   if sly.read8(patch.offset, ROM) == patch.patched then
-    sly.write8(patch.offset, patch.original, ROM)
+    sly.write(patch.offset, {patch.original}, ROM)
   end
 end
 
@@ -109,7 +109,7 @@ sly.on_frame(function(frame)
   if gameplay and yoshi_active and airborne and holding_b then
     local previous = sly.read8(PREVIOUS_CONTROLLER_1_DATA_2, WRAM)
     if has_bit(previous, BUTTON_B) then
-      sly.write8(PREVIOUS_CONTROLLER_1_DATA_2, previous - BUTTON_B, WRAM)
+      sly.write(PREVIOUS_CONTROLLER_1_DATA_2, {previous - BUTTON_B}, WRAM)
     end
 
     mode = "infinite hover"

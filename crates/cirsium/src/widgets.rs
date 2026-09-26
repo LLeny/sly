@@ -6,15 +6,12 @@ pub mod channel_scopes;
 pub mod controls;
 pub mod cpu;
 pub mod disassembly;
-pub mod dma;
-pub mod field;
 pub mod framebuffer;
 pub mod grid;
 pub mod log;
 pub mod memory;
 pub mod mmio;
 pub mod palette;
-pub mod ppu;
 pub mod savestates;
 pub(crate) mod scope;
 pub mod script;
@@ -29,8 +26,9 @@ pub use breakpoints::{
     BreakpointEntry, BreakpointKind, BreakpointsView, BreakpointsWidget, breakpoint_color,
     breakpoint_colors,
 };
+
 pub use callstack::{CallStackView, CallStackWidget, StackFrameView};
-pub use cartridge::{CartridgeField, CartridgeView, CartridgeWidget};
+pub use cartridge::{CartridgeView, CartridgeWidget};
 pub use channel_scopes::{AudioScopesView, ChannelScopesWidget};
 pub use controls::{ControlsView, ControlsWidget, StepTargetView};
 pub use cpu::{CpuView, CpuWidget, FlagView, RegisterView};
@@ -38,16 +36,16 @@ pub use disassembly::{
     DisasmLine, DisasmToken, DisassemblyLayoutCache, DisassemblyView, DisassemblyWidget, TokenKind,
     ViewMode,
 };
-pub use dma::{DmaChannelDetail, DmaChannelView, DmaView, DmaWidget};
+
 pub use framebuffer::{FramebufferView, FramebufferWidget, stage_bgra};
 pub use grid::{
-    GridContent, GridOverlay, GridPanel, GridWindowBand, GridWindowOverlay, TilesetLayer,
+    GridContent, GridOverlay, GridPanel, GridWindowBand, GridWindowOverlay, VideoResource,
 };
+
 pub use log::{LogEntry, LogLevel, LogView, LogWidget, short_target};
 pub use memory::{MemoryCell, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};
 pub use mmio::{MmioFieldView, MmioGroup, MmioRegisterView, MmioView, MmioWidget};
 pub use palette::{PaletteColor, PaletteView, PaletteWidget};
-pub use ppu::{PpuGroup, PpuProperty, PpuView, PpuWidget};
 pub use savestates::{
     SavestateSlot, SavestatesView, SavestatesWidget, SlotAction, SlotThumbnail, thumbnail_image,
 };
@@ -58,5 +56,8 @@ pub use script::{
 pub use sprites::{SpritesView, SpritesWidget};
 pub use structured::{StructuredPanel, StructuredView};
 pub use table::{TablePanel, TableView};
-pub use tilemap::{TilemapEntryView, TilemapView, TilemapWidget};
+pub use tilemap::{TilemapView, TilemapWidget};
 pub use tileset::{TilesetView, TilesetWidget};
+
+pub mod raster;
+pub use raster::{RasterView, RasterWidget};
