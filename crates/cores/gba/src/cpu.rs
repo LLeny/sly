@@ -1,36 +1,42 @@
 pub mod decoder;
 pub mod interpreter;
+mod pipeline;
 
 use crate::mmio::Mmio;
+use pipeline::Pipeline;
 
 pub struct Cpu {
     pub registers: [u32; 16],
     pub cpsr: Psr,
-    pipeline: [Option<u32>; 3],
+    pipeline: Pipeline,
 }
 
 impl Cpu {
     pub fn new() -> Self {
         Self {
-            pipeline: [None; 3],
+            pipeline: Pipeline::default(),
             registers: [0; 16],
             cpsr: Psr::default(),
         }
     }
 
     pub fn step(&mut self, mmio: &mut Mmio) {
-        self.pipeline[0] = self.pipeline[1];
-        self.pipeline[1] = self.pipeline[2];
-        self.pipeline[2] = Some(self.fetch_instruction(mmio));
+        let instruction = self.fetch_instruction(mmio);
+        if let Some((addr, instruction)) = self.pipeline.advance(self.pc(), instruction) {
+            self.execute(mmio, addr, instruction);
+        }
 
-        *self.pc_mut() += if self.is_thumb() { 2 } else { 4 };
-
-        if let Some(instruction) = self.pipeline[0] {
-            self.execute(mmio, instruction);
+        if !self.pipeline.is_empty() {
+            let increment = if self.is_thumb() { 2 } else { 4 };
+            self.registers[15] = self.registers[15].wrapping_add(increment);
         }
     }
 
-    pub fn fetch_instruction(&self, mmio: &mut Mmio) -> u32 {
+    pub(crate) fn flush_pipeline(&mut self) {
+        self.pipeline.flush();
+    }
+
+    pub(crate) fn fetch_instruction(&self, mmio: &mut Mmio) -> u32 {
         if self.is_thumb() {
             u32::from(mmio.fetch16(self.pc() & !0b1))
         } else {
@@ -38,31 +44,32 @@ impl Cpu {
         }
     }
 
-    pub fn pc(&self) -> u32 {
+    pub(crate) fn pc(&self) -> u32 {
         self.registers[15]
     }
 
-    pub fn pc_mut(&mut self) -> &mut u32 {
-        &mut self.registers[15]
+    pub(crate) fn set_pc(&mut self, value: u32) {
+        self.flush_pipeline();
+        self.registers[15] = value;
     }
 
-    pub fn sp(&self) -> u32 {
+    pub(crate) fn sp(&self) -> u32 {
         self.registers[13]
     }
 
-    pub fn sp_mut(&mut self) -> &mut u32 {
-        &mut self.registers[13]
+    pub(crate) fn set_sp(&mut self, value: u32) {
+        self.registers[13] = value;
     }
 
-    pub fn lr(&self) -> u32 {
+    pub(crate) fn lr(&self) -> u32 {
         self.registers[14]
     }
 
-    pub fn lr_mut(&mut self) -> &mut u32 {
-        &mut self.registers[14]
+    pub(crate) fn set_lr(&mut self, value: u32) {
+        self.registers[14] = value;
     }
 
-    pub fn is_thumb(&self) -> bool {
+    pub(crate) fn is_thumb(&self) -> bool {
         self.cpsr.t()
     }
 }

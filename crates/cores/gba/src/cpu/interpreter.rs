@@ -3,9 +3,9 @@ use super::decoder::{arm, thumb};
 use crate::mmio::Mmio;
 
 impl Cpu {
-    pub(super) fn execute(&mut self, mmio: &mut Mmio, instruction: u32) {
+    pub(super) fn execute(&mut self, mmio: &mut Mmio, addr: u32, instruction: u32) {
         let mut interpreter = Interpreter { cpu: self, mmio };
-        interpreter.execute(instruction);
+        interpreter.execute(addr, instruction);
     }
 }
 
@@ -14,17 +14,41 @@ pub(super) struct Interpreter<'a> {
     mmio: &'a mut Mmio,
 }
 
-impl Interpreter<'_> {
-    fn execute(&mut self, instruction: u32) {
+impl<'a> Interpreter<'a> {
+    fn execute(&mut self, addr: u32, instruction: u32) {
         if self.cpu.is_thumb() {
             let instr = thumb::Instruction(instruction as u16);
-            println!("{}", instr);
+
+            #[cfg(feature = "disasm")]
+            println!("[{:04X}] {}", addr, instr);
+
             thumb::dispatch_ops(self, instr);
         } else {
             let instr = arm::Instruction(instruction);
-            println!("{}", instr);
-            arm::dispatch_ops(self, instr);
+
+            #[cfg(feature = "disasm")]
+            println!("[{:04X}] {}", addr, instr);
+
+            if self.check_condition(instr.cond()) {
+                arm::dispatch_ops(self, instr);
+            }
         }
+    }
+
+    fn check_condition(&self, cond: u8) -> bool {
+        let psr = self.cpu.cpsr;
+        let passed = match cond >> 1 {
+            0 => psr.z(),                        // EQ / NE
+            1 => psr.c(),                        // CS / CC
+            2 => psr.n(),                        // MI / PL
+            3 => psr.v(),                        // VS / VC
+            4 => psr.c() && !psr.z(),            // HI / LS
+            5 => psr.n() == psr.v(),             // GE / LT
+            6 => !psr.z() && psr.n() == psr.v(), // GT / LE
+            7 => true,                           // AL / NV
+            _ => return false,
+        };
+        passed ^ (cond & 1 != 0)
     }
 }
 
@@ -53,8 +77,17 @@ impl arm::Ops for Interpreter<'_> {
         todo!()
     }
 
-    fn b(&mut self, _inst: arm::Instruction) {
-        todo!()
+    fn b(&mut self, inst: arm::Instruction) {
+        if !self.check_condition(inst.cond()) {
+            return;
+        }
+
+        if inst.link() {
+            self.cpu.set_lr(self.cpu.pc().wrapping_sub(4));
+        }
+
+        let dst = self.cpu.pc().wrapping_add_signed(inst.offset() as i32);
+        self.cpu.set_pc(dst);
     }
 
     fn bx(&mut self, _inst: arm::Instruction) {
