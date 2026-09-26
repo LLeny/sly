@@ -4367,6 +4367,8 @@ dependencies = [
 name = "gba"
 version = "0.1.0"
 dependencies = [
+ "chapa",
+ "chipi-macros",
  "core-model",
  "crc32fast",
  "debugger-model",

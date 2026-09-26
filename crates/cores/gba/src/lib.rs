@@ -1,32 +1,47 @@
 pub mod cartridge;
+pub mod cpu;
 pub mod error;
 
 #[cfg(feature = "debug")]
 pub mod debug;
 
 pub use cartridge::Cartridge;
+pub use cpu::Cpu;
 
 pub struct Gba {
     cartridge: Cartridge,
+    cpu: Cpu,
+    cycles: usize,
 }
 
 impl Gba {
     pub fn new(cartridge: Cartridge) -> Self {
-        Self { cartridge }
+        Self {
+            cartridge,
+            cpu: Cpu::new(),
+            cycles: 0,
+        }
     }
 }
 
 impl core_model::Core for Gba {
     fn reset(&mut self) {
-        todo!()
+        self.cpu = Cpu::new();
     }
 
     fn step(&mut self) {
-        todo!()
+        self.cpu.step();
+        self.cycles += 1;
     }
 
     fn run_frame(&mut self) {
-        println!("lol");
+        const FRAME_CYCLES: usize = 280_896;
+
+        while self.cycles < FRAME_CYCLES {
+            self.step();
+        }
+
+        self.cycles -= FRAME_CYCLES;
     }
 
     fn software_frame(&self) -> Option<core_model::SoftwareFrame<'_>> {

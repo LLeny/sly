@@ -14,6 +14,10 @@ impl Cartridge {
         Ok(Self { rom })
     }
 
+    pub fn entry_point(&self) -> u32 {
+        u32::from_le_bytes(self.rom[0x34..0x38].try_into().unwrap())
+    }
+
     pub fn title(&self) -> String {
         String::from_utf8_lossy(&self.rom[0xA0..0xAC])
             .trim_end_matches('\0')
