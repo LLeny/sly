@@ -2699,7 +2699,8 @@ dependencies = [
 [[package]]
 name = "chipi-backend-rust"
 version = "1.0.0"
-source = "git+https://github.com/ioncodes/chipi?branch=1.0#31df64cd2861c127ac352eb59fce919e24b42575"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24c85d1843ed203e003c887ed42bf6586e7d29d5f0c571fca76f215a7f34483e"
 dependencies = [
  "chipi-core",
  "chipi-syntax",
@@ -2708,7 +2709,8 @@ dependencies = [
 [[package]]
 name = "chipi-core"
 version = "1.0.0"
-source = "git+https://github.com/ioncodes/chipi?branch=1.0#31df64cd2861c127ac352eb59fce919e24b42575"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ec33da23de3458bb210137e0544939747d6be358fae008ea99d3665fc0ca49d"
 dependencies = [
  "chipi-syntax",
 ]
@@ -2716,7 +2718,8 @@ dependencies = [
 [[package]]
 name = "chipi-macros"
 version = "1.0.0"
-source = "git+https://github.com/ioncodes/chipi?branch=1.0#31df64cd2861c127ac352eb59fce919e24b42575"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33642defef957ae428a908c95272b36feea202af178ca65f3f413a6876d7cdb1"
 dependencies = [
  "chipi-backend-rust",
  "chipi-core",
@@ -2725,7 +2728,8 @@ dependencies = [
 [[package]]
 name = "chipi-syntax"
 version = "1.0.0"
-source = "git+https://github.com/ioncodes/chipi?branch=1.0#31df64cd2861c127ac352eb59fce919e24b42575"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b2ec4a70647bb93edc6dcd980b987abdbffaf51256345b87b83de4d74ea3589"
 
 [[package]]
 name = "chrono"
