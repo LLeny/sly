@@ -6,6 +6,7 @@ members = [
     "crates/cirsium",
     "crates/core-loader",
     "crates/game-database",
+    "crates/cores/gba",
     "crates/cores/snes",
     "bindings/c",
     "bindings/cxx",

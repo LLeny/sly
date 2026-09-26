@@ -3204,6 +3204,7 @@ version = "0.1.0"
 dependencies = [
  "core-model",
  "debugger-model",
+ "gba",
  "snes",
  "thiserror 2.0.18",
 ]
@@ -4356,6 +4357,17 @@ name = "game-database"
 version = "0.1.0"
 dependencies = [
  "core-model",
+]
+
+[[package]]
+name = "gba"
+version = "0.1.0"
+dependencies = [
+ "core-model",
+ "crc32fast",
+ "debugger-model",
+ "sha1",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

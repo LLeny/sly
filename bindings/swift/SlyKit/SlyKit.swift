@@ -9,8 +9,9 @@ public enum SlyError: Error, Equatable {
 
 public enum System: Hashable, Sendable {
     case snes
+    case gba
 
-    public static let all: [System] = [.snes]
+    public static let all: [System] = [.snes, .gba]
 
     public var slug: String {
         nativeString(sly_system_slug(native))
@@ -33,6 +34,7 @@ public enum System: Hashable, Sendable {
     var native: SlySystem {
         switch self {
         case .snes: SLY_SYSTEM_SNES
+        case .gba: SLY_SYSTEM_GBA
         }
     }
 }

@@ -205,12 +205,14 @@ pub fn peek_thumbnail(bytes: &[u8]) -> Option<Thumbnail<'_>> {
 const fn system_tag(system: System) -> u16 {
     match system {
         System::Snes => 2,
+        System::Gba => 3,
     }
 }
 
 const fn system_from_tag(tag: u16) -> Option<System> {
     match tag {
         2 => Some(System::Snes),
+        3 => Some(System::Gba),
         _ => None,
     }
 }

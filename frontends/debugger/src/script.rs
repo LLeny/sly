@@ -142,6 +142,7 @@ impl Script {
 pub(crate) fn default_script(system: core_model::System) -> &'static str {
     match system {
         core_model::System::Snes => include_str!("../../../lua/snes/default.lua"),
+        core_model::System::Gba => "",
     }
 }
 

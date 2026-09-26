@@ -18,32 +18,37 @@ pub struct AudioSpec {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum System {
     Snes,
+    Gba,
 }
 
 impl System {
-    pub const ALL: [System; 1] = [System::Snes];
+    pub const ALL: [System; 2] = [System::Snes, System::Gba];
 
     pub const fn slug(self) -> &'static str {
         match self {
             System::Snes => "snes",
+            System::Gba => "gba",
         }
     }
 
     pub const fn name(self) -> &'static str {
         match self {
             System::Snes => "SNES",
+            System::Gba => "GBA",
         }
     }
 
     pub const fn qualified_name(self) -> &'static str {
         match self {
             System::Snes => "Super Nintendo Entertainment System",
+            System::Gba => "Game Boy Advance",
         }
     }
 
     pub const fn rom_extensions(self) -> &'static [&'static str] {
         match self {
             System::Snes => &["sfc", "smc"],
+            System::Gba => &["gba"],
         }
     }
 }

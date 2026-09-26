@@ -4,10 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-debug = ["snes/debug", "dep:debugger-model"]
+debug = ["snes/debug", "gba/debug", "dep:debugger-model"]
 
 [dependencies]
 core-model = { path = "../models/core" }
 debugger-model = { path = "../models/debugger", optional = true }
 snes = { path = "../cores/snes" }
+gba = { path = "../cores/gba" }
 thiserror = "2.0.18"

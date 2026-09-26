@@ -45,6 +45,7 @@ mod ffi {
     #[derive(Clone, Copy, Debug)]
     enum System {
         Snes = 0,
+        Gba = 1,
     }
 
     /// Values match `SlyButton` in the C API.
@@ -132,6 +133,7 @@ pub struct SlyCore {
 fn binding_system(system: CoreSystem) -> ffi::System {
     match system {
         CoreSystem::Snes => ffi::System::Snes,
+        CoreSystem::Gba => ffi::System::Gba,
     }
 }
 

@@ -31,6 +31,7 @@ pub enum SlyStatus {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SlySystem {
     Snes = 0,
+    Gba = 1,
 }
 
 #[repr(C)]
@@ -159,6 +160,7 @@ fn cstring_lossy(text: &str) -> CString {
 fn binding_system(system: System) -> SlySystem {
     match system {
         System::Snes => SlySystem::Snes,
+        System::Gba => SlySystem::Gba,
     }
 }
 

@@ -28,6 +28,7 @@ typedef enum SlyStatus {
 
 typedef enum SlySystem {
   SLY_SYSTEM_SNES = 0,
+  SLY_SYSTEM_GBA = 1,
 } SlySystem;
 
 typedef enum SlyRegion {

@@ -219,7 +219,7 @@ impl StepTarget {
 
 pub trait DebugCore: Core {
     fn cpus(&self) -> Vec<CpuDescriptor>;
-    /// Next instruction address, not a pipelined PC register.
+
     fn pc(&self, cpu: &CpuId) -> u32;
 
     fn set_pc(&mut self, cpu: &CpuId, addr: u32);
@@ -296,7 +296,7 @@ pub trait DebugCore: Core {
     fn caption(&self, label: &str) -> String;
 
     fn memory_regions(&self) -> Vec<MemoryRegion>;
-    /// Returns exactly `len` bytes, zero where unmapped.
+
     fn peek_memory(&self, region: &str, addr: u32, len: usize) -> Vec<u8>;
 
     fn read_bus(

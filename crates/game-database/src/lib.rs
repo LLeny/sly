@@ -1,35 +1,9 @@
+mod sources;
+
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use core_model::{RomIdentity, System};
-
-const NO_INTRO_DAT: &str = include_str!(
-    "../../../submodules/libretro-database/metadat/no-intro/Nintendo - Super Nintendo Entertainment System.dat"
-);
-
-const GENRE_DAT: &str = include_str!(
-    "../../../submodules/libretro-database/metadat/genre/Nintendo - Super Nintendo Entertainment System.dat"
-);
-
-const DEVELOPER_DAT: &str = include_str!(
-    "../../../submodules/libretro-database/metadat/developer/Nintendo - Super Nintendo Entertainment System.dat"
-);
-
-const PUBLISHER_DAT: &str = include_str!(
-    "../../../submodules/libretro-database/metadat/publisher/Nintendo - Super Nintendo Entertainment System.dat"
-);
-
-const RELEASE_YEAR_DAT: &str = include_str!(
-    "../../../submodules/libretro-database/metadat/releaseyear/Nintendo - Super Nintendo Entertainment System.dat"
-);
-
-const RELEASE_MONTH_DAT: &str = include_str!(
-    "../../../submodules/libretro-database/metadat/releasemonth/Nintendo - Super Nintendo Entertainment System.dat"
-);
-
-const MAX_USERS_DAT: &str = include_str!(
-    "../../../submodules/libretro-database/metadat/maxusers/Nintendo - Super Nintendo Entertainment System.dat"
-);
 
 #[derive(Clone, Debug, Default)]
 pub struct GameMeta {
@@ -98,9 +72,7 @@ struct GameDb {
 }
 
 pub fn lookup(system: System, identity: &RomIdentity) -> GameMeta {
-    let db = match system {
-        System::Snes => database(),
-    };
+    let db = database(system);
 
     let sha1 = &identity.sha1;
     let crc = identity.crc32;
@@ -124,17 +96,25 @@ pub fn lookup(system: System, identity: &RomIdentity) -> GameMeta {
     meta
 }
 
-fn database() -> &'static GameDb {
-    static DB: OnceLock<GameDb> = OnceLock::new();
+fn database(system: System) -> &'static GameDb {
+    static SNES: OnceLock<GameDb> = OnceLock::new();
+    static GBA: OnceLock<GameDb> = OnceLock::new();
 
-    DB.get_or_init(|| {
+    match system {
+        System::Snes => SNES.get_or_init(|| GameDb::from_sources(&sources::SNES)),
+        System::Gba => GBA.get_or_init(|| GameDb::from_sources(&sources::GBA)),
+    }
+}
+
+impl GameDb {
+    fn from_sources(sources: &sources::Sources) -> Self {
         let mut db = GameDb {
             names_by_sha1: HashMap::new(),
             names_by_crc: HashMap::new(),
             fields_by_crc: HashMap::new(),
         };
 
-        for_each_game(NO_INTRO_DAT, |fields, rom| {
+        for_each_game(sources.names, |fields, rom| {
             let Some(name) = fields.get("name") else {
                 return;
             };
@@ -159,36 +139,36 @@ fn database() -> &'static GameDb {
             });
         };
 
-        merge(GENRE_DAT, |record, fields| {
+        merge(sources.genre, |record, fields| {
             record.genre = fields.get("genre").cloned();
         });
 
-        merge(DEVELOPER_DAT, |record, fields| {
+        merge(sources.developer, |record, fields| {
             record.developer = fields.get("developer").cloned();
         });
 
-        merge(PUBLISHER_DAT, |record, fields| {
+        merge(sources.publisher, |record, fields| {
             record.publisher = fields.get("publisher").cloned();
         });
 
-        merge(RELEASE_YEAR_DAT, |record, fields| {
+        merge(sources.release_year, |record, fields| {
             record.release_year = fields
                 .get("releaseyear")
                 .and_then(|value| value.parse().ok());
         });
 
-        merge(RELEASE_MONTH_DAT, |record, fields| {
+        merge(sources.release_month, |record, fields| {
             record.release_month = fields
                 .get("releasemonth")
                 .and_then(|value| value.parse().ok());
         });
 
-        merge(MAX_USERS_DAT, |record, fields| {
+        merge(sources.max_users, |record, fields| {
             record.max_users = fields.get("users").and_then(|value| value.parse().ok());
         });
 
         db
-    })
+    }
 }
 
 fn parse_crc(rom: &HashMap<String, String>) -> Option<u32> {
