@@ -9,6 +9,8 @@ pub struct Cpu {
     pub registers: [u32; 16],
     pub cpsr: Psr,
     pub spsr: [Psr; 5],
+    banks: [[u32; 16]; 5],
+    user_bank: [u32; 16],
     pipeline: Pipeline,
 }
 
@@ -19,6 +21,8 @@ impl Cpu {
             registers: [0; 16],
             cpsr: Psr::default(),
             spsr: [Psr::zeroed(); 5],
+            banks: [[0; 16]; 5],
+            user_bank: [0; 16],
         }
     }
 
@@ -71,28 +75,48 @@ impl Cpu {
         self.registers[14] = value;
     }
 
-    pub(crate) fn set_register(&mut self, index: usize, mut value: u32) {
+    pub(crate) fn set_register(&mut self, index: usize, value: u32) {
         if index == 15 {
-            self.flush_pipeline();
-            value = value & !0b1;
+            self.set_pc(value & if self.is_thumb() { !0b1 } else { !0b11 });
+        } else {
+            self.registers[index] = value;
         }
-        self.registers[index] = value;
     }
 
     pub(crate) fn is_thumb(&self) -> bool {
         self.cpsr.t()
     }
 
+    // SPSR_<current mode> -> CPSR
     pub(crate) fn restore_cpsr(&mut self) {
-        if let Some(index) = self.cpsr.mode().spsr_index() {
-            self.cpsr = self.spsr[index];
+        if let Some(index) = self.cpsr.mode().index() {
+            let spsr = self.spsr[index];
+            self.switch_mode(spsr.mode());
+            self.cpsr = spsr;
         }
     }
 
-    pub(crate) fn save_cpsr(&mut self) {
-        // TODO: ???
-        if let Some(index) = self.cpsr.mode().spsr_index() {
-            self.spsr[index] = self.cpsr;
+    fn switch_mode(&mut self, new: Mode) {
+        let old = self.cpsr.mode();
+
+        // registers -> banks[old], user_bank -> registers
+        if let Some(index) = old.index()
+            && let Some((start, end)) = old.bank_register_range()
+        {
+            for i in start..=end {
+                self.banks[index][i] = self.registers[i];
+                self.registers[i] = self.user_bank[i];
+            }
+        }
+
+        // registers -> user_bank, banks[new] -> registers
+        if let Some(index) = new.index()
+            && let Some((start, end)) = new.bank_register_range()
+        {
+            for i in start..=end {
+                self.user_bank[i] = self.registers[i];
+                self.registers[i] = self.banks[index][i];
+            }
         }
     }
 }
@@ -110,13 +134,21 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub fn spsr_index(&self) -> Option<usize> {
+    pub fn index(&self) -> Option<usize> {
         match self {
             Mode::Fiq => Some(0),
             Mode::Irq => Some(1),
             Mode::Supervisor => Some(2),
             Mode::Abort => Some(3),
             Mode::Undefined => Some(4),
+            _ => None,
+        }
+    }
+
+    pub fn bank_register_range(&self) -> Option<(usize, usize)> {
+        match self {
+            Mode::Fiq => Some((8, 14)),
+            Mode::Irq | Mode::Supervisor | Mode::Abort | Mode::Undefined => Some((13, 14)),
             _ => None,
         }
     }
@@ -139,6 +171,6 @@ pub struct Psr {
     pub fiq_disable: bool,
     #[bits(5, alias = "t")]
     pub state: bool,
-    #[bits(4, alias = "m", default = Mode::Supervisor)]
+    #[bits(0..=4, alias = "m", default = Mode::Supervisor)]
     pub mode: Mode,
 }
