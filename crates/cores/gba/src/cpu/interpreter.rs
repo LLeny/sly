@@ -20,14 +20,14 @@ impl<'a> Interpreter<'a> {
             let instr = thumb::Instruction(instruction as u16);
 
             #[cfg(feature = "disasm")]
-            println!("[{:04X}] {}", addr, instr);
+            println!("[{:08X}] {}", addr, instr);
 
             thumb::dispatch_ops(self, instr);
         } else {
             let instr = arm::Instruction(instruction);
 
             #[cfg(feature = "disasm")]
-            println!("[{:04X}] {}", addr, instr);
+            println!("[{:08X}] {}", addr, instr);
 
             if self.check_condition(instr.cond()) {
                 arm::dispatch_ops(self, instr);
