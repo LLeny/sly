@@ -125,29 +125,25 @@ impl arm::Ops for Interpreter<'_> {
             base.wrapping_sub(offset)
         };
         let address = if inst.pre() { updated_base } else { base };
+        let value = if rd == 15 {
+            self.cpu.pc().wrapping_add(4)
+        } else {
+            self.cpu.registers[rd]
+        };
 
         let loaded = match inst.mnemonic() {
-            arm::Mnemonic::Ldr => {
-                let value = if inst.byte() {
-                    self.mmio.read8(address) as u32
-                } else {
-                    self.mmio
-                        .read32(address & !0b11)
-                        .rotate_right((address & 0b11) * 8)
-                };
-                Some(value)
+            arm::Mnemonic::Ldr if inst.byte() => Some(self.mmio.read8(address) as u32),
+            arm::Mnemonic::Ldr if !inst.byte() => Some(
+                self.mmio
+                    .read32(address & !0b11)
+                    .rotate_right((address & 0b11) * 8),
+            ),
+            arm::Mnemonic::Str if inst.byte() => {
+                self.mmio.write8(address, value as u8);
+                None
             }
-            arm::Mnemonic::Str => {
-                let value = if rd == 15 {
-                    self.cpu.pc().wrapping_add(4)
-                } else {
-                    self.cpu.registers[rd]
-                };
-                if inst.byte() {
-                    self.mmio.write8(address, value as u8);
-                } else {
-                    self.mmio.write32(address & !0b11, value);
-                }
+            arm::Mnemonic::Str if !inst.byte() => {
+                self.mmio.write32(address & !0b11, value);
                 None
             }
             _ => unreachable!(),
@@ -161,8 +157,46 @@ impl arm::Ops for Interpreter<'_> {
         }
     }
 
-    fn halfword_transfer(&mut self, _op: arm::HalfwordTransferKind, _inst: arm::Instruction) {
-        todo!()
+    fn halfword_transfer(&mut self, _op: arm::HalfwordTransferKind, inst: arm::Instruction) {
+        let rd = inst.rd() as usize;
+        let rn = inst.rn() as usize;
+        let base = self.cpu.registers[rn];
+        let (offset, _) = self.cpu.read_arm_operand(inst);
+
+        let updated_base = if inst.up() {
+            base.wrapping_add(offset)
+        } else {
+            base.wrapping_sub(offset)
+        };
+        let address = if inst.pre() { updated_base } else { base };
+
+        let loaded = match inst.mnemonic() {
+            arm::Mnemonic::Ldrh => {
+                Some((self.mmio.read16(address & !0b1) as u32).rotate_right((address & 0b1) * 8))
+            }
+            arm::Mnemonic::Ldrsh if address & 0b1 != 0 => {
+                Some(self.mmio.read8(address) as i8 as u32)
+            }
+            arm::Mnemonic::Ldrsh => Some(self.mmio.read16(address & !0b1) as i16 as u32),
+            arm::Mnemonic::Ldrsb => Some(self.mmio.read8(address) as i8 as u32),
+            arm::Mnemonic::Strh => {
+                let value = if rd == 15 {
+                    self.cpu.pc().wrapping_add(4)
+                } else {
+                    self.cpu.registers[rd]
+                };
+                self.mmio.write16(address & !0b1, value as u16);
+                None
+            }
+            _ => unreachable!(),
+        };
+
+        if !inst.pre() || inst.write() {
+            self.cpu.set_register(rn, updated_base);
+        }
+        if let Some(value) = loaded {
+            self.cpu.set_register(rd, value);
+        }
     }
 
     fn block_transfer(&mut self, _op: arm::BlockTransferKind, _inst: arm::Instruction) {
@@ -170,10 +204,6 @@ impl arm::Ops for Interpreter<'_> {
     }
 
     fn b(&mut self, inst: arm::Instruction) {
-        if !self.check_condition(inst.cond()) {
-            return;
-        }
-
         if inst.link() {
             self.cpu.set_lr(self.cpu.pc().wrapping_sub(4));
         }
