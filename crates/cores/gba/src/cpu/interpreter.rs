@@ -252,8 +252,10 @@ impl arm::Ops for Interpreter<'_> {
         self.cpu.set_pc(dst);
     }
 
-    fn bx(&mut self, _inst: arm::Instruction) {
-        todo!()
+    fn bx(&mut self, inst: arm::Instruction) {
+        let target = self.cpu.registers[inst.rm() as usize];
+        self.cpu.cpsr.set_t(target & 1 != 0);
+        self.cpu.set_pc(target);
     }
 
     fn multiply(&mut self, _inst: arm::Instruction) {

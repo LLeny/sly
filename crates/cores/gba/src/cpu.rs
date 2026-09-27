@@ -58,7 +58,7 @@ impl Cpu {
 
     pub(crate) fn set_pc(&mut self, value: u32) {
         self.flush_pipeline();
-        self.registers[15] = value;
+        self.registers[15] = value & if self.is_thumb() { !0b1 } else { !0b11 };
     }
 
     pub(crate) fn sp(&self) -> u32 {
@@ -79,7 +79,7 @@ impl Cpu {
 
     pub(crate) fn set_register(&mut self, index: usize, value: u32) {
         if index == 15 {
-            self.set_pc(value & if self.is_thumb() { !0b1 } else { !0b11 });
+            self.set_pc(value);
         } else {
             self.registers[index] = value;
         }
