@@ -1,5 +1,6 @@
 use super::Cpu;
 use super::decoder::{arm, thumb};
+use super::shift::Shift;
 use crate::mmio::Mmio;
 
 impl Cpu {
@@ -35,68 +36,35 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn operand_register(&self, index: u8, inst: arm::Instruction) -> u32 {
-        let value = self.cpu.registers[index as usize];
-        if index == 15 && matches!(inst.form(), arm::Form::RegReg) {
-            value.wrapping_add(4) // PC + 12 for register shifts.
-        } else {
-            value
+    fn operand_register(&self, index: u8, form: arm::Form) -> u32 {
+        match (index, form) {
+            // Stored PC is already instruction address + 8 but register shifts read + 12.
+            (15, arm::Form::RegReg) => self.cpu.pc().wrapping_add(4),
+            _ => self.cpu.registers[index as usize],
         }
     }
 
     fn resolve_operand(&self, inst: arm::Instruction) -> (u32, bool) {
-        let carry = self.cpu.cpsr.c();
-        match inst.form() {
-            arm::Form::Imm => Self::shift_operand(
+        let (value, shift) = match inst.form() {
+            arm::Form::Imm => (
                 u32::from(inst.imm8()),
-                3,
-                u32::from(inst.rotate()) * 2,
-                carry,
+                Shift::Ror(u32::from(inst.rotate()) * 2),
             ),
             arm::Form::RegImm => {
-                let value = self.cpu.registers[inst.rm() as usize];
-                let amount = u32::from(inst.amount());
-                if inst.shift() == 3 && amount == 0 {
-                    // RRX: shift the old carry into bit 31.
-                    ((u32::from(carry) << 31) | (value >> 1), value & 1 != 0)
-                } else {
-                    Self::shift_operand(value, inst.shift(), amount, carry)
-                }
+                let shift = match Shift::decode(inst.shift(), u32::from(inst.amount())) {
+                    Shift::Ror(0) => Shift::Rrx,
+                    shift => shift,
+                };
+                (self.cpu.registers[inst.rm() as usize], shift)
             }
             arm::Form::RegReg => {
-                let value = self.operand_register(inst.rm(), inst);
+                let value = self.operand_register(inst.rm(), arm::Form::RegReg);
                 let amount = self.cpu.registers[inst.rs() as usize] & 0xff;
-                Self::shift_operand(value, inst.shift(), amount, carry)
+                (value, Shift::decode(inst.shift(), amount))
             }
             _ => unreachable!(),
-        }
-    }
-
-    fn shift_operand(value: u32, shift: u8, amount: u32, carry: bool) -> (u32, bool) {
-        if amount == 0 {
-            return (value, carry);
-        }
-
-        match shift {
-            0 if amount <= 32 => (
-                value.checked_shl(amount).unwrap_or(0),
-                (value >> (32 - amount)) & 1 != 0,
-            ),
-            1 if amount <= 32 => (
-                value.checked_shr(amount).unwrap_or(0),
-                (value >> (amount - 1)) & 1 != 0,
-            ),
-            0 | 1 => (0, false),
-            2 => {
-                let shifted = ((value as i32) >> (amount.min(32) - 1)) as u32;
-                (((shifted as i32) >> 1) as u32, shifted & 1 != 0)
-            }
-            3 => {
-                let result = value.rotate_right(amount);
-                (result, result >> 31 != 0)
-            }
-            _ => unreachable!(),
-        }
+        };
+        shift.apply(value, self.cpu.cpsr.c())
     }
 
     fn add_with_carry(a: u32, b: u32, carry: bool) -> (u32, bool, bool) {
@@ -129,7 +97,7 @@ impl arm::Ops for Interpreter<'_> {
 
         let c_in = self.cpu.cpsr.c();
         let v_in = self.cpu.cpsr.v();
-        let op1 = self.operand_register(inst.rn(), inst);
+        let op1 = self.operand_register(inst.rn(), inst.form());
         let (op2, shifter_carry) = self.resolve_operand(inst);
 
         let mnemonic = inst.mnemonic();

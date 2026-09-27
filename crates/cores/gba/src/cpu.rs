@@ -1,6 +1,7 @@
 pub mod decoder;
 pub mod interpreter;
 mod pipeline;
+mod shift;
 
 use crate::mmio::Mmio;
 use pipeline::Pipeline;
