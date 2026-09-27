@@ -8,6 +8,7 @@ use pipeline::Pipeline;
 pub struct Cpu {
     pub registers: [u32; 16],
     pub cpsr: Psr,
+    pub spsr: [Psr; 5],
     pipeline: Pipeline,
 }
 
@@ -17,6 +18,7 @@ impl Cpu {
             pipeline: Pipeline::default(),
             registers: [0; 16],
             cpsr: Psr::default(),
+            spsr: [Psr::zeroed(); 5],
         }
     }
 
@@ -69,8 +71,29 @@ impl Cpu {
         self.registers[14] = value;
     }
 
+    pub(crate) fn set_register(&mut self, index: usize, mut value: u32) {
+        if index == 15 {
+            self.flush_pipeline();
+            value = value & !0b1;
+        }
+        self.registers[index] = value;
+    }
+
     pub(crate) fn is_thumb(&self) -> bool {
         self.cpsr.t()
+    }
+
+    pub(crate) fn restore_cpsr(&mut self) {
+        if let Some(index) = self.cpsr.mode().spsr_index() {
+            self.cpsr = self.spsr[index];
+        }
+    }
+
+    pub(crate) fn save_cpsr(&mut self) {
+        // TODO: ???
+        if let Some(index) = self.cpsr.mode().spsr_index() {
+            self.spsr[index] = self.cpsr;
+        }
     }
 }
 
@@ -84,6 +107,19 @@ pub enum Mode {
     Abort = 0b10111,
     Undefined = 0b11011,
     System = 0b11111,
+}
+
+impl Mode {
+    pub fn spsr_index(&self) -> Option<usize> {
+        match self {
+            Mode::Fiq => Some(0),
+            Mode::Irq => Some(1),
+            Mode::Supervisor => Some(2),
+            Mode::Abort => Some(3),
+            Mode::Undefined => Some(4),
+            _ => None,
+        }
+    }
 }
 
 #[chapa::bitfield(u32, order = lsb0)]

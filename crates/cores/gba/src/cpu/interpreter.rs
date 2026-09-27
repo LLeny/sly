@@ -35,6 +35,41 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    fn resolve_operand(&self, inst: arm::Instruction) -> u32 {
+        match inst.form() {
+            arm::Form::Imm => inst.imm(),
+            arm::Form::RegImm => {
+                let value = self.cpu.registers[inst.rm() as usize];
+                let amount = u32::from(inst.amount());
+                if inst.shift() == 3 && amount == 0 {
+                    // RRX: shift the old carry into bit 31.
+                    (u32::from(self.cpu.cpsr.c()) << 31) | (value >> 1)
+                } else {
+                    Self::shift_operand(value, inst.shift(), amount)
+                }
+            }
+            arm::Form::RegReg => {
+                let mut value = self.cpu.registers[inst.rm() as usize];
+                if inst.rm() == 15 {
+                    value = value.wrapping_add(4); // PC + 12 for register shifts.
+                }
+                let amount = self.cpu.registers[inst.rs() as usize] & 0xff;
+                Self::shift_operand(value, inst.shift(), amount)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn shift_operand(value: u32, shift: u8, amount: u32) -> u32 {
+        match shift {
+            0 => value.checked_shl(amount).unwrap_or(0),
+            1 => value.checked_shr(amount).unwrap_or(0),
+            2 => ((value as i32) >> amount.min(31)) as u32,
+            3 => value.rotate_right(amount),
+            _ => unreachable!("decoded shift kind is two bits"),
+        }
+    }
+
     fn check_condition(&self, cond: u8) -> bool {
         let psr = self.cpu.cpsr;
         let passed = match cond >> 1 {
@@ -53,8 +88,50 @@ impl<'a> Interpreter<'a> {
 }
 
 impl arm::Ops for Interpreter<'_> {
-    fn data_processing(&mut self, _op: arm::DataProcessingKind, _inst: arm::Instruction) {
-        todo!()
+    fn data_processing(&mut self, op: arm::DataProcessingKind, inst: arm::Instruction) {
+        use arm::Mnemonic::*;
+
+        let op1 = self.cpu.registers[inst.rn() as usize];
+        let op2 = self.resolve_operand(inst);
+
+        let result = match inst.mnemonic() {
+            And | Tst => op1 & op2,
+            Eor | Teq => op1 ^ op2,
+            Sub | Cmp => op1.wrapping_sub(op2),
+            Add | Cmn => op1.wrapping_add(op2),
+            Rsb => op2.wrapping_sub(op1),
+            Adc => op1
+                .wrapping_add(op2)
+                .wrapping_add(if self.cpu.cpsr.c() { 1 } else { 0 }),
+            Sbc => op1
+                .wrapping_sub(op2)
+                .wrapping_sub(if self.cpu.cpsr.c() { 0 } else { 1 }),
+            Rsc => op2
+                .wrapping_sub(op1)
+                .wrapping_sub(if self.cpu.cpsr.c() { 0 } else { 1 }),
+            Orr => op1 | op2,
+            Mov => op2,
+            Bic => op1 & !op2,
+            Mvn => !op2,
+            _ => unreachable!(),
+        };
+
+        // These should always have the S bit set.
+        debug_assert!(!matches!(inst.mnemonic(), Tst | Teq | Cmp | Cmn) || inst.s());
+
+        if inst.s() {
+            if inst.rd() == 15 {
+                self.cpu.restore_cpsr();
+            } else {
+                // Flags are only updated if we don't update PC.
+                self.cpu.cpsr.set_n(result >> 31 != 0);
+                self.cpu.cpsr.set_z(result == 0);
+                self.cpu.cpsr.set_c(result >> 31 != 0);
+                self.cpu.cpsr.set_v(result >> 31 != 0);
+            }
+        }
+
+        self.cpu.set_register(inst.rd() as usize, result);
     }
 
     fn psr_transfer(&mut self, _op: arm::PsrTransferKind, _inst: arm::Instruction) {
