@@ -89,13 +89,19 @@ impl Cpu {
         self.cpsr.t()
     }
 
+    pub(crate) fn get_current_spsr(&self) -> Psr {
+        self.cpsr
+            .mode()
+            .index()
+            .map(|index| self.spsr[index])
+            .expect("something is fucked")
+    }
+
     // SPSR_<current mode> -> CPSR
     pub(crate) fn restore_cpsr(&mut self) {
-        if let Some(index) = self.cpsr.mode().index() {
-            let spsr = self.spsr[index];
-            self.switch_mode(spsr.mode());
-            self.cpsr = spsr;
-        }
+        let spsr = self.get_current_spsr();
+        self.switch_mode(spsr.mode());
+        self.cpsr = spsr;
     }
 
     fn switch_mode(&mut self, new: Mode) {

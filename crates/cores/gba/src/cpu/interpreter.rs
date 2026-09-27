@@ -1,5 +1,5 @@
-use super::Cpu;
 use super::decoder::{arm, thumb};
+use super::{Cpu, Mode};
 use crate::mmio::Mmio;
 
 impl Cpu {
@@ -105,8 +105,48 @@ impl arm::Ops for Interpreter<'_> {
         }
     }
 
-    fn psr_transfer(&mut self, _op: arm::PsrTransferKind, _inst: arm::Instruction) {
-        todo!()
+    fn psr_transfer(&mut self, op: arm::PsrTransferKind, inst: arm::Instruction) {
+        match op {
+            arm::PsrTransferKind::Mrs => {
+                let psr = if inst.psr() == 0 {
+                    self.cpu.cpsr
+                } else {
+                    self.cpu.get_current_spsr()
+                };
+                self.cpu.set_register(inst.rd() as usize, psr.raw());
+            }
+            arm::PsrTransferKind::MsrPsrReg | arm::PsrTransferKind::MsrPsrImm => {
+                let (value, _) = self.cpu.read_arm_operand(inst);
+                let saved = inst.psr() != 0;
+                let mut psr = if saved {
+                    self.cpu.get_current_spsr()
+                } else {
+                    self.cpu.cpsr
+                };
+
+                if inst.flags() {
+                    psr = chapa::insert_bits!(psr; 28..=31; value);
+                }
+                if inst.control() && (saved || !matches!(self.cpu.cpsr.mode(), Mode::User)) {
+                    psr = if saved {
+                        chapa::insert_bits!(psr; 0..=7; value)
+                    } else {
+                        chapa::insert_bits!(psr; 0..=4, 6..=7; value)
+                    };
+                }
+
+                if saved {
+                    let mode = self.cpu.cpsr.mode();
+                    let index = mode
+                        .index()
+                        .expect("SPSR access requires an exception mode");
+                    self.cpu.spsr[index] = psr;
+                } else {
+                    self.cpu.switch_mode(psr.mode());
+                    self.cpu.cpsr = psr;
+                }
+            }
+        }
     }
 
     fn multiply_long(&mut self, _op: arm::MultiplyLongKind, _inst: arm::Instruction) {
