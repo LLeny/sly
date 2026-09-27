@@ -1,6 +1,5 @@
 use super::Cpu;
 use super::decoder::{arm, thumb};
-use super::shift::Shift;
 use crate::mmio::Mmio;
 
 impl Cpu {
@@ -36,37 +35,6 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn operand_register(&self, index: u8, form: arm::Form) -> u32 {
-        match (index, form) {
-            // Stored PC is already instruction address + 8 but register shifts read + 12.
-            (15, arm::Form::RegReg) => self.cpu.pc().wrapping_add(4),
-            _ => self.cpu.registers[index as usize],
-        }
-    }
-
-    fn resolve_operand(&self, inst: arm::Instruction) -> (u32, bool) {
-        let (value, shift) = match inst.form() {
-            arm::Form::Imm => (
-                u32::from(inst.imm8()),
-                Shift::Ror(u32::from(inst.rotate()) * 2),
-            ),
-            arm::Form::RegImm => {
-                let shift = match Shift::decode(inst.shift(), u32::from(inst.amount())) {
-                    Shift::Ror(0) => Shift::Rrx,
-                    shift => shift,
-                };
-                (self.cpu.registers[inst.rm() as usize], shift)
-            }
-            arm::Form::RegReg => {
-                let value = self.operand_register(inst.rm(), arm::Form::RegReg);
-                let amount = self.cpu.registers[inst.rs() as usize] & 0xff;
-                (value, Shift::decode(inst.shift(), amount))
-            }
-            _ => unreachable!(),
-        };
-        shift.apply(value, self.cpu.cpsr.c())
-    }
-
     fn add_with_carry(a: u32, b: u32, carry: bool) -> (u32, bool, bool) {
         let sum = a as u64 + b as u64 + carry as u64;
         let result = sum as u32;
@@ -92,13 +60,13 @@ impl<'a> Interpreter<'a> {
 }
 
 impl arm::Ops for Interpreter<'_> {
-    fn data_processing(&mut self, op: arm::DataProcessingKind, inst: arm::Instruction) {
+    fn data_processing(&mut self, _op: arm::DataProcessingKind, inst: arm::Instruction) {
         use arm::Mnemonic::*;
 
         let c_in = self.cpu.cpsr.c();
         let v_in = self.cpu.cpsr.v();
-        let op1 = self.operand_register(inst.rn(), inst.form());
-        let (op2, shifter_carry) = self.resolve_operand(inst);
+        let op1 = self.cpu.operand_register(inst.rn(), inst.form());
+        let (op2, shifter_carry) = self.cpu.read_arm_operand(inst);
 
         let mnemonic = inst.mnemonic();
         let (result, carry, overflow) = match mnemonic {
@@ -145,8 +113,52 @@ impl arm::Ops for Interpreter<'_> {
         todo!()
     }
 
-    fn single_transfer(&mut self, _op: arm::SingleTransferKind, _inst: arm::Instruction) {
-        todo!()
+    fn single_transfer(&mut self, _op: arm::SingleTransferKind, inst: arm::Instruction) {
+        let rd = inst.rd() as usize;
+        let rn = inst.rn() as usize;
+        let base = self.cpu.registers[rn];
+        let (offset, _) = self.cpu.read_arm_operand(inst);
+
+        let updated_base = if inst.up() {
+            base.wrapping_add(offset)
+        } else {
+            base.wrapping_sub(offset)
+        };
+        let address = if inst.pre() { updated_base } else { base };
+
+        let loaded = match inst.mnemonic() {
+            arm::Mnemonic::Ldr => {
+                let value = if inst.byte() {
+                    self.mmio.read8(address) as u32
+                } else {
+                    self.mmio
+                        .read32(address & !0b11)
+                        .rotate_right((address & 0b11) * 8)
+                };
+                Some(value)
+            }
+            arm::Mnemonic::Str => {
+                let value = if rd == 15 {
+                    self.cpu.pc().wrapping_add(4)
+                } else {
+                    self.cpu.registers[rd]
+                };
+                if inst.byte() {
+                    self.mmio.write8(address, value as u8);
+                } else {
+                    self.mmio.write32(address & !0b11, value);
+                }
+                None
+            }
+            _ => unreachable!(),
+        };
+
+        if !inst.pre() || inst.write() {
+            self.cpu.set_register(rn, updated_base);
+        }
+        if let Some(value) = loaded {
+            self.cpu.set_register(rd, value);
+        }
     }
 
     fn halfword_transfer(&mut self, _op: arm::HalfwordTransferKind, _inst: arm::Instruction) {

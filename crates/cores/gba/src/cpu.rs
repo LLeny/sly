@@ -1,5 +1,6 @@
 pub mod decoder;
 pub mod interpreter;
+mod operand;
 mod pipeline;
 mod shift;
 
