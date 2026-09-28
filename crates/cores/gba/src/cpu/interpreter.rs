@@ -103,20 +103,20 @@ impl<B: Bus> arm::Ops for Interpreter<'_, B> {
             _ => unreachable!(),
         };
 
+        let is_test_instr = matches!(mnemonic, Tst | Teq | Cmp | Cmn);
+        debug_assert!(!is_test_instr || inst.s());
+
         if inst.s() {
-            if inst.rd() == 15 {
+            if inst.rd() == 15 && self.cpu.cpsr.mode().index().is_some() {
                 self.cpu.restore_cpsr();
             } else {
-                // Flags are only updated if we don't update PC.
+                // User and System modes have no SPSR to restore.
                 self.cpu.cpsr.set_n(result >> 31 != 0);
                 self.cpu.cpsr.set_z(result == 0);
                 self.cpu.cpsr.set_c(carry);
                 self.cpu.cpsr.set_v(overflow);
             }
         }
-
-        let is_test_instr = matches!(mnemonic, Tst | Teq | Cmp | Cmn);
-        debug_assert!(!is_test_instr || inst.s());
 
         if !is_test_instr {
             self.cpu.set_register(inst.rd() as usize, result);
@@ -400,7 +400,9 @@ impl<B: Bus> arm::Ops for Interpreter<'_, B> {
     }
 
     fn on_invalid(&mut self, _inst: arm::Instruction) {
-        todo!()
+        let return_address = self.cpu.pc().wrapping_sub(4);
+        self.cpu
+            .enter_exception(Mode::Undefined, 0x04, return_address);
     }
 }
 
@@ -743,6 +745,8 @@ impl<B: Bus> thumb::Ops for Interpreter<'_, B> {
     }
 
     fn on_invalid(&mut self, _inst: thumb::Instruction) {
-        todo!()
+        let return_address = self.cpu.pc().wrapping_sub(2);
+        self.cpu
+            .enter_exception(Mode::Undefined, 0x04, return_address);
     }
 }
