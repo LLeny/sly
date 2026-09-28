@@ -1,6 +1,7 @@
 mod bus;
 pub mod decoder;
 pub mod interpreter;
+mod multiply;
 mod operand;
 mod pipeline;
 mod shift;

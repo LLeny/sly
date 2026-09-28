@@ -1,6 +1,6 @@
 use super::decoder::{arm, registers, thumb};
 use super::shift::Shift;
-use super::{Bus, Cpu, Mode};
+use super::{Bus, Cpu, Mode, multiply};
 
 impl Cpu {
     pub(super) fn execute(&mut self, mmio: &mut impl Bus, addr: u32, instruction: u32) {
@@ -466,7 +466,7 @@ impl<B: Bus> thumb::Ops for Interpreter<'_, B> {
             CmpReg => Self::add_with_carry(lhs, !rs, true),
             CmnReg => Self::add_with_carry(lhs, rs, false),
             OrrReg => (lhs | rs, c_in, v_in),
-            MulReg => (lhs.wrapping_mul(rs), false, v_in),
+            MulReg => (lhs.wrapping_mul(rs), multiply::carry(rs, lhs), v_in),
             BicReg => (lhs & !rs, c_in, v_in),
             MvnReg => (!rs, c_in, v_in),
         };

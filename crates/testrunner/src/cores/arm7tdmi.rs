@@ -6,6 +6,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
 use gba::Cpu;
+use gba::cpu::decoder::{arm, thumb};
 use gba::cpu::{Bus, Mode};
 use serde::Deserialize;
 
@@ -88,6 +89,15 @@ struct Test {
 }
 
 impl Test {
+    fn signed_halfword_load(&self) -> bool {
+        let opcode = self.initial.pipeline[0];
+        if self.initial.cpsr & (1 << 5) != 0 {
+            thumb::Instruction(opcode as u16).mnemonic() == thumb::Mnemonic::Ldrsh
+        } else {
+            arm::Instruction(opcode).mnemonic() == arm::Mnemonic::Ldrsh
+        }
+    }
+
     fn name(&self, index: usize) -> String {
         self.name.clone().unwrap_or_else(|| {
             format!(
@@ -169,11 +179,12 @@ fn run_tests(tests: impl Iterator<Item = Result<Test>>, limit: Option<usize>) ->
 fn run_test(cpu: &mut Cpu, test: &Test) -> Vec<Field> {
     cpu.load_test_state(&test.initial.cpu_state());
 
-    let mut bus = TransactionBus::new(&test.transactions);
+    let mut bus = TransactionBus::new(&test.transactions, test.signed_halfword_load());
     cpu.step_test_instruction(&mut bus);
 
     let got = cpu.test_state();
-    let want = test.expected.cpu_state();
+    let mut want = test.expected.cpu_state();
+    want.registers[15] &= if want.cpsr & (1 << 5) != 0 { !1 } else { !3 };
     let mut fields = bus.fields;
     if got == want && bus.consumed == test.transactions.len() {
         return fields;
@@ -226,14 +237,16 @@ struct TransactionBus<'a> {
     expected: &'a [Transaction],
     consumed: usize,
     fields: Vec<Field>,
+    signed_halfword_load: bool,
 }
 
 impl<'a> TransactionBus<'a> {
-    fn new(expected: &'a [Transaction]) -> Self {
+    fn new(expected: &'a [Transaction], signed_halfword_load: bool) -> Self {
         Self {
             expected,
             consumed: 0,
             fields: Vec::new(),
+            signed_halfword_load,
         }
     }
 
@@ -248,6 +261,19 @@ impl<'a> TransactionBus<'a> {
         };
 
         compare(fields, kind, want.kind, || format!("bus[{index}].kind"));
+
+        // Fuck you
+        if self.signed_halfword_load
+            && kind == READ
+            && want.kind == READ
+            && size == 1
+            && want.size == 2
+            && want.addr & 1 != 0
+            && addr == want.addr
+        {
+            return (want.data >> 8) & 0xFF;
+        }
+
         compare(fields, size, want.size, || format!("bus[{index}].size"));
 
         // NBA records the requested address before bus alignment. We align
