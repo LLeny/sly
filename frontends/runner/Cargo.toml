@@ -10,3 +10,4 @@ core-model = { path = "../../crates/models/core" }
 storage = { path = "../../crates/storage" }
 sdl3 = { version = "0.18.4", features = ["build-from-source-static"] }
 gif = "0.14.2"
+tracing-subscriber.workspace = true

@@ -7,15 +7,30 @@ impl Display {
         Self
     }
 
-    pub(super) fn peek(&self, _address: u32, _width: Width) -> u32 {
-        todo!("PPU inspection")
+    pub(super) fn peek(&self, address: u32, width: Width) -> u32 {
+        tracing::error!(
+            address = format_args!("{:#010x}", address),
+            width = format_args!("{:?}", width),
+            "Peeking at PPU"
+        );
+        0xFF
     }
 
-    pub(super) fn read(&mut self, _address: u32, _width: Width) -> u32 {
-        todo!("PPU read")
+    pub(super) fn read(&mut self, address: u32, width: Width) -> u32 {
+        tracing::error!(
+            address = format_args!("{:#010x}", address),
+            width = format_args!("{:?}", width),
+            "Reading from PPU"
+        );
+        0xFF
     }
 
     pub(super) fn write(&mut self, _address: u32, _width: Width, _value: u32) {
-        todo!("PPU write")
+        tracing::error!(
+            address = format_args!("{:#010x}", _address),
+            width = format_args!("{:?}", _width),
+            value = format_args!("{:#010x}", _value),
+            "Writing to PPU"
+        );
     }
 }

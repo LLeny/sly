@@ -8199,6 +8199,7 @@ dependencies = [
  "gif 0.14.2",
  "sdl3",
  "storage",
+ "tracing-subscriber",
 ]
 
 [[package]]

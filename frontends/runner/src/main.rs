@@ -252,6 +252,15 @@ fn load_state(session: &storage::Session<storage::FsStore>, core: &mut dyn Core)
 }
 
 fn main() {
+    #[cfg(debug_assertions)]
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .without_time()
+        .init();
+
     let mut rom_path = None;
     let mut uncapped = false;
     let mut record = false;
