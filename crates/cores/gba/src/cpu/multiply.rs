@@ -32,6 +32,14 @@ pub(super) fn carry(multiplicand: u32, multiplier: u32) -> bool {
     carry >> 31 != 0
 }
 
+pub(super) fn accumulate_carry(rm: u32, rs: u32, accumulator: u32) -> bool {
+    if !matches!(rs >> 24, 0 | 0xFF) {
+        return rs >> 30 == 2;
+    }
+
+    self::long_carry(rm, rs, u64::from(accumulator), true)
+}
+
 // Adaptation of https://github.com/zaydlang/multiplication-algorithm
 pub(super) fn long_carry(rm: u32, rs: u32, accumulator: u64, signed: bool) -> bool {
     const MASK_33: u64 = (1 << 33) - 1;

@@ -357,16 +357,46 @@ impl<B: Bus> arm::Ops for Interpreter<'_, B> {
             .branch_exchange(self.cpu.registers[inst.rm() as usize]);
     }
 
-    fn multiply(&mut self, _inst: arm::Instruction) {
-        todo!()
+    fn multiply(&mut self, inst: arm::Instruction) {
+        let rm = self.cpu.registers[inst.rm() as usize];
+        let rs = self.cpu.registers[inst.rs() as usize];
+        let accumulator = if inst.a() {
+            self.cpu.registers[inst.acc() as usize]
+        } else {
+            0
+        };
+        let result = rm.wrapping_mul(rs).wrapping_add(accumulator);
+
+        self.cpu.set_register(inst.dest() as usize, result);
+        if inst.s() {
+            self.cpu.cpsr.set_n(result >> 31 != 0);
+            self.cpu.cpsr.set_z(result == 0);
+            let carry = if inst.a() {
+                multiply::accumulate_carry(rm, rs, accumulator)
+            } else {
+                multiply::carry(rm, rs)
+            };
+            self.cpu.cpsr.set_c(carry);
+        }
     }
 
     fn swi(&mut self, _inst: arm::Instruction) {
-        todo!()
+        let return_address = self.cpu.pc().wrapping_sub(4);
+        self.cpu
+            .enter_exception(Mode::Supervisor, 0x08, return_address);
     }
 
-    fn swp(&mut self, _inst: arm::Instruction) {
-        todo!()
+    fn swp(&mut self, inst: arm::Instruction) {
+        let rm = self.cpu.registers[inst.rm() as usize];
+        let rn = self.cpu.registers[inst.rn() as usize];
+
+        if inst.byte() {
+            self.cpu.registers[inst.rd() as usize] = self.mmio.read8(rn) as u32;
+            self.mmio.write8(rn, rm as u8);
+        } else {
+            self.cpu.registers[inst.rd() as usize] = self.load_word_rotated(rn);
+            self.mmio.write32(rn & !0b11, rm);
+        }
     }
 
     fn on_invalid(&mut self, _inst: arm::Instruction) {
