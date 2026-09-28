@@ -30,6 +30,7 @@ impl Gba {
     }
 
     pub fn skip_bios(&mut self) {
+        self.cpu = Cpu::new();
         self.cpu.cpsr = Psr::from_raw(0x1F);
 
         self.cpu.banks[Mode::Irq.index().unwrap()][13] = 0x0300_7FA0;
