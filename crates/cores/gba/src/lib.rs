@@ -10,6 +10,8 @@ pub use cartridge::Cartridge;
 pub use cpu::Cpu;
 use mmio::Mmio;
 
+use crate::cpu::{Bus, Mode, Psr};
+
 pub struct Gba {
     cpu: Cpu,
     mmio: Mmio,
@@ -18,11 +20,27 @@ pub struct Gba {
 
 impl Gba {
     pub fn new(cartridge: Cartridge) -> Self {
-        Self {
+        let mut gba = Self {
             cpu: Cpu::new(),
             mmio: Mmio::new(cartridge),
             cycles: 0,
-        }
+        };
+        gba.skip_bios();
+        gba
+    }
+
+    pub fn skip_bios(&mut self) {
+        self.cpu.cpsr = Psr::from_raw(0x1F);
+
+        self.cpu.banks[Mode::Irq.index().unwrap()][13] = 0x0300_7FA0;
+        self.cpu.banks[Mode::Supervisor.index().unwrap()][13] = 0x0300_7FE0;
+        
+        self.cpu.set_sp(0x0300_7F00);
+        self.cpu.set_lr(0x0800_0000);
+        self.cpu.set_pc(0x0800_0000);
+
+        self.mmio.write8(0x0400_0300, 1); // POSTFLG
+        self.mmio.write16(0x0400_0204, 0); // WAITCNT
     }
 }
 
