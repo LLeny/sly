@@ -167,8 +167,35 @@ impl<B: Bus> arm::Ops for Interpreter<'_, B> {
         }
     }
 
-    fn multiply_long(&mut self, _op: arm::MultiplyLongKind, _inst: arm::Instruction) {
-        todo!()
+    fn multiply_long(&mut self, op: arm::MultiplyLongKind, inst: arm::Instruction) {
+        use arm::MultiplyLongKind::*;
+
+        let rm = self.cpu.registers[inst.rm() as usize];
+        let rs = self.cpu.registers[inst.rs() as usize];
+        let signed = matches!(op, Smull | Smlal);
+        let accumulator = match op {
+            Umlal | Smlal => {
+                ((self.cpu.registers[inst.hi() as usize] as u64) << 32)
+                    | self.cpu.registers[inst.lo() as usize] as u64
+            }
+            Umull | Smull => 0,
+        };
+        let product = match op {
+            Umull | Umlal => (rm as u64) * (rs as u64),
+            Smull | Smlal => ((rm as i32 as i64) * (rs as i32 as i64)) as u64,
+        };
+        let result = product.wrapping_add(accumulator);
+
+        self.cpu.set_register(inst.lo() as usize, result as u32);
+        self.cpu
+            .set_register(inst.hi() as usize, (result >> 32) as u32);
+        if inst.s() {
+            self.cpu.cpsr.set_n(result >> 63 != 0);
+            self.cpu.cpsr.set_z(result == 0);
+            self.cpu
+                .cpsr
+                .set_c(multiply::long_carry(rm, rs, accumulator, signed));
+        }
     }
 
     fn single_transfer(&mut self, _op: arm::SingleTransferKind, inst: arm::Instruction) {
