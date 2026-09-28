@@ -20,19 +20,25 @@ impl<'a> Interpreter<'a> {
             let instr = thumb::Instruction(instruction as u16);
 
             #[cfg(feature = "disasm")]
-            println!("[{:08X}] {}", addr, instr);
+            println!("[{:08X}][T] {}", addr, instr);
 
             thumb::dispatch_ops(self, instr);
         } else {
             let instr = arm::Instruction(instruction);
 
             #[cfg(feature = "disasm")]
-            println!("[{:08X}] {}", addr, instr);
+            println!("[{:08X}][A] {}", addr, instr);
 
             if self.check_condition(instr.cond()) {
                 arm::dispatch_ops(self, instr);
             }
         }
+    }
+
+    fn load_word_rotated(&mut self, addr: u32) -> u32 {
+        self.mmio
+            .read32(addr & !0b11)
+            .rotate_right((addr & 0b11) * 8)
     }
 
     fn add_with_carry(a: u32, b: u32, carry: bool) -> (u32, bool, bool) {
@@ -173,11 +179,7 @@ impl arm::Ops for Interpreter<'_> {
 
         let loaded = match inst.mnemonic() {
             arm::Mnemonic::Ldr if inst.byte() => Some(self.mmio.read8(address) as u32),
-            arm::Mnemonic::Ldr if !inst.byte() => Some(
-                self.mmio
-                    .read32(address & !0b11)
-                    .rotate_right((address & 0b11) * 8),
-            ),
+            arm::Mnemonic::Ldr if !inst.byte() => Some(self.load_word_rotated(address)),
             arm::Mnemonic::Str if inst.byte() => {
                 self.mmio.write8(address, value as u8);
                 None
@@ -292,16 +294,52 @@ impl thumb::Ops for Interpreter<'_> {
         todo!()
     }
 
-    fn high_register(&mut self, _op: thumb::HighRegisterKind, _inst: thumb::Instruction) {
-        todo!()
+    fn high_register(&mut self, op: thumb::HighRegisterKind, inst: thumb::Instruction) {
+        let rd = inst.high_dest() as usize;
+        let rs = self.cpu.registers[inst.high_src() as usize];
+
+        match op {
+            thumb::HighRegisterKind::AddHigh => {
+                let result = self.cpu.registers[rd].wrapping_add(rs);
+                self.cpu.set_register(rd, result);
+            }
+            thumb::HighRegisterKind::MovHigh => {
+                self.cpu.set_register(rd, rs);
+            }
+            thumb::HighRegisterKind::CmpHigh => {
+                let (result, carry, overflow) =
+                    Self::add_with_carry(self.cpu.registers[rd], !rs, true);
+                self.cpu.cpsr.set_n(result >> 31 != 0);
+                self.cpu.cpsr.set_z(result == 0);
+                self.cpu.cpsr.set_c(carry);
+                self.cpu.cpsr.set_v(overflow);
+            }
+        }
     }
 
     fn register_transfer(&mut self, _op: thumb::RegisterTransferKind, _inst: thumb::Instruction) {
         todo!()
     }
 
-    fn immediate_transfer(&mut self, _op: thumb::ImmediateTransferKind, _inst: thumb::Instruction) {
-        todo!()
+    fn immediate_transfer(&mut self, op: thumb::ImmediateTransferKind, inst: thumb::Instruction) {
+        match op {
+            thumb::ImmediateTransferKind::LdrWordImm => {
+                let addr = self.cpu.registers[inst.rb() as usize].wrapping_add(inst.word_offset());
+                let value = self.load_word_rotated(addr);
+                self.cpu.set_register(inst.rd() as usize, value);
+            }
+            thumb::ImmediateTransferKind::StrWordImm => {
+                let addr = self.cpu.registers[inst.rb() as usize].wrapping_add(inst.word_offset());
+                let value = self.cpu.registers[inst.rd() as usize];
+                self.mmio.write32(addr & !0b11, value);
+            }
+            thumb::ImmediateTransferKind::LdrLiteral => {
+                let addr = (self.cpu.pc() & !0b11).wrapping_add(inst.scaled_offset() as u32);
+                let value = self.mmio.read32(addr);
+                self.cpu.set_register(inst.dest8() as usize, value);
+            }
+            _ => todo!(),
+        }
     }
 
     fn address(&mut self, _op: thumb::AddressKind, _inst: thumb::Instruction) {
