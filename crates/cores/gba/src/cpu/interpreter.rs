@@ -1,34 +1,33 @@
 use super::decoder::{arm, registers, thumb};
 use super::shift::Shift;
-use super::{Cpu, Mode};
-use crate::mmio::Mmio;
+use super::{Bus, Cpu, Mode};
 
 impl Cpu {
-    pub(super) fn execute(&mut self, mmio: &mut Mmio, addr: u32, instruction: u32) {
+    pub(super) fn execute(&mut self, mmio: &mut impl Bus, addr: u32, instruction: u32) {
         let mut interpreter = Interpreter { cpu: self, mmio };
         interpreter.execute(addr, instruction);
     }
 }
 
-pub(super) struct Interpreter<'a> {
+pub(super) struct Interpreter<'a, B> {
     cpu: &'a mut Cpu,
-    mmio: &'a mut Mmio,
+    mmio: &'a mut B,
 }
 
-impl<'a> Interpreter<'a> {
-    fn execute(&mut self, addr: u32, instruction: u32) {
+impl<B: Bus> Interpreter<'_, B> {
+    fn execute(&mut self, _addr: u32, instruction: u32) {
         if self.cpu.is_thumb() {
             let instr = thumb::Instruction(instruction as u16);
 
             #[cfg(feature = "disasm")]
-            println!("[{:08X}][T] {}", addr, instr);
+            println!("[{:08X}][T] {}", _addr, instr);
 
             thumb::dispatch_ops(self, instr);
         } else {
             let instr = arm::Instruction(instruction);
 
             #[cfg(feature = "disasm")]
-            println!("[{:08X}][A] {}", addr, instr);
+            println!("[{:08X}][A] {}", _addr, instr);
 
             if self.check_condition(instr.cond()) {
                 arm::dispatch_ops(self, instr);
@@ -78,7 +77,7 @@ impl<'a> Interpreter<'a> {
     }
 }
 
-impl arm::Ops for Interpreter<'_> {
+impl<B: Bus> arm::Ops for Interpreter<'_, B> {
     fn data_processing(&mut self, _op: arm::DataProcessingKind, inst: arm::Instruction) {
         use arm::Mnemonic::*;
 
@@ -348,7 +347,7 @@ impl arm::Ops for Interpreter<'_> {
     }
 }
 
-impl thumb::Ops for Interpreter<'_> {
+impl<B: Bus> thumb::Ops for Interpreter<'_, B> {
     fn shift_immediate(&mut self, op: thumb::ShiftImmediateKind, inst: thumb::Instruction) {
         let rd = inst.rd() as usize;
         let rs = inst.rs() as usize;

@@ -4,6 +4,7 @@ mod gamepak;
 use std::ops::Range;
 
 use crate::Cartridge;
+use crate::cpu::Bus;
 use display::Display;
 use gamepak::GamePak;
 
@@ -68,38 +69,6 @@ impl Mmio {
         self.peek(address, Width::Word)
     }
 
-    pub fn read8(&mut self, address: u32) -> u8 {
-        self.read(address, Width::Byte) as u8
-    }
-
-    pub fn read16(&mut self, address: u32) -> u16 {
-        self.read(address, Width::Halfword) as u16
-    }
-
-    pub fn read32(&mut self, address: u32) -> u32 {
-        self.read(address, Width::Word)
-    }
-
-    pub fn write8(&mut self, address: u32, value: u8) {
-        self.write(address, Width::Byte, u32::from(value));
-    }
-
-    pub fn write16(&mut self, address: u32, value: u16) {
-        self.write(address, Width::Halfword, u32::from(value));
-    }
-
-    pub fn write32(&mut self, address: u32, value: u32) {
-        self.write(address, Width::Word, value);
-    }
-
-    pub fn fetch16(&mut self, address: u32) -> u16 {
-        self.read16(address)
-    }
-
-    pub fn fetch32(&mut self, address: u32) -> u32 {
-        self.read32(address)
-    }
-
     fn peek(&self, address: u32, width: Width) -> u32 {
         match Self::target(address) {
             Target::Memory => self.route(address, width).map_or(0, load),
@@ -156,6 +125,40 @@ enum Width {
     Byte,
     Halfword,
     Word,
+}
+
+impl Bus for Mmio {
+    fn read8(&mut self, address: u32) -> u8 {
+        self.read(address, Width::Byte) as u8
+    }
+
+    fn read16(&mut self, address: u32) -> u16 {
+        self.read(address, Width::Halfword) as u16
+    }
+
+    fn read32(&mut self, address: u32) -> u32 {
+        self.read(address, Width::Word)
+    }
+
+    fn write8(&mut self, address: u32, value: u8) {
+        self.write(address, Width::Byte, u32::from(value));
+    }
+
+    fn write16(&mut self, address: u32, value: u16) {
+        self.write(address, Width::Halfword, u32::from(value));
+    }
+
+    fn write32(&mut self, address: u32, value: u32) {
+        self.write(address, Width::Word, value);
+    }
+
+    fn fetch16(&mut self, address: u32) -> u16 {
+        self.read16(address)
+    }
+
+    fn fetch32(&mut self, address: u32) -> u32 {
+        self.read32(address)
+    }
 }
 
 impl Width {

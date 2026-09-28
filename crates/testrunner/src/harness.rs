@@ -94,6 +94,15 @@ pub struct Field {
 }
 
 impl Field {
+    pub fn hex(name: impl Into<String>, got: u32, want: u32) -> Self {
+        Self {
+            name: name.into(),
+            got: got.into(),
+            want: want.into(),
+            notation: Notation::Hex { bytes: 4 },
+        }
+    }
+
     pub fn matched(&self) -> bool {
         self.got == self.want
     }

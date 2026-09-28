@@ -5,9 +5,6 @@
 [submodule "submodules/libretro-database"]
 	path = submodules/libretro-database
 	url = https://github.com/libretro/libretro-database
-[submodule "submodules/65x02"]
-	path = submodules/65x02
-	url = https://github.com/SingleStepTests/65x02
 [submodule "submodules/spc700"]
 	path = submodules/spc700
 	url = https://github.com/SingleStepTests/spc700
@@ -17,3 +14,6 @@
 [submodule "submodules/SNES"]
 	path = submodules/SNES
 	url = https://github.com/PeterLemon/SNES
+[submodule "submodules/ARM7TDMI"]
+	path = submodules/ARM7TDMI
+	url = https://github.com/SingleStepTests/ARM7TDMI

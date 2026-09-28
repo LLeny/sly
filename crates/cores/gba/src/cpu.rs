@@ -1,3 +1,4 @@
+mod bus;
 pub mod decoder;
 pub mod interpreter;
 mod operand;
@@ -6,16 +7,16 @@ mod shift;
 
 use std::ops::RangeInclusive;
 
-use crate::mmio::Mmio;
-use pipeline::Pipeline;
+pub use bus::Bus;
+pub use pipeline::Pipeline;
 
 pub struct Cpu {
     pub registers: [u32; 16],
     pub cpsr: Psr,
     pub spsr: [Psr; 5],
-    banks: [[u32; 16]; 5],
-    user_bank: [u32; 16],
-    pipeline: Pipeline,
+    pub banks: [[u32; 16]; 5],
+    pub user_bank: [u32; 16],
+    pub pipeline: Pipeline,
 }
 
 impl Cpu {
@@ -30,7 +31,7 @@ impl Cpu {
         }
     }
 
-    pub fn step(&mut self, mmio: &mut Mmio) {
+    pub fn step(&mut self, mmio: &mut impl Bus) {
         let instruction = self.fetch_instruction(mmio);
         if let Some((addr, instruction)) = self.pipeline.advance(self.pc(), instruction) {
             self.execute(mmio, addr, instruction);
@@ -46,7 +47,7 @@ impl Cpu {
         self.pipeline.flush();
     }
 
-    pub(crate) fn fetch_instruction(&self, mmio: &mut Mmio) -> u32 {
+    pub(crate) fn fetch_instruction(&self, mmio: &mut impl Bus) -> u32 {
         if self.is_thumb() {
             u32::from(mmio.fetch16(self.pc() & !0b1))
         } else {

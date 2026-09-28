@@ -1,6 +1,7 @@
 mod cores;
 mod harness;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -8,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use clap::Parser;
 use owo_colors::OwoColorize;
 
-use cores::Target;
+use cores::{FileFormat, Target};
 use harness::{OpReport, Outcome};
 
 #[derive(Parser)]
@@ -53,20 +54,14 @@ fn run(args: &Args) -> Result<bool> {
         bail!("--tests requires selecting a single core, not the whole system");
     }
 
-    let opcodes = args
-        .opcodes
-        .as_ref()
-        .map(|list| self::parse_opcodes(list))
-        .transpose()?;
-
     let mut all_clean = true;
     for target in targets {
-        all_clean &= self::run_target(target, args, opcodes.as_deref())?;
+        all_clean &= self::run_target(target, args)?;
     }
     Ok(all_clean)
 }
 
-fn run_target(target: &Target, args: &Args, opcodes: Option<&[u8]>) -> Result<bool> {
+fn run_target(target: &Target, args: &Args) -> Result<bool> {
     let tests_dir = args
         .tests
         .clone()
@@ -78,27 +73,26 @@ fn run_target(target: &Target, args: &Args, opcodes: Option<&[u8]>) -> Result<bo
         );
     }
 
-    let opcodes = self::discover_opcodes(&tests_dir, target.suffix, opcodes)
+    let files = self::discover_files(&tests_dir, target.format, args.opcodes.as_deref())
         .with_context(|| format!("scanning {}", tests_dir.display()))?;
-    if opcodes.is_empty() {
-        bail!("no matching opcode test files in {}", tests_dir.display());
+    if files.is_empty() {
+        bail!("no matching test files in {}", tests_dir.display());
     }
 
     println!(
         "{} {} {}",
         "▶".cyan().bold(),
         target.name.bold(),
-        format!("({}, {} opcodes)", tests_dir.display(), opcodes.len()).dimmed()
+        format!("({}, {} groups)", tests_dir.display(), files.len()).dimmed()
     );
 
     let mut core = target.build();
     let mut tally = Tally::default();
 
-    for opcode in opcodes {
-        let path = tests_dir.join(format!("{opcode:02x}{}.json", target.suffix));
-        let report = harness::run_file(core.as_mut(), &path, args.limit)?;
+    for (name, path) in files {
+        let report = core.run_file(&path, args.limit)?;
         tally.add(&report);
-        self::print_op(opcode, &report);
+        self::print_op(&name, &report);
     }
 
     tally.print_summary();
@@ -126,10 +120,10 @@ impl Tally {
     }
 
     fn print_summary(&self) {
-        let opcodes = self.clean + self.failed + self.panicked + self.empty;
+        let groups = self.clean + self.failed + self.panicked + self.empty;
         println!(
             "  {}  {}   {}   {}   {}",
-            format!("{}/{} opcodes ok", self.clean, opcodes).bold(),
+            format!("{}/{} groups ok", self.clean, groups).bold(),
             format!("{} failed", self.failed).red(),
             format!("{} panicked", self.panicked).yellow(),
             format!("{} empty", self.empty).dimmed(),
@@ -139,9 +133,8 @@ impl Tally {
     }
 }
 
-fn print_op(opcode: u8, report: &OpReport) {
-    let op = format!("{opcode:02X}");
-    let op = op.bold();
+fn print_op(name: &str, report: &OpReport) {
+    let op = name.bold();
     match &report.outcome {
         Outcome::Clean => {
             let note = format!("{} ok", report.passed);
@@ -174,6 +167,61 @@ fn print_op(opcode: u8, report: &OpReport) {
             }
         }
     }
+}
+
+fn discover_files(
+    dir: &Path,
+    format: FileFormat,
+    requested: Option<&[String]>,
+) -> Result<Vec<(String, PathBuf)>> {
+    match format {
+        FileFormat::HexOpcodes { suffix } => {
+            let requested = requested.map(parse_opcodes).transpose()?;
+            let files = self::discover_opcodes(dir, suffix, requested.as_deref())?
+                .into_iter()
+                .map(|op| {
+                    let path = dir.join(format!("{op:02x}{suffix}.json"));
+                    (format!("{op:02X}"), path)
+                })
+                .collect();
+
+            Ok(files)
+        }
+        FileFormat::ArmGroups => self::discover_groups(dir, requested),
+    }
+}
+
+fn discover_groups(dir: &Path, requested: Option<&[String]>) -> Result<Vec<(String, PathBuf)>> {
+    let mut files = BTreeMap::new();
+
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+
+        let (stem, binary) = match name.strip_suffix(".json.bin") {
+            Some(stem) => (stem, true),
+            None => match name.strip_suffix(".json") {
+                Some(stem) => (stem, false),
+                None => continue,
+            },
+        };
+
+        if requested.is_some_and(|names| !names.iter().any(|name| name.trim() == stem)) {
+            continue;
+        }
+
+        if binary || !files.contains_key(stem) {
+            files.insert(stem.to_owned(), path);
+        }
+    }
+
+    Ok(files.into_iter().collect())
 }
 
 fn discover_opcodes(dir: &Path, suffix: &str, requested: Option<&[u8]>) -> Result<Vec<u8>> {
