@@ -97,6 +97,23 @@ impl Cpu {
             .expect("something is fucked")
     }
 
+    pub(crate) fn branch_exchange(&mut self, target: u32) {
+        self.cpsr.set_t(target & 1 != 0);
+        self.set_pc(target);
+    }
+
+    pub(crate) fn enter_exception(&mut self, mode: Mode, vector: u32, return_address: u32) {
+        let saved_cpsr = self.cpsr;
+        self.switch_mode(mode);
+        self.spsr[mode.index().expect("exception modes have an SPSR")] = saved_cpsr;
+        self.set_lr(return_address);
+
+        self.cpsr.set_mode(mode);
+        self.cpsr.set_t(false);
+        self.cpsr.set_i(true);
+        self.set_pc(vector);
+    }
+
     // SPSR_<current mode> -> CPSR
     pub(crate) fn restore_cpsr(&mut self) {
         let spsr = self.get_current_spsr();

@@ -42,6 +42,18 @@ impl<'a> Interpreter<'a> {
             .rotate_right((addr & 0b11) * 8)
     }
 
+    fn load_halfword_rotated(&mut self, addr: u32) -> u32 {
+        (self.mmio.read16(addr & !0b1) as u32).rotate_right((addr & 0b1) * 8)
+    }
+
+    fn load_signed_halfword(&mut self, addr: u32) -> u32 {
+        if addr & 0b1 != 0 {
+            self.mmio.read8(addr) as i8 as u32
+        } else {
+            self.mmio.read16(addr) as i16 as u32
+        }
+    }
+
     fn add_with_carry(a: u32, b: u32, carry: bool) -> (u32, bool, bool) {
         let sum = a as u64 + b as u64 + carry as u64;
         let result = sum as u32;
@@ -214,13 +226,8 @@ impl arm::Ops for Interpreter<'_> {
         let address = if inst.pre() { updated_base } else { base };
 
         let loaded = match inst.mnemonic() {
-            arm::Mnemonic::Ldrh => {
-                Some((self.mmio.read16(address & !0b1) as u32).rotate_right((address & 0b1) * 8))
-            }
-            arm::Mnemonic::Ldrsh if address & 0b1 != 0 => {
-                Some(self.mmio.read8(address) as i8 as u32)
-            }
-            arm::Mnemonic::Ldrsh => Some(self.mmio.read16(address & !0b1) as i16 as u32),
+            arm::Mnemonic::Ldrh => Some(self.load_halfword_rotated(address)),
+            arm::Mnemonic::Ldrsh => Some(self.load_signed_halfword(address)),
             arm::Mnemonic::Ldrsb => Some(self.mmio.read8(address) as i8 as u32),
             arm::Mnemonic::Strh => {
                 let value = if rd == 15 {
@@ -256,9 +263,8 @@ impl arm::Ops for Interpreter<'_> {
     }
 
     fn bx(&mut self, inst: arm::Instruction) {
-        let target = self.cpu.registers[inst.rm() as usize];
-        self.cpu.cpsr.set_t(target & 1 != 0);
-        self.cpu.set_pc(target);
+        self.cpu
+            .branch_exchange(self.cpu.registers[inst.rm() as usize]);
     }
 
     fn multiply(&mut self, _inst: arm::Instruction) {
@@ -435,45 +441,186 @@ impl thumb::Ops for Interpreter<'_> {
         }
     }
 
-    fn register_transfer(&mut self, _op: thumb::RegisterTransferKind, _inst: thumb::Instruction) {
-        todo!()
+    fn register_transfer(&mut self, op: thumb::RegisterTransferKind, inst: thumb::Instruction) {
+        use thumb::RegisterTransferKind::*;
+
+        let rd = inst.rd() as usize;
+        let addr = self.cpu.registers[inst.rb() as usize]
+            .wrapping_add(self.cpu.registers[inst.ro() as usize]);
+        let value = self.cpu.registers[rd];
+
+        let loaded = match op {
+            StrRegOffset => {
+                self.mmio.write32(addr & !0b11, value);
+                return;
+            }
+            StrbRegOffset => {
+                self.mmio.write8(addr, value as u8);
+                return;
+            }
+            StrhRegOffset => {
+                self.mmio.write16(addr & !0b1, value as u16);
+                return;
+            }
+            LdrRegOffset => self.load_word_rotated(addr),
+            LdrbRegOffset => self.mmio.read8(addr) as u32,
+            LdrsbRegOffset => self.mmio.read8(addr) as i8 as u32,
+            LdrhRegOffset => self.load_halfword_rotated(addr),
+            LdrshRegOffset => self.load_signed_halfword(addr),
+        };
+        self.cpu.set_register(rd, loaded);
     }
 
     fn immediate_transfer(&mut self, op: thumb::ImmediateTransferKind, inst: thumb::Instruction) {
-        match op {
-            thumb::ImmediateTransferKind::LdrWordImm => {
-                let addr = self.cpu.registers[inst.rb() as usize].wrapping_add(inst.word_offset());
-                let value = self.load_word_rotated(addr);
-                self.cpu.set_register(inst.rd() as usize, value);
-            }
-            thumb::ImmediateTransferKind::StrWordImm => {
-                let addr = self.cpu.registers[inst.rb() as usize].wrapping_add(inst.word_offset());
-                let value = self.cpu.registers[inst.rd() as usize];
+        use thumb::ImmediateTransferKind::*;
+
+        let (rd, base, offset) = match op {
+            LdrWordImm | StrWordImm => (
+                inst.rd(),
+                self.cpu.registers[inst.rb() as usize],
+                inst.word_offset(),
+            ),
+            LdrbByteImm | StrbByteImm => (
+                inst.rd(),
+                self.cpu.registers[inst.rb() as usize],
+                inst.off5() as u32,
+            ),
+            LdrhHalfImm | StrhHalfImm => (
+                inst.rd(),
+                self.cpu.registers[inst.rb() as usize],
+                inst.half_offset(),
+            ),
+            LdrSp | StrSp => (inst.dest8(), self.cpu.sp(), inst.scaled_offset() as u32),
+            LdrLiteral => (
+                inst.dest8(),
+                self.cpu.pc() & !0b11,
+                inst.scaled_offset() as u32,
+            ),
+        };
+        let rd = rd as usize;
+        let addr = base.wrapping_add(offset);
+        let value = self.cpu.registers[rd];
+
+        let loaded = match op {
+            StrWordImm | StrSp => {
                 self.mmio.write32(addr & !0b11, value);
+                return;
             }
-            thumb::ImmediateTransferKind::LdrLiteral => {
-                let addr = (self.cpu.pc() & !0b11).wrapping_add(inst.scaled_offset() as u32);
-                let value = self.mmio.read32(addr);
-                self.cpu.set_register(inst.dest8() as usize, value);
+            StrbByteImm => {
+                self.mmio.write8(addr, value as u8);
+                return;
             }
-            _ => todo!(),
+            StrhHalfImm => {
+                self.mmio.write16(addr & !0b1, value as u16);
+                return;
+            }
+            LdrWordImm | LdrSp => self.load_word_rotated(addr),
+            LdrbByteImm => self.mmio.read8(addr) as u32,
+            LdrhHalfImm => self.load_halfword_rotated(addr),
+            LdrLiteral => self.mmio.read32(addr),
+        };
+        self.cpu.set_register(rd, loaded);
+    }
+
+    fn address(&mut self, op: thumb::AddressKind, inst: thumb::Instruction) {
+        let rd = inst.dest8() as usize;
+
+        match op {
+            thumb::AddressKind::AddPc => self.cpu.set_register(
+                rd,
+                (self.cpu.pc() & !0b11).wrapping_add(inst.scaled_offset() as u32),
+            ),
+            thumb::AddressKind::AddSp => self
+                .cpu
+                .set_register(rd, self.cpu.sp().wrapping_add(inst.scaled_offset() as u32)),
+            thumb::AddressKind::AddSpAdjust => self
+                .cpu
+                .set_sp(self.cpu.sp().wrapping_add(inst.stack_offset() as u32)),
+            thumb::AddressKind::SubSpAdjust => self
+                .cpu
+                .set_sp(self.cpu.sp().wrapping_sub(inst.stack_offset() as u32)),
         }
     }
 
-    fn address(&mut self, _op: thumb::AddressKind, _inst: thumb::Instruction) {
-        todo!()
+    fn multiple_transfer(&mut self, op: thumb::MultipleTransferKind, inst: thumb::Instruction) {
+        use thumb::MultipleTransferKind::*;
+
+        let rb = match op {
+            Push | Pop => 13,
+            Stmia | Ldmia => inst.base() as usize,
+        };
+        let base = self.cpu.registers[rb];
+        let registers = inst.rlist();
+        let count = inst.list().count_ones() + u32::from(matches!(op, Push | Pop) && inst.extra());
+
+        // Empty lists transfer PC but write back as tho 16 registers moved.
+        let size = if count == 0 { 0x40 } else { count * 4 };
+        let registers = registers.chain((count == 0).then_some(15));
+        let (start, updated_base) = match op {
+            Push => {
+                let start = base.wrapping_sub(size);
+                (start, start)
+            }
+            Stmia | Ldmia | Pop => (base, base.wrapping_add(size)),
+        };
+
+        match op {
+            Ldmia | Pop => {
+                // A loaded base register takes precedence over writeback.
+                self.cpu.set_register(rb, updated_base);
+                for (index, reg) in registers.enumerate() {
+                    let addr = start.wrapping_add(index as u32 * 4);
+                    let value = self.mmio.read32(addr & !0b11);
+                    self.cpu.set_register(reg, value);
+                }
+            }
+            Stmia | Push => {
+                for (index, reg) in registers.enumerate() {
+                    let addr = start.wrapping_add(index as u32 * 4);
+                    let value = match reg {
+                        15 => self.cpu.pc().wrapping_add(2),
+                        _ if reg == rb && index != 0 => updated_base,
+                        _ => self.cpu.registers[reg],
+                    };
+                    self.mmio.write32(addr & !0b11, value);
+                }
+                self.cpu.set_register(rb, updated_base);
+            }
+        }
     }
 
-    fn multiple_transfer(&mut self, _op: thumb::MultipleTransferKind, _inst: thumb::Instruction) {
-        todo!()
-    }
-
-    fn branch(&mut self, _op: thumb::BranchKind, _inst: thumb::Instruction) {
-        todo!()
+    fn branch(&mut self, op: thumb::BranchKind, inst: thumb::Instruction) {
+        match op {
+            thumb::BranchKind::BCond => {
+                if self.check_condition(inst.cond()) {
+                    let offset = inst.cond_offset() as i32;
+                    self.cpu.set_pc(self.cpu.pc().wrapping_add_signed(offset));
+                }
+            }
+            thumb::BranchKind::BUncond => {
+                let offset = inst.offset() as i32;
+                self.cpu.set_pc(self.cpu.pc().wrapping_add_signed(offset));
+            }
+            thumb::BranchKind::Bx => self
+                .cpu
+                .branch_exchange(self.cpu.registers[inst.high_src() as usize]),
+            thumb::BranchKind::Blh => {
+                let lr = self.cpu.pc().wrapping_add_signed(inst.prefix() as i32);
+                self.cpu.set_lr(lr);
+            }
+            thumb::BranchKind::Bll => {
+                let target = self.cpu.lr().wrapping_add(inst.suffix() as u32);
+                let return_address = self.cpu.pc().wrapping_sub(2) | 1;
+                self.cpu.set_lr(return_address);
+                self.cpu.set_pc(target);
+            }
+        }
     }
 
     fn swi(&mut self, _inst: thumb::Instruction) {
-        todo!()
+        let return_address = self.cpu.pc().wrapping_sub(2);
+        self.cpu
+            .enter_exception(Mode::Supervisor, 0x08, return_address);
     }
 
     fn on_invalid(&mut self, _inst: thumb::Instruction) {
