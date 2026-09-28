@@ -1,4 +1,5 @@
 use super::decoder::{arm, thumb};
+use super::shift::Shift;
 use super::{Cpu, Mode};
 use crate::mmio::Mmio;
 
@@ -278,20 +279,137 @@ impl arm::Ops for Interpreter<'_> {
 }
 
 impl thumb::Ops for Interpreter<'_> {
-    fn shift_immediate(&mut self, _op: thumb::ShiftImmediateKind, _inst: thumb::Instruction) {
-        todo!()
+    fn shift_immediate(&mut self, op: thumb::ShiftImmediateKind, inst: thumb::Instruction) {
+        let rd = inst.rd() as usize;
+        let rs = inst.rs() as usize;
+        let offset = inst.shift_imm() as u32;
+
+        let shift = match op {
+            thumb::ShiftImmediateKind::LslShiftImm => Shift::Lsl(offset),
+            thumb::ShiftImmediateKind::LsrShiftImm => {
+                Shift::Lsr(if offset == 0 { 32 } else { offset })
+            }
+            thumb::ShiftImmediateKind::AsrShiftImm => {
+                Shift::Asr(if offset == 0 { 32 } else { offset })
+            }
+        };
+
+        let (result, carry) = shift.apply(self.cpu.registers[rs], self.cpu.cpsr.c());
+        self.cpu.set_register(rd, result);
+
+        self.cpu.cpsr.set_n(result >> 31 != 0);
+        self.cpu.cpsr.set_z(result == 0);
+        self.cpu.cpsr.set_c(carry);
     }
 
-    fn add_subtract(&mut self, _op: thumb::AddSubtractKind, _inst: thumb::Instruction) {
-        todo!()
+    fn add_subtract(&mut self, op: thumb::AddSubtractKind, inst: thumb::Instruction) {
+        let rd = inst.rd() as usize;
+        let rs = self.cpu.registers[inst.rs() as usize];
+        let rn = inst.rn() as usize;
+
+        let (result, carry, overflow) = match op {
+            thumb::AddSubtractKind::AddReg3 => {
+                Self::add_with_carry(rs, self.cpu.registers[rn], false)
+            }
+            thumb::AddSubtractKind::AddImm3 => Self::add_with_carry(rs, inst.imm3() as u32, false),
+            thumb::AddSubtractKind::SubReg3 => {
+                Self::add_with_carry(rs, !self.cpu.registers[rn], true)
+            }
+            thumb::AddSubtractKind::SubImm3 => {
+                Self::add_with_carry(rs, !(inst.imm3() as u32), true)
+            }
+        };
+        self.cpu.set_register(rd, result);
+
+        self.cpu.cpsr.set_n(result >> 31 != 0);
+        self.cpu.cpsr.set_z(result == 0);
+        self.cpu.cpsr.set_c(carry);
+        self.cpu.cpsr.set_v(overflow);
     }
 
-    fn immediate(&mut self, _op: thumb::ImmediateKind, _inst: thumb::Instruction) {
-        todo!()
+    fn immediate(&mut self, op: thumb::ImmediateKind, inst: thumb::Instruction) {
+        match op {
+            thumb::ImmediateKind::MovImm8 => {
+                let result = inst.imm8() as u32;
+                self.cpu.set_register(inst.dest8() as usize, result);
+                self.cpu.cpsr.set_n(false);
+                self.cpu.cpsr.set_z(result == 0);
+            }
+            thumb::ImmediateKind::AddImm8 => {
+                let value = self.cpu.registers[inst.dest8() as usize];
+                let (result, carry, overflow) =
+                    Self::add_with_carry(value, inst.imm8() as u32, false);
+                self.cpu.set_register(inst.dest8() as usize, result);
+                self.cpu.cpsr.set_n(result >> 31 != 0);
+                self.cpu.cpsr.set_z(result == 0);
+                self.cpu.cpsr.set_c(carry);
+                self.cpu.cpsr.set_v(overflow);
+            }
+            thumb::ImmediateKind::SubImm8 => {
+                let value = self.cpu.registers[inst.dest8() as usize];
+                let (result, carry, overflow) =
+                    Self::add_with_carry(value, !(inst.imm8() as u32), true);
+                self.cpu.set_register(inst.dest8() as usize, result);
+                self.cpu.cpsr.set_n(result >> 31 != 0);
+                self.cpu.cpsr.set_z(result == 0);
+                self.cpu.cpsr.set_c(carry);
+                self.cpu.cpsr.set_v(overflow);
+            }
+            thumb::ImmediateKind::CmpImm8 => {
+                let value = self.cpu.registers[inst.dest8() as usize];
+                let (result, carry, overflow) =
+                    Self::add_with_carry(value, !(inst.imm8() as u32), true);
+                self.cpu.cpsr.set_n(result >> 31 != 0);
+                self.cpu.cpsr.set_z(result == 0);
+                self.cpu.cpsr.set_c(carry);
+                self.cpu.cpsr.set_v(overflow);
+            }
+        }
     }
 
-    fn alu(&mut self, _op: thumb::AluKind, _inst: thumb::Instruction) {
-        todo!()
+    fn alu(&mut self, op: thumb::AluKind, inst: thumb::Instruction) {
+        use thumb::AluKind::*;
+
+        let rd = inst.rd() as usize;
+        let lhs = self.cpu.registers[rd];
+        let rs = self.cpu.registers[inst.rs() as usize];
+        let c_in = self.cpu.cpsr.c();
+        let v_in = self.cpu.cpsr.v();
+
+        let (result, carry, overflow) = match op {
+            AndReg | TstReg => (lhs & rs, c_in, v_in),
+            EorReg => (lhs ^ rs, c_in, v_in),
+            LslReg | LsrReg | AsrReg | RorReg => {
+                let amount = rs & 0xFF;
+                let shift = match op {
+                    LslReg => Shift::Lsl(amount),
+                    LsrReg => Shift::Lsr(amount),
+                    AsrReg => Shift::Asr(amount),
+                    RorReg => Shift::Ror(amount),
+                    _ => unreachable!(),
+                };
+                let (result, carry) = shift.apply(lhs, c_in);
+                (result, carry, v_in)
+            }
+            AdcReg => Self::add_with_carry(lhs, rs, c_in),
+            SbcReg => Self::add_with_carry(lhs, !rs, c_in),
+            NegReg => Self::add_with_carry(0, !rs, true),
+            CmpReg => Self::add_with_carry(lhs, !rs, true),
+            CmnReg => Self::add_with_carry(lhs, rs, false),
+            OrrReg => (lhs | rs, c_in, v_in),
+            MulReg => (lhs.wrapping_mul(rs), false, v_in),
+            BicReg => (lhs & !rs, c_in, v_in),
+            MvnReg => (!rs, c_in, v_in),
+        };
+
+        self.cpu.cpsr.set_n(result >> 31 != 0);
+        self.cpu.cpsr.set_z(result == 0);
+        self.cpu.cpsr.set_c(carry);
+        self.cpu.cpsr.set_v(overflow);
+
+        if !matches!(op, TstReg | CmpReg | CmnReg) {
+            self.cpu.set_register(rd, result);
+        }
     }
 
     fn high_register(&mut self, op: thumb::HighRegisterKind, inst: thumb::Instruction) {
