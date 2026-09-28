@@ -4,6 +4,8 @@ mod operand;
 mod pipeline;
 mod shift;
 
+use std::ops::RangeInclusive;
+
 use crate::mmio::Mmio;
 use pipeline::Pipeline;
 
@@ -126,9 +128,9 @@ impl Cpu {
 
         // registers -> banks[old], user_bank -> registers
         if let Some(index) = old.index()
-            && let Some((start, end)) = old.bank_register_range()
+            && let Some(range) = old.bank_register_range()
         {
-            for i in start..=end {
+            for i in range {
                 self.banks[index][i] = self.registers[i];
                 self.registers[i] = self.user_bank[i];
             }
@@ -136,9 +138,9 @@ impl Cpu {
 
         // registers -> user_bank, banks[new] -> registers
         if let Some(index) = new.index()
-            && let Some((start, end)) = new.bank_register_range()
+            && let Some(range) = new.bank_register_range()
         {
-            for i in start..=end {
+            for i in range {
                 self.user_bank[i] = self.registers[i];
                 self.registers[i] = self.banks[index][i];
             }
@@ -170,12 +172,17 @@ impl Mode {
         }
     }
 
-    pub fn bank_register_range(&self) -> Option<(usize, usize)> {
+    pub fn bank_register_range(&self) -> Option<RangeInclusive<usize>> {
         match self {
-            Mode::Fiq => Some((8, 14)),
-            Mode::Irq | Mode::Supervisor | Mode::Abort | Mode::Undefined => Some((13, 14)),
+            Mode::Fiq => Some(8..=14),
+            Mode::Irq | Mode::Supervisor | Mode::Abort | Mode::Undefined => Some(13..=14),
             _ => None,
         }
+    }
+
+    pub fn is_banked(&self, index: usize) -> bool {
+        self.bank_register_range()
+            .is_some_and(|range| range.contains(&index))
     }
 }
 

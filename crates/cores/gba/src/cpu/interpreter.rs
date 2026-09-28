@@ -1,4 +1,4 @@
-use super::decoder::{arm, thumb};
+use super::decoder::{arm, registers, thumb};
 use super::shift::Shift;
 use super::{Cpu, Mode};
 use crate::mmio::Mmio;
@@ -249,8 +249,72 @@ impl arm::Ops for Interpreter<'_> {
         }
     }
 
-    fn block_transfer(&mut self, _op: arm::BlockTransferKind, _inst: arm::Instruction) {
-        todo!()
+    fn block_transfer(&mut self, op: arm::BlockTransferKind, inst: arm::Instruction) {
+        // Empty lists transfer PC but write back as tho 16 registers moved.
+        let (list, size) = match inst.list() {
+            0 => (1 << 15, 0x40),
+            list => (list, list.count_ones() * 4),
+        };
+        let rn = inst.rn() as usize;
+        let base = self.cpu.registers[rn];
+        let updated_base = if inst.up() {
+            base.wrapping_add(size)
+        } else {
+            base.wrapping_sub(size)
+        };
+        let start = match (inst.up(), inst.pre()) {
+            (true, false) => base,
+            (true, true) => base.wrapping_add(4),
+            (false, false) => updated_base.wrapping_add(4),
+            (false, true) => updated_base,
+        };
+        let restore_psr = inst.user() && op == arm::BlockTransferKind::Ldm && list & (1 << 15) != 0;
+        let user_transfer = inst.user() && !restore_psr;
+        let mode = self.cpu.cpsr.mode();
+        let user_banked = |reg| user_transfer && mode.is_banked(reg);
+
+        match op {
+            arm::BlockTransferKind::Stm => {
+                for (index, reg) in registers(list).enumerate() {
+                    let addr = start.wrapping_add(index as u32 * 4);
+                    let value = match reg {
+                        15 => self.cpu.pc().wrapping_add(4),
+                        _ if user_banked(reg) => self.cpu.user_bank[reg],
+                        _ if reg == rn && inst.write() && index != 0 => updated_base,
+                        _ => self.cpu.registers[reg],
+                    };
+                    self.mmio.write32(addr & !0b11, value);
+                }
+                if inst.write() {
+                    self.cpu.set_register(rn, updated_base);
+                }
+            }
+            arm::BlockTransferKind::Ldm => {
+                let mut pc = None;
+                for (index, reg) in registers(list).enumerate() {
+                    let addr = start.wrapping_add(index as u32 * 4);
+                    let value = self.mmio.read32(addr & !0b11);
+                    match reg {
+                        15 => pc = Some(value),
+                        _ if user_banked(reg) => self.cpu.user_bank[reg] = value,
+                        _ => self.cpu.registers[reg] = value,
+                    }
+                }
+
+                if inst.write() && list & (1 << rn) == 0 {
+                    self.cpu.set_register(rn, updated_base);
+                }
+
+                // Finish writes to the current bank before restoring the return state.
+                if restore_psr {
+                    self.cpu.restore_cpsr();
+                }
+
+                if let Some(pc) = pc {
+                    self.cpu.set_pc(pc);
+                }
+            }
+        }
     }
 
     fn b(&mut self, inst: arm::Instruction) {
@@ -550,12 +614,11 @@ impl thumb::Ops for Interpreter<'_> {
             Stmia | Ldmia => inst.base() as usize,
         };
         let base = self.cpu.registers[rb];
-        let registers = inst.rlist();
-        let count = inst.list().count_ones() + u32::from(matches!(op, Push | Pop) && inst.extra());
-
         // Empty lists transfer PC but write back as tho 16 registers moved.
-        let size = if count == 0 { 0x40 } else { count * 4 };
-        let registers = registers.chain((count == 0).then_some(15));
+        let (list, size) = match inst.rlist() {
+            0 => (1 << 15, 0x40),
+            list => (list, list.count_ones() * 4),
+        };
         let (start, updated_base) = match op {
             Push => {
                 let start = base.wrapping_sub(size);
@@ -568,14 +631,14 @@ impl thumb::Ops for Interpreter<'_> {
             Ldmia | Pop => {
                 // A loaded base register takes precedence over writeback.
                 self.cpu.set_register(rb, updated_base);
-                for (index, reg) in registers.enumerate() {
+                for (index, reg) in registers(list).enumerate() {
                     let addr = start.wrapping_add(index as u32 * 4);
                     let value = self.mmio.read32(addr & !0b11);
                     self.cpu.set_register(reg, value);
                 }
             }
             Stmia | Push => {
-                for (index, reg) in registers.enumerate() {
+                for (index, reg) in registers(list).enumerate() {
                     let addr = start.wrapping_add(index as u32 * 4);
                     let value = match reg {
                         15 => self.cpu.pc().wrapping_add(2),

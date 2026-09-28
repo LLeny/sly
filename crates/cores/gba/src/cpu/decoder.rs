@@ -7,7 +7,7 @@ mod generated {
 pub use generated::{ARM as arm, Thumb as thumb};
 
 impl thumb::Instruction {
-    pub fn rlist(&self) -> impl Iterator<Item = usize> + Clone {
+    pub fn rlist(&self) -> u16 {
         let mut rlist = self.list() as u16;
         if self.extra() {
             match self.mnemonic() {
@@ -16,6 +16,14 @@ impl thumb::Instruction {
                 _ => {}
             }
         }
-        (0..16).filter(move |&i| (rlist >> i) & 1 != 0)
+        rlist
     }
+}
+
+pub fn registers(mut mask: u16) -> impl Iterator<Item = usize> {
+    std::iter::from_fn(move || {
+        let reg = (mask != 0).then(|| mask.trailing_zeros() as usize)?;
+        mask &= mask - 1;
+        Some(reg)
+    })
 }
