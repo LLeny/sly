@@ -5,6 +5,7 @@ pub mod error;
 pub mod gamepak;
 pub mod mmio;
 pub mod ppu;
+mod scheduler;
 
 #[cfg(feature = "debug")]
 pub mod debug;
@@ -18,10 +19,12 @@ use crate::bus::{BusView, CpuBus};
 use crate::cpu::{Bus, Mode, Psr};
 use crate::gamepak::GamePak;
 use crate::mmio::{Handler, Mmio, MmioMap, RegisterInfo};
-use crate::ppu::Ppu;
+use crate::ppu::{
+    FRAME_CYCLES, HBLANK_START_CYCLES, Ppu, SCANLINE_CYCLES, VBLANK_END_CYCLES, VBLANK_START_CYCLES,
+};
+use crate::scheduler::{Event, EventKind, Scheduler};
 
 const CLOCK_HZ: f64 = 16_777_216.0;
-const FRAME_CYCLES: usize = 280_896;
 
 const SCREEN_WIDTH: u32 = 240;
 const SCREEN_HEIGHT: u32 = 160;
@@ -31,7 +34,7 @@ pub struct Gba {
     ppu: Ppu,
     gamepak: GamePak,
     mmio: Mmio,
-    cycles: usize,
+    scheduler: Scheduler,
 }
 
 impl Gba {
@@ -45,9 +48,12 @@ impl Gba {
             ppu: Ppu::new(),
             gamepak: GamePak::new(cartridge),
             mmio: Mmio::new(map),
-            cycles: 0,
+            scheduler: Scheduler::new(),
         };
+
         gba.skip_bios();
+        gba.schedule_video_events();
+
         gba
     }
 
@@ -83,6 +89,36 @@ impl Gba {
         self.mmio.map.registers().map(|register| register.info())
     }
 
+    fn schedule_video_events(&mut self) {
+        let events = [
+            (HBLANK_START_CYCLES, SCANLINE_CYCLES, EventKind::HBlankStart),
+            (SCANLINE_CYCLES, SCANLINE_CYCLES, EventKind::ScanlineStart),
+            (VBLANK_START_CYCLES, FRAME_CYCLES, EventKind::VBlankStart),
+            (VBLANK_END_CYCLES, FRAME_CYCLES, EventKind::VBlankEnd),
+        ];
+
+        for (deadline, period, kind) in events {
+            self.scheduler.schedule_periodic_at(deadline, period, kind);
+        }
+    }
+
+    fn step_cpu(&mut self) {
+        let (cpu, mut bus) = self.split();
+        cpu.step(&mut bus);
+
+        // TODO: account for CPU internal cycles and bus wait states.
+        self.scheduler.advance_by(1);
+    }
+
+    fn dispatch_event(&mut self, event: Event) {
+        match event.kind {
+            EventKind::HBlankStart => self.ppu.start_hblank(),
+            EventKind::ScanlineStart => self.ppu.start_scanline(),
+            EventKind::VBlankStart => self.ppu.start_vblank(),
+            EventKind::VBlankEnd => self.ppu.end_vblank(),
+        }
+    }
+
     fn split(&mut self) -> (&mut Cpu, CpuBus<'_>) {
         let bus = CpuBus {
             ppu: &mut self.ppu,
@@ -97,20 +133,33 @@ impl Gba {
 impl core_model::Core for Gba {
     fn reset(&mut self) {
         self.cpu = Cpu::new();
+        self.ppu = Ppu::new();
+        self.scheduler = Scheduler::new();
+
+        self.schedule_video_events();
     }
 
     fn step(&mut self) {
-        let (cpu, mut bus) = self.split();
-        cpu.step(&mut bus);
-        self.cycles += 1;
+        self.step_cpu();
+
+        while let Some(event) = self.scheduler.pop_due() {
+            self.dispatch_event(event);
+        }
     }
 
     fn run_frame(&mut self) {
-        while self.cycles < FRAME_CYCLES {
-            self.step();
-        }
+        loop {
+            match self.scheduler.pop_due() {
+                Some(event) => {
+                    self.dispatch_event(event);
 
-        self.cycles -= FRAME_CYCLES;
+                    if event.kind == EventKind::VBlankStart {
+                        break;
+                    }
+                }
+                None => self.step_cpu(),
+            }
+        }
     }
 
     fn software_frame(&self) -> Option<core_model::SoftwareFrame<'_>> {
