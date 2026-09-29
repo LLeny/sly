@@ -1,3 +1,5 @@
+mod mmio;
+
 use std::sync::Arc;
 
 use debugger_model::{
@@ -71,7 +73,7 @@ impl debugger_model::DebugCore for GbaDebug {
     }
 
     fn mmio_view(&self) -> MmioView {
-        todo!()
+        mmio::view(&self.core)
     }
 
     fn caption(&self, _label: &str) -> String {

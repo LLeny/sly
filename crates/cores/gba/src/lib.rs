@@ -1,28 +1,50 @@
+pub mod bus;
 pub mod cartridge;
 pub mod cpu;
 pub mod error;
+pub mod gamepak;
 pub mod mmio;
+pub mod ppu;
 
 #[cfg(feature = "debug")]
 pub mod debug;
 
 pub use cartridge::Cartridge;
 pub use cpu::Cpu;
-use mmio::Mmio;
 
+use std::time::Duration;
+
+use crate::bus::{BusView, CpuBus};
 use crate::cpu::{Bus, Mode, Psr};
+use crate::gamepak::GamePak;
+use crate::mmio::{Handler, Mmio, MmioMap, RegisterInfo};
+use crate::ppu::Ppu;
+
+const CLOCK_HZ: f64 = 16_777_216.0;
+const FRAME_CYCLES: usize = 280_896;
+
+const SCREEN_WIDTH: u32 = 240;
+const SCREEN_HEIGHT: u32 = 160;
 
 pub struct Gba {
     cpu: Cpu,
+    ppu: Ppu,
+    gamepak: GamePak,
     mmio: Mmio,
     cycles: usize,
 }
 
 impl Gba {
     pub fn new(cartridge: Cartridge) -> Self {
+        let mut map = MmioMap::new(Handler::MEMORY);
+        ppu::io::register(&mut map);
+        gamepak::io::register(&mut map);
+
         let mut gba = Self {
             cpu: Cpu::new(),
-            mmio: Mmio::new(cartridge),
+            ppu: Ppu::new(),
+            gamepak: GamePak::new(cartridge),
+            mmio: Mmio::new(map),
             cycles: 0,
         };
         gba.skip_bios();
@@ -35,13 +57,40 @@ impl Gba {
 
         self.cpu.banks[Mode::Irq.index().unwrap()][13] = 0x0300_7FA0;
         self.cpu.banks[Mode::Supervisor.index().unwrap()][13] = 0x0300_7FE0;
-        
+
         self.cpu.set_sp(0x0300_7F00);
         self.cpu.set_lr(0x0800_0000);
         self.cpu.set_pc(0x0800_0000);
 
-        self.mmio.write8(0x0400_0300, 1); // POSTFLG
-        self.mmio.write16(0x0400_0204, 0); // WAITCNT
+        let mut bus = self.bus();
+        bus.write8(0x0400_0300, 1); // POSTFLG
+        bus.write16(0x0400_0204, 0); // WAITCNT
+    }
+
+    pub fn bus(&mut self) -> CpuBus<'_> {
+        self.split().1
+    }
+
+    pub fn bus_view(&self) -> BusView<'_> {
+        BusView {
+            ppu: &self.ppu,
+            gamepak: &self.gamepak,
+            mmio: &self.mmio,
+        }
+    }
+
+    pub fn mmio_registers(&self) -> impl Iterator<Item = RegisterInfo> {
+        self.mmio.map.registers().map(|register| register.info())
+    }
+
+    fn split(&mut self) -> (&mut Cpu, CpuBus<'_>) {
+        let bus = CpuBus {
+            ppu: &mut self.ppu,
+            gamepak: &mut self.gamepak,
+            mmio: &mut self.mmio,
+        };
+
+        (&mut self.cpu, bus)
     }
 }
 
@@ -51,13 +100,12 @@ impl core_model::Core for Gba {
     }
 
     fn step(&mut self) {
-        self.cpu.step(&mut self.mmio);
+        let (cpu, mut bus) = self.split();
+        cpu.step(&mut bus);
         self.cycles += 1;
     }
 
     fn run_frame(&mut self) {
-        const FRAME_CYCLES: usize = 280_896;
-
         while self.cycles < FRAME_CYCLES {
             self.step();
         }
@@ -66,20 +114,21 @@ impl core_model::Core for Gba {
     }
 
     fn software_frame(&self) -> Option<core_model::SoftwareFrame<'_>> {
-        static PIXELS: [[u8; 4]; 240 * 160] = [[255; 4]; 240 * 160];
+        static PIXELS: [[u8; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize] =
+            [[255; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize];
 
         Some(core_model::SoftwareFrame {
-            width: 240,
-            height: 160,
+            width: SCREEN_WIDTH,
+            height: SCREEN_HEIGHT,
             pixels: &PIXELS,
         })
     }
 
-    fn frame_interval(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_secs_f64(280_896.0 / 16_777_216.0))
+    fn frame_interval(&self) -> Option<Duration> {
+        Some(Duration::from_secs_f64(FRAME_CYCLES as f64 / CLOCK_HZ))
     }
 
     fn cartridge_info(&self) -> Option<core_model::CartridgeInfo> {
-        Some(self.mmio.cartridge().info())
+        Some(self.gamepak.cartridge().info())
     }
 }
