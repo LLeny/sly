@@ -10,7 +10,11 @@ pub(super) fn render_linear(
     on_context: Option<ContextCallback>,
 ) -> impl IntoElement {
     let list_id = SharedString::from(format!("{id}-list"));
-    let gutters = layout_cache.borrow_mut().gutters(&view, rows.selected);
+    let (gutters, mnemonic_width) = {
+        let mut cache = layout_cache.borrow_mut();
+        let gutters = cache.gutters(&view, rows.selected);
+        (gutters, cache.mnemonic_width(&view).max(LINEAR_MNEMONIC_W))
+    };
     let count = view.lines.len();
     let empty_gutter = GutterCell::default();
     uniform_list(list_id, count, move |range, _window, cx| {
@@ -20,6 +24,7 @@ pub(super) fn render_linear(
         let row_options = row::DisasmRowOptions {
             arrows_width: *arrows_width,
             show_bytes: view.show_bytes,
+            mnemonic_width,
             rows: rows.clone(),
             on_select: on_select.clone(),
             on_context: on_context.clone(),

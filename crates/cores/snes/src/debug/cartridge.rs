@@ -30,8 +30,8 @@ pub(super) fn cartridge_view(cart: &Cartridge) -> CartridgeView {
                     Field::new("Mapper", self::mapper_name(cart)).accented(),
                     Field::new("Speed", speed),
                     Field::new("Region", cart.region().to_string()),
-                    Field::new("ROM size", self::human_size(cart.rom.len())),
-                    Field::new("SRAM size", self::human_size(cart.sram.len())),
+                    Field::new("ROM size", core_model::format_byte_size(cart.rom.len())),
+                    Field::new("SRAM size", core_model::format_byte_size(cart.sram.len())),
                     Field::new("Header", format!("${:06X}", cart.header_offset())),
                 ]
                 .into_iter()
@@ -56,18 +56,5 @@ pub(super) fn mapper_name(cart: &Cartridge) -> &'static str {
             MapMode::Spc7110 => "SPC7110",
         },
         Err(_) => "unknown",
-    }
-}
-
-pub(super) fn human_size(bytes: usize) -> String {
-    const MB: usize = 1 << 20;
-    const KB: usize = 1 << 10;
-
-    if bytes >= MB && bytes.is_multiple_of(MB) {
-        format!("{} MB", bytes / MB)
-    } else if bytes >= KB {
-        format!("{} KB", bytes / KB)
-    } else {
-        format!("{bytes} B")
     }
 }

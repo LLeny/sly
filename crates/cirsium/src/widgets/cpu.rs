@@ -60,12 +60,22 @@ impl RenderOnce for CpuWidget {
         let theme = Theme::global(cx);
         let t = &*theme;
 
+        let columns = if self
+            .view
+            .registers
+            .iter()
+            .any(|register| register.bits > 24)
+        {
+            2
+        } else {
+            3
+        };
         let registers =
             div()
                 .flex()
                 .flex_col()
                 .gap_1()
-                .children(self.view.registers.chunks(3).map(|row| {
+                .children(self.view.registers.chunks(columns).map(|row| {
                     div()
                         .flex()
                         .gap_1()

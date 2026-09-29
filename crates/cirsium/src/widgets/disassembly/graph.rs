@@ -46,6 +46,7 @@ pub(super) struct GraphEdge {
 pub(super) struct GraphLayout {
     pub blocks: Vec<GraphBlock>,
     pub edges: Vec<GraphEdge>,
+    pub mnemonic_w: f32,
 }
 
 const EDGE_HIT_DIST: f32 = 6.;
@@ -77,12 +78,13 @@ fn point_segment_dist_sq(px: f32, py: f32, a: (f32, f32), b: (f32, f32)) -> f32 
     (px - cx).powi(2) + (py - cy).powi(2)
 }
 
-pub(super) fn build(lines: &[DisasmLine]) -> GraphLayout {
+pub(super) fn build(lines: &[DisasmLine], mnemonic_w: f32) -> GraphLayout {
     let n = lines.len();
     if n == 0 {
         return GraphLayout {
             blocks: Vec::new(),
             edges: Vec::new(),
+            mnemonic_w,
         };
     }
 
@@ -115,7 +117,7 @@ pub(super) fn build(lines: &[DisasmLine]) -> GraphLayout {
 
     for (idx, &start) in leaders.iter().enumerate() {
         let end = leaders.get(idx + 1).copied().unwrap_or(n);
-        blocks.push(self::block_geometry(lines, start, end));
+        blocks.push(self::block_geometry(lines, start, end, mnemonic_w));
     }
 
     for (bi, block) in blocks.iter().enumerate() {
@@ -181,18 +183,29 @@ pub(super) fn build(lines: &[DisasmLine]) -> GraphLayout {
         })
         .collect();
 
-    GraphLayout { blocks, edges }
+    GraphLayout {
+        blocks,
+        edges,
+        mnemonic_w,
+    }
 }
 
-fn block_geometry(lines: &[DisasmLine], start: usize, end: usize) -> GraphBlock {
+fn block_geometry(lines: &[DisasmLine], start: usize, end: usize, mnemonic_w: f32) -> GraphBlock {
     let rows = end - start;
 
     let mut max_chars = MIN_BLOCK_CHARS;
+    let mut note_width = NOTE_RESERVE;
     for line in &lines[start..end] {
         max_chars = max_chars.max(line.text.chars().count());
+        note_width = note_width.max(line.note.chars().count() as f32 * CHAR_W + 16.);
     }
 
-    let w = (BLOCK_GUTTER_W + max_chars as f32 * CHAR_W + NOTE_RESERVE + BLOCK_PAD_X * 2.)
+    let mnemonic_extra = mnemonic_w - super::GRAPH_MNEMONIC_W;
+    let w = (BLOCK_GUTTER_W
+        + max_chars as f32 * CHAR_W
+        + mnemonic_extra
+        + note_width
+        + BLOCK_PAD_X * 2.)
         .max(MIN_BLOCK_W);
     let h = BLOCK_HEADER_H + rows as f32 * BLOCK_LINE_H + BLOCK_PAD_Y * 2. + BLOCK_BORDER_H;
     GraphBlock {

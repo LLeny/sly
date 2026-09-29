@@ -34,6 +34,8 @@ const GRAPH_TOP_PAD: f32 = 16.;
 const GRAPH_BOTTOM_PAD: f32 = 28.;
 const LINEAR_MNEMONIC_W: f32 = 42.;
 const GRAPH_MNEMONIC_W: f32 = 36.;
+const MNEMONIC_CHAR_W: f32 = 8.;
+const MNEMONIC_PAD: f32 = 24.;
 
 type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
 type ContextCallback = Rc<dyn Fn(usize, Point<Pixels>, &mut Window, &mut App) + 'static>;
@@ -61,6 +63,7 @@ pub struct DisassemblyView {
 pub struct DisassemblyLayoutCache {
     gutters: Option<GutterEntry>,
     graph: Option<GraphEntry>,
+    mnemonic: Option<(Arc<DisassemblyView>, f32)>,
 }
 
 struct GutterEntry {
@@ -104,12 +107,32 @@ impl DisassemblyLayoutCache {
             return entry.layout.clone();
         }
 
-        let layout = Rc::new(graph::build(&view.lines));
+        let mnemonic_w = self.mnemonic_width(view).max(GRAPH_MNEMONIC_W);
+        let layout = Rc::new(graph::build(&view.lines, mnemonic_w));
         self.graph = Some(GraphEntry {
             lines: view.clone(),
             layout: layout.clone(),
         });
         layout
+    }
+
+    fn mnemonic_width(&mut self, view: &Arc<DisassemblyView>) -> f32 {
+        if let Some((lines, width)) = &self.mnemonic
+            && Arc::ptr_eq(lines, view)
+        {
+            return *width;
+        }
+
+        let width = view
+            .lines
+            .iter()
+            .filter_map(|line| line.tokens.first())
+            .filter(|token| token.kind != TokenKind::Plain)
+            .map(|token| token.text.chars().count() as f32 * MNEMONIC_CHAR_W + MNEMONIC_PAD)
+            .fold(0., f32::max);
+        self.mnemonic = Some((view.clone(), width));
+
+        width
     }
 }
 
@@ -180,6 +203,11 @@ impl DisassemblyWidget {
 
     pub fn current(mut self, current: Option<usize>) -> Self {
         self.rows.current = current;
+        self
+    }
+
+    pub fn pipeline(mut self, pipeline: Option<usize>) -> Self {
+        self.rows.pipeline = pipeline;
         self
     }
 

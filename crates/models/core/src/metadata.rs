@@ -53,3 +53,16 @@ impl CartridgeInfo {
         GameId::new(self.system, self.rom.sha1.clone())
     }
 }
+
+pub fn format_byte_size(bytes: usize) -> String {
+    const MB: usize = 1 << 20;
+    const KB: usize = 1 << 10;
+
+    if bytes >= MB && bytes.is_multiple_of(MB) {
+        format!("{} MB", bytes / MB)
+    } else if bytes >= KB {
+        format!("{} KB", bytes / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}

@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::ops::Range;
 
 use logos::Logos;
 
@@ -7,6 +8,40 @@ use crate::model::{DisasmToken, TokenKind};
 pub struct SyntaxSpec {
     pub registers: &'static [&'static str],
     pub symbols: fn(&str) -> bool,
+    identifier_kind: Option<fn(&str) -> Option<TokenKind>>,
+}
+
+impl SyntaxSpec {
+    pub const fn new(registers: &'static [&'static str], symbols: fn(&str) -> bool) -> Self {
+        Self {
+            registers,
+            symbols,
+            identifier_kind: None,
+        }
+    }
+
+    pub const fn with_identifier_kind(mut self, classify: fn(&str) -> Option<TokenKind>) -> Self {
+        self.identifier_kind = Some(classify);
+        self
+    }
+
+    fn classify_identifier(&self, text: &str) -> TokenKind {
+        if let Some(kind) = self.identifier_kind.and_then(|classify| classify(text)) {
+            return kind;
+        }
+
+        if self
+            .registers
+            .iter()
+            .any(|register| register.eq_ignore_ascii_case(text))
+        {
+            TokenKind::Register
+        } else if (self.symbols)(text) {
+            TokenKind::Symbol
+        } else {
+            TokenKind::Plain
+        }
+    }
 }
 
 pub fn strip_symbol_sigils<'a>(text: &'a str, syntax: &SyntaxSpec) -> Cow<'a, str> {
@@ -44,17 +79,19 @@ pub fn strip_symbol_sigils<'a>(text: &'a str, syntax: &SyntaxSpec) -> Cow<'a, st
 }
 
 #[derive(Logos)]
-#[logos(skip r"[ \t]+")]
 enum Operand {
+    #[regex(r"[ \t\r\n]+")]
+    Whitespace,
     #[token("#")]
     Imm,
-    #[regex(r"\$[0-9a-fA-F]*")]
+    #[regex(r"\$[0-9a-fA-F]+")]
+    #[regex(r"0[xX][0-9a-fA-F]+")]
     Hex,
     #[regex(r"[0-9]+")]
     Dec,
     #[regex(r"[A-Za-z_][A-Za-z0-9_]*")]
     Ident,
-    #[regex(r"[,()\[\]]")]
+    #[regex(r"[,():\[\]{}!^+\-]")]
     Punct,
 }
 
@@ -69,36 +106,37 @@ pub fn tokenize(text: &str, mnemonic: TokenKind, syntax: &SyntaxSpec) -> Vec<Dis
         tokens.push(DisasmToken::new(&text[..split], mnemonic));
     }
 
-    let mut lexer = Operand::lexer(&text[split..]);
+    let operands = text[split..].trim_start();
+    let mut spans: Vec<(Range<usize>, TokenKind)> = Vec::with_capacity(8);
+    let mut lexer = Operand::lexer(operands);
     while let Some(result) = lexer.next() {
-        let slice = lexer.slice();
-        match result {
-            Ok(Operand::Imm) => tokens.push(DisasmToken::new("#", TokenKind::ImmPrefix)),
-            Ok(Operand::Hex) => {
-                tokens.push(DisasmToken::new("$", TokenKind::HexPrefix));
-                if slice.len() > 1 {
-                    tokens.push(DisasmToken::new(&slice[1..], TokenKind::Number));
+        let span = lexer.span();
+        let kind = match result {
+            Ok(Operand::Whitespace) => {
+                if let Some((last, _)) = spans.last_mut() {
+                    last.end = span.end;
                 }
+                continue;
             }
-            Ok(Operand::Dec) => tokens.push(DisasmToken::new(slice, TokenKind::Number)),
-            Ok(Operand::Ident) => {
-                let kind = if syntax
-                    .registers
-                    .iter()
-                    .any(|r| r.eq_ignore_ascii_case(slice))
-                {
-                    TokenKind::Register
-                } else if (syntax.symbols)(slice) {
-                    TokenKind::Symbol
-                } else {
-                    TokenKind::Plain
-                };
-                tokens.push(DisasmToken::new(slice, kind));
+            Ok(Operand::Hex) => {
+                let digits = span.start + if lexer.slice().starts_with('$') { 1 } else { 2 };
+                spans.push((span.start..digits, TokenKind::HexPrefix));
+                spans.push((digits..span.end, TokenKind::Number));
+                continue;
             }
-            Ok(Operand::Punct) => tokens.push(DisasmToken::new(slice, TokenKind::Punctuation)),
-            Err(()) => tokens.push(DisasmToken::new(slice, TokenKind::Plain)),
-        }
+            Ok(Operand::Imm) => TokenKind::ImmPrefix,
+            Ok(Operand::Dec) => TokenKind::Number,
+            Ok(Operand::Ident) => syntax.classify_identifier(lexer.slice()),
+            Ok(Operand::Punct) => TokenKind::Punctuation,
+            Err(()) => TokenKind::Plain,
+        };
+        spans.push((span, kind));
     }
 
+    tokens.extend(
+        spans
+            .into_iter()
+            .map(|(span, kind)| DisasmToken::new(&operands[span], kind)),
+    );
     tokens
 }

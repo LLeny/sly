@@ -123,7 +123,7 @@ pub(super) fn disasm_line_on<B: CpuPeek>(
         Address::new(bank, addr).as_24bit(),
         len,
         format!("{bank:02X}:{addr:04X}"),
-        self::format_bytes(len, |offset| {
+        format_bytes(len, |offset| {
             bus.peek8(Address::new(bank, addr.wrapping_add(offset)))
         }),
         &*text,
@@ -242,7 +242,7 @@ pub(super) fn spc_disasm_view(apu: &Apu, base: u16, count: usize) -> Vec<DisasmL
 }
 
 pub(super) fn spc_read_bytes(apu: &Apu, addr: u16, len: u8) -> String {
-    self::format_bytes(len, |offset| apu.peek(addr.wrapping_add(offset)))
+    format_bytes(len, |offset| apu.peek(addr.wrapping_add(offset)))
 }
 
 pub(super) fn spc_mnemonic_kind(text: &str) -> TokenKind {
@@ -260,10 +260,10 @@ pub(super) fn spc_mnemonic_kind(text: &str) -> TokenKind {
     }
 }
 
-pub(super) const SPC_SYNTAX: SyntaxSpec = SyntaxSpec {
-    registers: &["A", "X", "Y", "SP", "YA", "PSW", "C"],
-    symbols: crate::apu::is_symbol,
-};
+pub(super) const SPC_SYNTAX: SyntaxSpec = SyntaxSpec::new(
+    &["A", "X", "Y", "SP", "YA", "PSW", "C"],
+    crate::apu::is_symbol,
+);
 
 pub(super) fn field(label: &str, value: String) -> debugger_model::Row {
     debugger_model::Row::Field(debugger_model::Field {
@@ -286,19 +286,6 @@ pub(super) fn section(title: &str, rows: Vec<debugger_model::Row>) -> debugger_m
         rows,
         ..debugger_model::Section::default()
     }
-}
-
-pub(super) fn format_bytes(len: u8, mut byte_at: impl FnMut(u16) -> u8) -> String {
-    use std::fmt::Write;
-
-    let mut out = String::with_capacity(len as usize * 3);
-    for i in 0..len {
-        if i != 0 {
-            out.push(' ');
-        }
-        let _ = write!(out, "{:02X}", byte_at(i as u16));
-    }
-    out
 }
 
 pub(super) fn disasm_note(tokens: &[DisasmToken], d: &Disasm, ea: Option<Address>) -> String {
@@ -346,10 +333,8 @@ pub(super) fn map_flow(flow: CoreFlow) -> FlowKind {
     }
 }
 
-pub(super) const SNES_SYNTAX: SyntaxSpec = SyntaxSpec {
-    registers: &["A", "X", "Y", "S"],
-    symbols: crate::mmio::is_symbol,
-};
+pub(super) const SNES_SYNTAX: SyntaxSpec =
+    SyntaxSpec::new(&["A", "X", "Y", "S"], crate::mmio::is_symbol);
 
 impl SnesDebug {
     pub(super) fn fingerprint(&self, cpu: &CpuId, request: &DisassemblyRequest) -> Option<u64> {

@@ -6,12 +6,13 @@ edition = "2024"
 [features]
 default = ["disasm"]
 disasm = []
-debug = ["dep:debugger-model"]
+debug = ["dep:debugger-model", "dep:workspace-model"]
 
 [dependencies]
 chapa = { version = "0.9.0", features = ["reflection"] }
 chipi-macros = "1.0.1"
 core-model = { path = "../../models/core" }
+workspace-model = { path = "../../models/workspace", optional = true }
 debugger-model = { path = "../../models/debugger", optional = true }
 crc32fast = "1.5.0"
 sha1 = "0.11.0"

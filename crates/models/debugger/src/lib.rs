@@ -11,7 +11,7 @@ pub use model::{
     AudioChannel, AudioScopeView, AudioScopesView, BitMask, CallStackView, CartridgeView, Cell,
     ColWidth, Column, CpuView, DisasmLine, DisasmToken, Field, FlagView, FlowKind, Highlight,
     MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, RegisterView, Row, Section,
-    StackFrame, StructuredView, TableRow, TableView, TokenKind, Tone, hex,
+    StackFrame, StructuredView, TableRow, TableView, TokenKind, Tone, format_bytes, hex,
 };
 
 pub use script::{

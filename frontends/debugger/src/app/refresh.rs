@@ -376,6 +376,9 @@ impl Debugger {
         for reg in &mut cpu.registers {
             let (key, value) = (reg.name.clone(), reg.value as u64);
             let highlight = changes.highlight(key, value);
+            if matches!(reg.highlight, Highlight::Execution | Highlight::Pipeline) {
+                continue;
+            }
             reg.highlight = match mode {
                 CpuRefresh::Highlight => highlight,
                 CpuRefresh::Baseline => Highlight::None,

@@ -39,8 +39,7 @@ impl Cpu {
         }
 
         if !self.pipeline.is_empty() {
-            let increment = if self.is_thumb() { 2 } else { 4 };
-            self.registers[15] = self.registers[15].wrapping_add(increment);
+            self.registers[15] = self.registers[15].wrapping_add(self.instruction_width());
         }
     }
 
@@ -91,6 +90,10 @@ impl Cpu {
 
     pub(crate) fn is_thumb(&self) -> bool {
         self.cpsr.t()
+    }
+
+    pub(crate) fn instruction_width(&self) -> u32 {
+        if self.is_thumb() { 2 } else { 4 }
     }
 
     pub(crate) fn get_current_spsr(&self) -> Psr {
@@ -163,6 +166,18 @@ pub enum Mode {
 }
 
 impl Mode {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Mode::User => "User",
+            Mode::Fiq => "FIQ",
+            Mode::Irq => "IRQ",
+            Mode::Supervisor => "Supervisor",
+            Mode::Abort => "Abort",
+            Mode::Undefined => "Undefined",
+            Mode::System => "System",
+        }
+    }
+
     pub fn index(&self) -> Option<usize> {
         match self {
             Mode::Fiq => Some(0),

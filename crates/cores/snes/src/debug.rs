@@ -11,8 +11,8 @@ use debugger_model::{
     RegisterView, Row, RunOutcome, SOUND_WORKSPACE, Section, SpriteEntry, Sprites, StackFrame,
     StepTarget, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapOverlay,
     TilemapOverlayBand, TilemapViewport, Tileset, TilesetTile, TokenKind, VIDEO_WORKSPACE,
-    VideoDebug, VideoResource, VideoResourceId, VideoResourceKind, VideoRevision, hex,
-    standard_manifest, strip_symbol_sigils, tokenize,
+    VideoDebug, VideoResource, VideoResourceId, VideoResourceKind, VideoRevision, format_bytes,
+    hex, standard_manifest, strip_symbol_sigils, tokenize,
 };
 
 use workspace_model::{
@@ -80,7 +80,7 @@ impl SnesDebug {
             crate::cartridge::tv_system(cart.region())
                 .to_string()
                 .into(),
-            self::human_size(cart.rom.len()).into(),
+            core_model::format_byte_size(cart.rom.len()).into(),
         ];
 
         let mut debug = Self {

@@ -1,8 +1,10 @@
 use super::*;
+use crate::diff::{Highlight, highlight_color, highlight_fill};
 
 #[derive(Clone, Default)]
 pub(super) struct RowStates {
     pub(super) current: Option<usize>,
+    pub(super) pipeline: Option<usize>,
     pub(super) current_note: Option<SharedString>,
     pub(super) selected: Option<usize>,
     pub(super) breakpoints: Rc<HashMap<usize, BreakpointKind>>,
@@ -21,6 +23,32 @@ impl RowStates {
         self.breakpoints.get(&ix).copied()
     }
 
+    pub(super) fn marker(&self, ix: usize) -> Option<Highlight> {
+        if self.is_current(ix) {
+            Some(Highlight::Execution)
+        } else if self.pipeline == Some(ix) {
+            Some(Highlight::Pipeline)
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn marker_color(&self, theme: &Theme, ix: usize) -> Option<Hsla> {
+        self.marker(ix).map(|marker| highlight_color(theme, marker))
+    }
+
+    pub(super) fn background(&self, theme: &Theme, ix: usize) -> Option<Hsla> {
+        if let Some(marker) = self.marker(ix) {
+            return highlight_fill(theme, marker).map(|(fill, _)| fill);
+        }
+
+        if let Some(kind) = self.breakpoint(ix) {
+            return Some(breakpoint_color(theme, kind).opacity(0.20));
+        }
+
+        self.is_selected(ix).then_some(theme.bg_panel_alt)
+    }
+
     pub(super) fn note<'a>(&'a self, ix: usize, line: &'a DisasmLine) -> &'a str {
         match &self.current_note {
             Some(note) if self.is_current(ix) => note.as_ref(),
@@ -32,6 +60,7 @@ impl RowStates {
 pub(super) struct DisasmRowOptions {
     pub(super) arrows_width: f32,
     pub(super) show_bytes: bool,
+    pub(super) mnemonic_width: f32,
     pub(super) rows: RowStates,
     pub(super) on_select: Option<SelectCallback>,
     pub(super) on_context: Option<ContextCallback>,
@@ -44,9 +73,8 @@ pub(super) fn disasm_row(
     arrows: &GutterCell,
     options: &DisasmRowOptions,
 ) -> Stateful<Div> {
-    let current = options.rows.is_current(ix);
-    let selected = options.rows.is_selected(ix);
     let breakpoint = options.rows.breakpoint(ix);
+    let background = options.rows.background(theme, ix);
     let note = SharedString::from(options.rows.note(ix, line));
 
     let mut gutter = div()
@@ -62,12 +90,12 @@ pub(super) fn disasm_row(
                 .rounded_full()
                 .bg(breakpoint_color(theme, kind)),
         );
-    } else if current {
+    } else if let Some(color) = options.rows.marker_color(theme, ix) {
         gutter = gutter.child(
             svg()
                 .path(icon::CHEVRON_RIGHT)
                 .size(px(11.))
-                .text_color(theme.accent),
+                .text_color(color),
         );
     }
 
@@ -80,13 +108,7 @@ pub(super) fn disasm_row(
         .h(px(ROW_HEIGHT))
         .px_1()
         .rounded_md()
-        .when(current, |d| d.bg(theme.accent_soft))
-        .when_some(breakpoint.filter(|_| !current), |d, kind| {
-            d.bg(breakpoint_color(theme, kind).opacity(0.20))
-        })
-        .when(selected && !current && breakpoint.is_none(), |d| {
-            d.bg(theme.bg_panel_alt)
-        })
+        .when_some(background, |d, bg| d.bg(bg))
         .child(gutter);
 
     if options.arrows_width > 0. {
@@ -127,7 +149,7 @@ pub(super) fn disasm_row(
     row = row.child(self::instruction_text(
         theme,
         &line.tokens,
-        LINEAR_MNEMONIC_W,
+        options.mnemonic_width,
     ));
 
     if !note.is_empty() {
@@ -143,7 +165,7 @@ pub(super) fn disasm_row(
         );
     }
 
-    if !current && !selected && breakpoint.is_none() {
+    if background.is_none() {
         let hover_bg = theme.bg_header;
         row = row.hover(move |s| s.bg(hover_bg));
     }
@@ -181,6 +203,7 @@ pub(super) fn instruction_text(theme: &Theme, tokens: &[DisasmToken], mnemonic_m
     for tok in tokens.iter().skip(1) {
         text = text.child(
             div()
+                .flex_none()
                 .text_color(super::model::token_color(theme, tok.kind))
                 .child(SharedString::from(tok.text.clone())),
         );

@@ -23,6 +23,21 @@ pub struct HookHit {
     pub pc: u32,
 }
 
+impl HookHit {
+    pub fn execute(cpu: CpuId, region: impl Into<Arc<str>>, pc: u32) -> Self {
+        Self {
+            kind: BreakpointKind::Execute,
+            cpu: cpu.clone(),
+            region: region.into(),
+            addr: pc,
+            value: 0,
+            width: AccessWidth::Byte,
+            source: AccessSource::Cpu(cpu),
+            pc,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct EventDescriptor {
     pub id: Arc<str>,

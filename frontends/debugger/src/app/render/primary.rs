@@ -211,6 +211,7 @@ impl Debugger {
                     .id(disasm_id.clone())
                     .title(disasm_title)
                     .current(pane.disasm.current_ix())
+                    .pipeline(pane.disasm.pipeline_ix())
                     .current_note(pane.disasm.current_note())
                     .selected(pane.disasm.selected_ix())
                     .breakpoints(pane.disasm.breakpoint_rows())

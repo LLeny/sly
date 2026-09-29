@@ -3,10 +3,10 @@ use std::cell::Cell;
 use debugger_model::{
     Cell as TableCell, ColWidth, Column, CpuDescriptor, CpuView, DisasmLine, Field, FlagView,
     FlowKind, RasterImage, RegisterView, Row, Section, StructuredView, SyntaxSpec, TableRow,
-    TableView, TokenKind, Tone, hex, strip_symbol_sigils, tokenize,
+    TableView, TokenKind, Tone, format_bytes, hex, strip_symbol_sigils, tokenize,
 };
 
-use super::{field, format_bytes, section};
+use super::{field, section};
 use crate::Snes;
 use crate::mmio::{Address, AddressSpace};
 use crate::superfx::{SuperFx, bitmap, decoder, map};
@@ -16,13 +16,13 @@ pub const WORKSPACE: &str = "superfx";
 pub const STATE_ID: &str = "gsu_state";
 pub const CACHE_ID: &str = "gsu_cache";
 
-pub const GSU_SYNTAX: SyntaxSpec = SyntaxSpec {
-    registers: &[
+pub const GSU_SYNTAX: SyntaxSpec = SyntaxSpec::new(
+    &[
         "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r12", "r13",
         "r14", "r15",
     ],
-    symbols: |_| false,
-};
+    |_| false,
+);
 
 pub fn descriptor() -> CpuDescriptor {
     CpuDescriptor::new(CPU_GSU, "GSU", "gsu")

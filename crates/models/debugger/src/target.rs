@@ -222,6 +222,10 @@ pub trait DebugCore: Core {
 
     fn pc(&self, cpu: &CpuId) -> u32;
 
+    fn pipeline_pc(&self, _cpu: &CpuId) -> Option<u32> {
+        None
+    }
+
     fn set_pc(&mut self, cpu: &CpuId, addr: u32);
 
     fn cpu_view(&self, cpu: &CpuId) -> CpuView;
@@ -372,6 +376,13 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
             OnPause,
         ),
         PanelDescriptor::new(
+            panel::FRAMEBUFFER,
+            "Screen",
+            PanelKind::Framebuffer,
+            Left,
+            Continuous,
+        ),
+        PanelDescriptor::new(
             panel::SAVESTATES,
             "Save States",
             PanelKind::Savestates,
@@ -421,13 +432,10 @@ pub fn standard_manifest(cpus: &[CpuDescriptor]) -> ComponentManifest {
         );
     }
 
-    panels.push(PanelDescriptor::new(
-        panel::MEMORY,
-        "Memory",
-        PanelKind::Memory,
-        Center,
-        OnPause,
-    ));
+    panels.push(
+        PanelDescriptor::new(panel::MEMORY, "Memory", PanelKind::Memory, Center, OnPause)
+            .tag(CPU_WORKSPACE),
+    );
 
     for c in cpus {
         panels.push(

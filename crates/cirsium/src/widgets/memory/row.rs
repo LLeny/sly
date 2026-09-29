@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{Div, FontWeight, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, div, px};
 
-use crate::diff::Highlight;
+use crate::diff::{Highlight, highlight_fill};
 use crate::theme::Theme;
 use crate::widgets::{BreakpointKind, breakpoint_colors};
 
@@ -81,7 +81,7 @@ pub(super) fn mem_row(
                 breakpoint_at(addr.wrapping_sub(stride)) != Some(kind),
                 breakpoint_at(addr.wrapping_add(stride)) != Some(kind),
             ),
-            Fill::Read | Fill::Write => {
+            Fill::Highlight(_) => {
                 let same = |r: Option<&MemoryRow>| {
                     r.and_then(|r| r.cells.get(i))
                         .map(|c| self::cell_fill(c, false))
@@ -210,8 +210,7 @@ fn cell_box(width: f32) -> Div {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Fill {
     None,
-    Read,
-    Write,
+    Highlight(Highlight),
     Selection,
     Breakpoint(BreakpointKind),
 }
@@ -222,18 +221,17 @@ fn cell_fill(cell: &MemoryCell, selected: bool) -> Fill {
     }
 
     match cell.highlight {
-        Highlight::Read => Fill::Read,
-        Highlight::Written | Highlight::Changed => Fill::Write,
         Highlight::None if selected => Fill::Selection,
         Highlight::None => Fill::None,
+        Highlight::Changed => Fill::Highlight(Highlight::Written),
+        highlight => Fill::Highlight(highlight),
     }
 }
 
 fn fill_colors(theme: &Theme, fill: Fill) -> Option<(Hsla, Hsla)> {
     match fill {
         Fill::None => None,
-        Fill::Read => Some((theme.read_fill, theme.read_border)),
-        Fill::Write => Some((theme.write_fill, theme.write_border)),
+        Fill::Highlight(highlight) => highlight_fill(theme, highlight),
         Fill::Selection => Some((theme.selection, theme.selection_border)),
         Fill::Breakpoint(kind) => Some(breakpoint_colors(theme, kind)),
     }

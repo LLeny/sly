@@ -4375,6 +4375,7 @@ dependencies = [
  "sha1",
  "thiserror 2.0.18",
  "tracing",
+ "workspace-model",
 ]
 
 [[package]]

@@ -116,6 +116,16 @@ impl Gba {
         self.scheduler.advance_by(1);
     }
 
+    fn dispatch_due(&mut self) -> bool {
+        let mut vblank = false;
+        while let Some(event) = self.scheduler.pop_due() {
+            vblank |= event.kind == EventKind::VBlankStart;
+            self.dispatch_event(event);
+        }
+
+        vblank
+    }
+
     fn dispatch_event(&mut self, event: Event) {
         match event.kind {
             EventKind::HBlankStart => self.ppu.start_hblank(),
@@ -157,10 +167,7 @@ impl core_model::Core for Gba {
 
     fn step(&mut self) {
         self.step_cpu();
-
-        while let Some(event) = self.scheduler.pop_due() {
-            self.dispatch_event(event);
-        }
+        self.dispatch_due();
     }
 
     fn run_frame(&mut self) {

@@ -47,12 +47,15 @@ impl RenderOnce for CartridgeWidget {
         let t = &*theme;
 
         let title = gpui::SharedString::from(self.view.title.clone());
-        let title_block = Copyable::new("cart-title", title.clone()).child(
-            div()
-                .font_family(t.mono_font)
-                .text_color(t.text_primary)
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(title),
+        let title_block = div().flex_1().min_w(px(0.)).child(
+            Copyable::new("cart-title", title.clone()).child(
+                div()
+                    .font_family(t.mono_font)
+                    .text_color(t.text_primary)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .truncate()
+                    .child(title),
+            ),
         );
 
         let cover = self.view.cover.clone();

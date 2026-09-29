@@ -202,8 +202,6 @@ pub(super) fn render_graph(
         let mut body = div().flex().flex_col().flex_1().justify_center();
         for (k, line) in lines.iter().enumerate() {
             let ix = block.start + k;
-            let current = rows.is_current(ix);
-            let selected = rows.is_selected(ix);
             let breakpoint = rows.breakpoint(ix);
             let note = SharedString::from(rows.note(ix, line));
 
@@ -220,12 +218,12 @@ pub(super) fn render_graph(
                         .rounded_full()
                         .bg(breakpoint_color(theme, kind)),
                 );
-            } else if current {
+            } else if let Some(color) = rows.marker_color(theme, ix) {
                 gutter = gutter.child(
                     svg()
                         .path(icon::CHEVRON_RIGHT)
                         .size(px(10.))
-                        .text_color(theme.accent),
+                        .text_color(color),
                 );
             }
 
@@ -236,15 +234,13 @@ pub(super) fn render_graph(
                 .pr_3()
                 .h(px(graph::BLOCK_LINE_H))
                 .flex_none()
-                .when(current, |d| d.bg(theme.accent_soft))
-                .when_some(breakpoint.filter(|_| !current), |d, kind| {
-                    d.bg(breakpoint_color(theme, kind).opacity(0.20))
-                })
-                .when(selected && !current && breakpoint.is_none(), |d| {
-                    d.bg(theme.bg_panel_alt)
-                })
+                .when_some(rows.background(theme, ix), |d, bg| d.bg(bg))
                 .child(gutter)
-                .child(row::instruction_text(theme, &line.tokens, GRAPH_MNEMONIC_W));
+                .child(row::instruction_text(
+                    theme,
+                    &line.tokens,
+                    layout.mnemonic_w,
+                ));
 
             if !note.is_empty() {
                 row = row.child(

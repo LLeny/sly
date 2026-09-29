@@ -237,17 +237,7 @@ impl SnesDebug {
         let mut hits = Vec::new();
         for (id, pc) in self.cpu_pcs() {
             if breakpoints.iter().any(|mark| executes_at(mark, id, pc)) {
-                let cpu = CpuId::from(id);
-                hits.push(HookHit {
-                    kind: BreakpointKind::Execute,
-                    cpu: cpu.clone(),
-                    region: cpu_space(id).into(),
-                    addr: pc,
-                    pc,
-                    value: 0,
-                    width: AccessWidth::Byte,
-                    source: AccessSource::Cpu(cpu),
-                });
+                hits.push(HookHit::execute(CpuId::from(id), cpu_space(id), pc));
             }
         }
 

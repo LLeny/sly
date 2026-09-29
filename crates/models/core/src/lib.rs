@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use input::ControllerDescriptor;
-pub use metadata::{BackupKind, BackupMemory, CartridgeInfo, GameId, RomIdentity};
+pub use metadata::{
+    BackupKind, BackupMemory, CartridgeInfo, GameId, RomIdentity, format_byte_size,
+};
 pub use state::StateError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

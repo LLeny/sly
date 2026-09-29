@@ -67,6 +67,7 @@ pub struct Disasm {
     breakpoints: Vec<BreakpointMark>,
     fingerprint: Option<u64>,
     current_ix: Option<usize>,
+    pipeline_ix: Option<usize>,
     current_note: Option<SharedString>,
     bp_rows: Rc<HashMap<usize, BreakpointKind>>,
 }
@@ -95,6 +96,7 @@ impl Disasm {
             breakpoints: Vec::new(),
             fingerprint: None,
             current_ix: None,
+            pipeline_ix: None,
             current_note: None,
             bp_rows: Rc::default(),
         }
@@ -140,13 +142,20 @@ impl Disasm {
         self.current_ix
     }
 
+    pub fn pipeline_ix(&self) -> Option<usize> {
+        self.pipeline_ix
+    }
+
     pub fn current_note(&self) -> Option<SharedString> {
         self.current_note.clone()
     }
 
     pub fn selected_ix(&self) -> Option<usize> {
-        self.selected
-            .and_then(|addr| self.view.lines.iter().position(|l| l.addr == addr))
+        self.selected.and_then(|addr| self.line_index(addr))
+    }
+
+    fn line_index(&self, addr: u32) -> Option<usize> {
+        self.view.lines.iter().position(|line| line.addr == addr)
     }
 
     pub fn breakpoint_rows(&self) -> Rc<HashMap<usize, BreakpointKind>> {
@@ -236,7 +245,10 @@ impl Disasm {
     }
 
     fn refresh_row_states(&mut self, target: &dyn DebugCore, pc: u32) {
-        self.current_ix = self.view.lines.iter().position(|l| l.addr == pc);
+        self.current_ix = self.line_index(pc);
+        self.pipeline_ix = target
+            .pipeline_pc(&self.cpu)
+            .and_then(|addr| self.line_index(addr));
         self.current_note = self.current_ix.and_then(|_| {
             let note = target
                 .disassemble_one(&self.cpu, &self.request(pc, 1))?

@@ -7,6 +7,8 @@ pub enum Highlight {
     Read,
     Written,
     Changed,
+    Execution,
+    Pipeline,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -144,6 +146,19 @@ pub fn hex(value: u32, bits: u8) -> String {
         width = nibbles.next_multiple_of(2);
     }
     format!("${value:0width$X}")
+}
+
+pub fn format_bytes(len: u8, mut byte_at: impl FnMut(u16) -> u8) -> String {
+    use std::fmt::Write;
+
+    let mut out = String::with_capacity(len as usize * 3);
+    for i in 0..len {
+        if i != 0 {
+            out.push(' ');
+        }
+        let _ = write!(out, "{:02X}", byte_at(u16::from(i)));
+    }
+    out
 }
 
 #[derive(Clone)]

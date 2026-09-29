@@ -136,19 +136,6 @@ impl SnesDebug {
 
         manifest
             .insert_after(
-                panel::MEMORY,
-                PanelDescriptor::new(
-                    panel::FRAMEBUFFER,
-                    "Screen",
-                    PanelKind::Framebuffer,
-                    DockLocation::Center,
-                    RefreshPolicy::Continuous,
-                ),
-            )
-            .expect("shipped panel id");
-
-        manifest
-            .insert_after(
                 panel::BREAKPOINTS,
                 PanelDescriptor::new(
                     panel::PALETTE,
@@ -232,11 +219,6 @@ impl SnesDebug {
             )
             .expect("shipped panel id");
 
-        // The sprites panel takes the memory viewer's place in the PPU workspace.
-        manifest
-            .restrict(panel::MEMORY, CPU_WORKSPACE)
-            .expect("shipped panel id");
-
         manifest.workspaces.push(
             WorkspaceDescriptor::new(SOUND_WORKSPACE, "APU", WorkspaceIcon::Sound)
                 .mmio_group("APU"),
@@ -306,9 +288,6 @@ impl SnesDebug {
             )
             .expect("shipped panel id");
 
-        manifest
-            .relocate_after(panel::FRAMEBUFFER, panel::CONTROLS, DockLocation::Left)
-            .expect("shipped panel id");
         manifest
             .insert_after(
                 panel::FRAMEBUFFER,
