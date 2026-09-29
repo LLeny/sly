@@ -1,13 +1,12 @@
 use rust_sugiyama::configure::Config;
 
-use super::{DisasmLine, FlowKind};
+use super::{DisasmLine, FlowKind, GlyphMetrics};
 
 pub(super) const BLOCK_HEADER_H: f32 = 20.;
 pub(super) const BLOCK_LINE_H: f32 = 16.;
 const BLOCK_PAD_X: f32 = 8.;
 pub(super) const BLOCK_GUTTER_W: f32 = 20.;
 pub(super) const BLOCK_PAD_Y: f32 = 5.;
-const CHAR_W: f32 = 7.;
 const MIN_BLOCK_W: f32 = 96.;
 const VERTEX_SPACING: f64 = 38.;
 const COMPONENT_GAP: f32 = 56.;
@@ -17,7 +16,7 @@ const CHANNEL_STEP: f32 = 8.;
 const LANE_MARGIN: f32 = 6.;
 const MARGIN: f32 = 24.;
 const NOTE_RESERVE: f32 = 150.;
-const MIN_BLOCK_CHARS: usize = 8;
+const NOTE_GAP: f32 = 16.;
 const BLOCK_BORDER_H: f32 = 2.;
 const RANK_EPS: f32 = 0.5;
 
@@ -78,7 +77,7 @@ fn point_segment_dist_sq(px: f32, py: f32, a: (f32, f32), b: (f32, f32)) -> f32 
     (px - cx).powi(2) + (py - cy).powi(2)
 }
 
-pub(super) fn build(lines: &[DisasmLine], mnemonic_w: f32) -> GraphLayout {
+pub(super) fn build(lines: &[DisasmLine], mnemonic_w: f32, glyphs: GlyphMetrics) -> GraphLayout {
     let n = lines.len();
     if n == 0 {
         return GraphLayout {
@@ -117,7 +116,12 @@ pub(super) fn build(lines: &[DisasmLine], mnemonic_w: f32) -> GraphLayout {
 
     for (idx, &start) in leaders.iter().enumerate() {
         let end = leaders.get(idx + 1).copied().unwrap_or(n);
-        blocks.push(self::block_geometry(lines, start, end, mnemonic_w));
+        blocks.push(self::block_geometry(
+            &lines[start..end],
+            start,
+            mnemonic_w,
+            glyphs,
+        ));
     }
 
     for (bi, block) in blocks.iter().enumerate() {
@@ -190,23 +194,31 @@ pub(super) fn build(lines: &[DisasmLine], mnemonic_w: f32) -> GraphLayout {
     }
 }
 
-fn block_geometry(lines: &[DisasmLine], start: usize, end: usize, mnemonic_w: f32) -> GraphBlock {
-    let rows = end - start;
+fn block_geometry(
+    lines: &[DisasmLine],
+    start: usize,
+    mnemonic_w: f32,
+    glyphs: GlyphMetrics,
+) -> GraphBlock {
+    let rows = lines.len();
+    let end = start + rows;
 
-    let mut max_chars = MIN_BLOCK_CHARS;
-    let mut note_width = NOTE_RESERVE;
-    for line in &lines[start..end] {
-        max_chars = max_chars.max(line.text.chars().count());
-        note_width = note_width.max(line.note.chars().count() as f32 * CHAR_W + 16.);
+    let mut operand_chars = 0;
+    let mut note_chars = 0;
+    for line in lines {
+        let operands = line.tokens.iter().skip(1).map(|t| t.text.chars().count());
+        operand_chars = operand_chars.max(operands.sum());
+        note_chars = note_chars.max(line.note.chars().count());
     }
 
-    let mnemonic_extra = mnemonic_w - super::GRAPH_MNEMONIC_W;
+    let note_w = (NOTE_GAP + note_chars as f32 * glyphs.note).max(NOTE_RESERVE);
     let w = (BLOCK_GUTTER_W
-        + max_chars as f32 * CHAR_W
-        + mnemonic_extra
-        + note_width
+        + mnemonic_w
+        + operand_chars as f32 * glyphs.code
+        + note_w
         + BLOCK_PAD_X * 2.)
-        .max(MIN_BLOCK_W);
+        .max(MIN_BLOCK_W)
+        .ceil();
     let h = BLOCK_HEADER_H + rows as f32 * BLOCK_LINE_H + BLOCK_PAD_Y * 2. + BLOCK_BORDER_H;
     GraphBlock {
         start,

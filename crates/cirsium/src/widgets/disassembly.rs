@@ -34,7 +34,6 @@ const GRAPH_TOP_PAD: f32 = 16.;
 const GRAPH_BOTTOM_PAD: f32 = 28.;
 const LINEAR_MNEMONIC_W: f32 = 42.;
 const GRAPH_MNEMONIC_W: f32 = 36.;
-const MNEMONIC_CHAR_W: f32 = 8.;
 const MNEMONIC_PAD: f32 = 24.;
 
 type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
@@ -61,9 +60,33 @@ pub struct DisassemblyView {
 
 #[derive(Default)]
 pub struct DisassemblyLayoutCache {
+    glyphs: GlyphMetrics,
     gutters: Option<GutterEntry>,
     graph: Option<GraphEntry>,
     mnemonic: Option<(Arc<DisassemblyView>, f32)>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq)]
+struct GlyphMetrics {
+    code: f32,
+    note: f32,
+}
+
+impl GlyphMetrics {
+    fn measure(window: &Window, font: &'static str) -> Self {
+        let text = window.text_system();
+        let font_id = text.resolve_font(&gpui::font(font));
+        let rem = window.rem_size();
+        let advance = |scale: f32| {
+            text.em_advance(font_id, rem * scale)
+                .map_or(f32::from(rem) * scale * 0.6, f32::from)
+        };
+
+        Self {
+            code: advance(0.875),
+            note: advance(0.75),
+        }
+    }
 }
 
 struct GutterEntry {
@@ -78,6 +101,14 @@ struct GraphEntry {
 }
 
 impl DisassemblyLayoutCache {
+    fn set_glyphs(&mut self, glyphs: GlyphMetrics) {
+        if self.glyphs != glyphs {
+            self.glyphs = glyphs;
+            self.graph = None;
+            self.mnemonic = None;
+        }
+    }
+
     fn gutters(
         &mut self,
         view: &Arc<DisassemblyView>,
@@ -108,7 +139,7 @@ impl DisassemblyLayoutCache {
         }
 
         let mnemonic_w = self.mnemonic_width(view).max(GRAPH_MNEMONIC_W);
-        let layout = Rc::new(graph::build(&view.lines, mnemonic_w));
+        let layout = Rc::new(graph::build(&view.lines, mnemonic_w, self.glyphs));
         self.graph = Some(GraphEntry {
             lines: view.clone(),
             layout: layout.clone(),
@@ -128,7 +159,7 @@ impl DisassemblyLayoutCache {
             .iter()
             .filter_map(|line| line.tokens.first())
             .filter(|token| token.kind != TokenKind::Plain)
-            .map(|token| token.text.chars().count() as f32 * MNEMONIC_CHAR_W + MNEMONIC_PAD)
+            .map(|token| token.text.chars().count() as f32 * self.glyphs.code + MNEMONIC_PAD)
             .fold(0., f32::max);
         self.mnemonic = Some((view.clone(), width));
 
@@ -342,7 +373,7 @@ impl DisassemblyWidget {
 }
 
 impl RenderOnce for DisassemblyWidget {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let DisassemblyWidget {
             view,
             scroll,
@@ -385,6 +416,10 @@ impl RenderOnce for DisassemblyWidget {
 
         let theme = Theme::global(cx);
         let t = &*theme;
+
+        layout_cache
+            .borrow_mut()
+            .set_glyphs(GlyphMetrics::measure(window, t.mono_font));
 
         let body = match view_mode {
             ViewMode::Linear => {
