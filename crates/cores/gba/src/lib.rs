@@ -149,6 +149,7 @@ impl core_model::Core for Gba {
 
     fn run_frame(&mut self) {
         loop {
+            // TODO: Probably should do smth like scheduler.next_deadline()
             match self.scheduler.pop_due() {
                 Some(event) => {
                     self.dispatch_event(event);
@@ -163,13 +164,10 @@ impl core_model::Core for Gba {
     }
 
     fn software_frame(&self) -> Option<core_model::SoftwareFrame<'_>> {
-        static PIXELS: [[u8; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize] =
-            [[255; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize];
-
         Some(core_model::SoftwareFrame {
             width: SCREEN_WIDTH,
             height: SCREEN_HEIGHT,
-            pixels: &PIXELS,
+            pixels: self.ppu.frame(),
         })
     }
 

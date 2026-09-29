@@ -26,14 +26,28 @@ const VCOUNT: Register<VerticalCount> = Register::new(
 .read_mask(VerticalCount::SCANLINE_MASK)
 .read_only();
 
-const HANDLER: Handler = Handler {
-    read: |bus, address, width| bus.ppu.read(address, width),
-    write: |bus, address, width, value| bus.ppu.write(address, width, value),
-    peek: |bus, address, width| bus.ppu.peek(address, width),
+const PALETTE: Handler = Handler {
+    read: |bus, address, width| bus.ppu.read_palette(address, width),
+    write: |bus, address, width, value| bus.ppu.write_palette(address, width, value),
+    peek: |bus, address, width| bus.ppu.read_palette(address, width),
+};
+
+const VRAM: Handler = Handler {
+    read: |bus, address, width| bus.ppu.read_vram(address, width),
+    write: |bus, address, width, value| bus.ppu.write_vram(address, width, value),
+    peek: |bus, address, width| bus.ppu.read_vram(address, width),
+};
+
+const OAM: Handler = Handler {
+    read: |bus, address, width| bus.ppu.read_oam(address, width),
+    write: |bus, address, width, value| bus.ppu.write_oam(address, width, value),
+    peek: |bus, address, width| bus.ppu.read_oam(address, width),
 };
 
 pub(crate) fn register(map: &mut MmioMap) {
     map.register(&DISPSTAT);
     map.register(&VCOUNT);
-    map.map(0x0500_0000..=0x07FF_FFFF, HANDLER);
+    map.map(0x0500_0000..=0x05FF_FFFF, PALETTE);
+    map.map(0x0600_0000..=0x06FF_FFFF, VRAM);
+    map.map(0x0700_0000..=0x07FF_FFFF, OAM);
 }
