@@ -18,17 +18,9 @@ impl<B: Bus> Interpreter<'_, B> {
     fn execute(&mut self, _addr: u32, instruction: u32) {
         if self.cpu.is_thumb() {
             let instr = thumb::Instruction(instruction as u16);
-
-            #[cfg(feature = "disasm")]
-            println!("[{:08X}][T] {}", _addr, instr);
-
             thumb::dispatch_ops(self, instr);
         } else {
             let instr = arm::Instruction(instruction);
-
-            #[cfg(feature = "disasm")]
-            println!("[{:08X}][A] {}", _addr, instr);
-
             if self.check_condition(instr.cond()) {
                 arm::dispatch_ops(self, instr);
             }

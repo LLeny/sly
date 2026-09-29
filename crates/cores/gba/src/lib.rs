@@ -3,6 +3,7 @@ pub mod cartridge;
 pub mod cpu;
 pub mod error;
 pub mod gamepak;
+mod input;
 pub mod mmio;
 pub mod ppu;
 mod scheduler;
@@ -18,6 +19,7 @@ use std::time::Duration;
 use crate::bus::{BusView, CpuBus};
 use crate::cpu::{Bus, Mode, Psr};
 use crate::gamepak::GamePak;
+use crate::input::Input;
 use crate::mmio::{Handler, Mmio, MmioMap, RegisterInfo};
 use crate::ppu::{
     FRAME_CYCLES, HBLANK_START_CYCLES, Ppu, SCANLINE_CYCLES, VBLANK_END_CYCLES, VBLANK_START_CYCLES,
@@ -33,6 +35,7 @@ pub struct Gba {
     cpu: Cpu,
     ppu: Ppu,
     gamepak: GamePak,
+    input: Input,
     mmio: Mmio,
     scheduler: Scheduler,
 }
@@ -42,11 +45,13 @@ impl Gba {
         let mut map = MmioMap::new(Handler::MEMORY);
         ppu::io::register(&mut map);
         gamepak::io::register(&mut map);
+        input::register(&mut map);
 
         let mut gba = Self {
             cpu: Cpu::new(),
             ppu: Ppu::new(),
             gamepak: GamePak::new(cartridge),
+            input: Input::new(),
             mmio: Mmio::new(map),
             scheduler: Scheduler::new(),
         };
@@ -81,6 +86,7 @@ impl Gba {
         BusView {
             ppu: &self.ppu,
             gamepak: &self.gamepak,
+            input: &self.input,
             mmio: &self.mmio,
         }
     }
@@ -123,6 +129,7 @@ impl Gba {
         let bus = CpuBus {
             ppu: &mut self.ppu,
             gamepak: &mut self.gamepak,
+            input: &mut self.input,
             mmio: &mut self.mmio,
         };
 
@@ -131,9 +138,18 @@ impl Gba {
 }
 
 impl core_model::Core for Gba {
+    fn set_button(&mut self, port: usize, button: core_model::Button, pressed: bool) {
+        self.input.set_button(port, button, pressed);
+    }
+
+    fn controllers(&self) -> Vec<core_model::ControllerDescriptor> {
+        self.input.controllers()
+    }
+
     fn reset(&mut self) {
         self.cpu = Cpu::new();
         self.ppu = Ppu::new();
+        self.input = Input::new();
         self.scheduler = Scheduler::new();
 
         self.schedule_video_events();

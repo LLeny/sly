@@ -51,13 +51,14 @@ impl Ppu {
     pub(crate) fn start_vblank(&mut self) {
         self.dispstat.set_vblank(true);
 
-        // TODO: lol
-        for (output, pixel) in self
-            .frame
-            .iter_mut()
-            .zip(self.vram[0xA000..0x14000].chunks_exact(2))
-        {
-            *output = [pixel[0], pixel[1], 0, 255];
+        for (i, &palette_index) in self.vram[0..=0x95FF].iter().enumerate() {
+            let offset = usize::from(palette_index) * 2;
+            let color = u16::from_le_bytes([self.palette[offset], self.palette[offset + 1]]);
+            let expand = |shift: u32| {
+                let channel = ((color >> shift) & 0x1F) as u8;
+                (channel << 3) | (channel >> 2)
+            };
+            self.frame[i] = [expand(0), expand(5), expand(10), 255];
         }
     }
 

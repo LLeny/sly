@@ -22,6 +22,14 @@ impl GbaDebug {
 }
 
 impl core_model::Core for GbaDebug {
+    fn set_button(&mut self, port: usize, button: core_model::Button, pressed: bool) {
+        self.core.set_button(port, button, pressed);
+    }
+
+    fn controllers(&self) -> Vec<core_model::ControllerDescriptor> {
+        self.core.controllers()
+    }
+
     fn software_frame(&self) -> Option<core_model::SoftwareFrame<'_>> {
         self.core.software_frame()
     }
