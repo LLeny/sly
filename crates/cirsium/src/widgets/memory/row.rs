@@ -19,7 +19,7 @@ const HEX_ASCII_GAP: f32 = 14.;
 #[allow(clippy::too_many_arguments)]
 pub(super) fn mem_row(
     theme: &Theme,
-    row: &MemoryRow,
+    row: Option<&MemoryRow>,
     above: Option<&MemoryRow>,
     below: Option<&MemoryRow>,
     bytes_per_row: usize,
@@ -29,6 +29,10 @@ pub(super) fn mem_row(
     on_byte_drag: Option<ByteDragCallback>,
     on_context: Option<ContextCallback>,
 ) -> Div {
+    let Some(row) = row else {
+        return div().h(px(ROW_HEIGHT));
+    };
+
     let in_selection = |addr: u32| selection.is_some_and(|(lo, hi)| addr >= lo && addr <= hi);
     let breakpoint_at = |addr: u32| {
         breakpoints
@@ -78,14 +82,18 @@ pub(super) fn mem_row(
                 !in_selection(addr + stride),
             ),
             Fill::Breakpoint(kind) => (
-                breakpoint_at(addr.wrapping_sub(stride)) != Some(kind),
-                breakpoint_at(addr.wrapping_add(stride)) != Some(kind),
+                in_selection(addr.wrapping_sub(stride))
+                    || breakpoint_at(addr.wrapping_sub(stride)) != Some(kind),
+                in_selection(addr.wrapping_add(stride))
+                    || breakpoint_at(addr.wrapping_add(stride)) != Some(kind),
             ),
             Fill::Highlight(_) => {
                 let same = |r: Option<&MemoryRow>| {
-                    r.and_then(|r| r.cells.get(i))
-                        .map(|c| self::cell_fill(c, false))
-                        == Some(fills[i])
+                    r.and_then(|r| {
+                        r.cells
+                            .get(i)
+                            .map(|c| self::cell_fill(c, in_selection(r.addr + i as u32)))
+                    }) == Some(fills[i])
                 };
                 (!same(above), !same(below))
             }
@@ -216,12 +224,15 @@ enum Fill {
 }
 
 fn cell_fill(cell: &MemoryCell, selected: bool) -> Fill {
+    if selected {
+        return Fill::Selection;
+    }
+
     if let Some(kind) = cell.breakpoint {
         return Fill::Breakpoint(kind);
     }
 
     match cell.highlight {
-        Highlight::None if selected => Fill::Selection,
         Highlight::None => Fill::None,
         Highlight::Changed => Fill::Highlight(Highlight::Written),
         highlight => Fill::Highlight(highlight),

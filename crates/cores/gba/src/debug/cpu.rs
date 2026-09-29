@@ -1,6 +1,7 @@
 use debugger_model::{CpuView, FlagView, Highlight, RegisterView};
 
 use crate::Cpu;
+use crate::cpu::{Mode, Psr};
 
 pub(super) fn execution_address(cpu: &Cpu) -> u32 {
     cpu.pipeline
@@ -50,4 +51,40 @@ pub(super) fn view(cpu: &Cpu) -> CpuView {
         .map(|(name, set)| FlagView::new(name, set))
         .collect(),
     }
+}
+
+pub(super) fn write(cpu: &mut Cpu, name: &str, value: u32) -> bool {
+    let name = name.to_ascii_uppercase();
+    let index = match name.as_str() {
+        "CPSR" | "SPSR" if !Mode::is_valid(value) => return false,
+        "CPSR" => {
+            let pc = execution_address(cpu);
+            let psr = Psr::from_raw(value);
+            cpu.switch_mode(psr.mode());
+            cpu.cpsr = psr;
+            cpu.set_pc(pc);
+            return true;
+        }
+        "SPSR" => {
+            let Some(bank) = cpu.cpsr.mode().index() else {
+                return false;
+            };
+            cpu.spsr[bank] = Psr::from_raw(value);
+            return true;
+        }
+        "SP" => 13,
+        "LR" => 14,
+        "PC" => 15,
+        _ => match name
+            .strip_prefix('R')
+            .and_then(|n| n.parse::<usize>().ok())
+            .filter(|&n| n < 16)
+        {
+            Some(index) => index,
+            None => return false,
+        },
+    };
+
+    cpu.set_register(index, value);
+    true
 }

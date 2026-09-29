@@ -29,7 +29,7 @@ pub enum VideoResourceKind {
     Tileset,
     Tilemap,
     Sprites,
-    Raster,
+    Bitmap,
 }
 
 #[derive(Clone, Debug)]
@@ -38,6 +38,7 @@ pub struct VideoResource {
     pub name: Arc<str>,
     pub kind: VideoResourceKind,
     pub enabled: bool,
+    pub variant: Option<Arc<str>>,
 }
 
 impl VideoResource {
@@ -51,7 +52,13 @@ impl VideoResource {
             name: name.into(),
             kind,
             enabled: true,
+            variant: None,
         }
+    }
+
+    pub fn variant(mut self, variant: impl Into<Arc<str>>) -> Self {
+        self.variant = Some(variant.into());
+        self
     }
 }
 
@@ -104,7 +111,7 @@ pub trait VideoDebug {
         None
     }
 
-    fn raster(&self, _resource: &VideoResourceId) -> Option<RasterImage> {
+    fn bitmap(&self, _resource: &VideoResourceId) -> Option<BitmapImage> {
         None
     }
 }
@@ -206,18 +213,38 @@ impl PaletteView {
     }
 }
 
-#[derive(Clone)]
-pub struct RasterImage {
+#[derive(Clone, Default)]
+pub struct BitmapImage {
     pub width: u32,
     pub height: u32,
     pub pixels: Arc<[[u8; 4]]>,
     pub details: Vec<Field>,
+    pub source: Option<BitmapSource>,
+    pub indices: Option<Arc<[u16]>>,
 }
 
-impl RasterImage {
+#[derive(Clone, Debug)]
+pub struct BitmapSource {
+    pub address: MemoryAddress,
+    pub bytes_per_pixel: u32,
+}
+
+impl BitmapImage {
     pub fn is_valid(&self) -> bool {
         self.width > 0
             && self.height > 0
             && (self.width as usize).checked_mul(self.height as usize) == Some(self.pixels.len())
+    }
+
+    pub fn pixel_address(&self, index: usize) -> Option<MemoryAddress> {
+        let source = self.source.as_ref()?;
+        let offset = u32::try_from(index)
+            .ok()?
+            .checked_mul(source.bytes_per_pixel)?;
+
+        Some(MemoryAddress {
+            region: source.address.region.clone(),
+            addr: source.address.addr.checked_add(offset)?,
+        })
     }
 }

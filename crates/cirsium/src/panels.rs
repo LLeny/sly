@@ -106,6 +106,10 @@ impl PanelRegistry {
         &self.manifest
     }
 
+    pub fn descriptor(&self, id: &str) -> Option<&PanelDescriptor> {
+        self.entry(id).map(|entry| &entry.descriptor)
+    }
+
     pub fn view(&self, id: &str) -> Option<AnyView> {
         self.entry(id).map(|entry| entry.handle.view())
     }

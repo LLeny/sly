@@ -143,14 +143,14 @@ impl Debugger {
             )
         });
 
-        let raster = visible.contains(RasterWidget::ID).then(|| {
+        let bitmap = visible.contains(BitmapWidget::ID).then(|| {
             self.wire_grid(
-                RasterWidget::panel(self.raster.clone()),
-                RasterWidget::ID,
-                &self.raster_ui,
-                self.resources_of(VideoResourceKind::Raster),
-                |d| &mut d.raster_ui,
-                Self::refresh_raster,
+                BitmapWidget::panel(self.bitmap.clone()),
+                BitmapWidget::ID,
+                &self.bitmap_ui,
+                self.resources_of(VideoResourceKind::Bitmap),
+                |d| &mut d.bitmap_ui,
+                Self::refresh_bitmap,
                 cx,
             )
         });
@@ -231,11 +231,13 @@ impl Debugger {
                             this.update(cx, |d, cx| d.disasm_open_menu(pane_ix, ix, pos, cx))
                         }
                     })
-                    .decode_mode(pane.disasm.decode_label(), {
+                    .decode_modes(pane.disasm.decode_modes(), pane.disasm.decode_mode(), {
                         let this = this.clone();
-                        move |_, _, cx| {
+                        move |mode, _, cx| {
                             this.update(cx, |d, cx| {
-                                d.panes[pane_ix].disasm.cycle_decode_mode(d.target.as_ref());
+                                d.panes[pane_ix]
+                                    .disasm
+                                    .set_decode_mode(mode, d.target.as_ref());
                                 cx.notify();
                             })
                         }
@@ -397,8 +399,8 @@ impl Debugger {
             panels.insert(SpritesWidget::ID.into(), sprites.into_any_element());
         }
 
-        if let Some(raster) = raster {
-            panels.insert(RasterWidget::ID.into(), raster.into_any_element());
+        if let Some(bitmap) = bitmap {
+            panels.insert(BitmapWidget::ID.into(), bitmap.into_any_element());
         }
 
         if let Some(screen) = framebuffer {

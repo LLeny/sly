@@ -17,7 +17,7 @@ const BUTTONS: [Button; 10] = [
 
 // Active low!
 #[chapa::bitfield(u16, order = lsb0)]
-struct KeyInput {
+pub(crate) struct KeyInput {
     #[bits(0..=9)]
     released: u16,
 }
@@ -33,7 +33,7 @@ const KEYINPUT: Register<KeyInput> = Register::new(
 .read_only();
 
 pub(crate) struct Input {
-    keyinput: KeyInput,
+    pub(crate) keyinput: KeyInput,
 }
 
 impl Input {

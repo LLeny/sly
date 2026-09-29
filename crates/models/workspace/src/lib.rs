@@ -38,7 +38,7 @@ pub enum PanelKind {
     Tileset,
     Tilemap,
     Sprites,
-    Raster,
+    Bitmap,
     Structured,
     Table,
     ChannelScopes,
@@ -479,7 +479,7 @@ impl ComponentManifest {
                         | PanelKind::Tileset
                         | PanelKind::Tilemap
                         | PanelKind::Sprites
-                        | PanelKind::Raster
+                        | PanelKind::Bitmap
                 ) {
                     return Err(ManifestError::new(format!(
                         "panel `{link}` cannot provide selection"

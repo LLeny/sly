@@ -1,8 +1,8 @@
 use std::cell::Cell;
 
 use debugger_model::{
-    Cell as TableCell, ColWidth, Column, CpuDescriptor, CpuView, DisasmLine, Field, FlagView,
-    FlowKind, RasterImage, RegisterView, Row, Section, StructuredView, SyntaxSpec, TableRow,
+    BitmapImage, Cell as TableCell, ColWidth, Column, CpuDescriptor, CpuView, DisasmLine, Field,
+    FlagView, FlowKind, RegisterView, Row, Section, StructuredView, SyntaxSpec, TableRow,
     TableView, TokenKind, Tone, format_bytes, hex, strip_symbol_sigils, tokenize,
 };
 
@@ -465,7 +465,7 @@ pub fn cache_view(snes: &Snes) -> TableView {
     }
 }
 
-pub fn bitmap_raster(snes: &Snes) -> RasterImage {
+pub fn bitmap_image(snes: &Snes) -> BitmapImage {
     let screen = bitmap::Screen::at_last_stop(&snes.superfx);
     let (cols, rows) = screen.tile_grid();
     let (width, height) = (cols * 8, rows * 8);
@@ -488,7 +488,7 @@ pub fn bitmap_raster(snes: &Snes) -> RasterImage {
         }
     }
 
-    RasterImage {
+    BitmapImage {
         width,
         height,
         pixels: pixels.into(),
@@ -496,5 +496,6 @@ pub fn bitmap_raster(snes: &Snes) -> RasterImage {
             Field::new("Source", "Game Pak RAM"),
             Field::new("Depth", format!("{}bpp", screen.bpp())),
         ],
+        ..Default::default()
     }
 }

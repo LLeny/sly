@@ -43,7 +43,7 @@ pub(super) fn ppu_view(core: &Snes) -> StructuredView {
         const SHOWN: usize = 6;
         let extra = ranges.len().saturating_sub(SHOWN);
         for (i, range) in ranges.iter().take(SHOWN).enumerate() {
-            let label = if i == 0 { "Raster" } else { "" };
+            let label = if i == 0 { "Bitmap" } else { "" };
             properties.push(Field::new(label, range.clone()));
         }
 
@@ -643,7 +643,7 @@ fn rgba((r, g, b): (u8, u8, u8), opaque: bool) -> [u8; 4] {
 
 const PALETTE: &str = "snes.palette";
 const SPRITES: &str = "snes.objects";
-const GSU_RASTER: &str = "snes.gsu.bitmap";
+const GSU_BITMAP: &str = "snes.gsu.bitmap";
 const TILES_PREFIX: &str = "snes.tiles.";
 const MAP_PREFIX: &str = "snes.map.";
 
@@ -674,7 +674,7 @@ impl VideoDebug for SnesDebug {
         }
 
         if self.has_gsu() {
-            resources.push(VideoResource::new(GSU_RASTER, "GSU Bitmap", Raster));
+            resources.push(VideoResource::new(GSU_BITMAP, "GSU Bitmap", Bitmap));
         }
 
         resources
@@ -684,7 +684,7 @@ impl VideoDebug for SnesDebug {
         let pixels = match resource.as_str() {
             PALETTE => self.palette_key(),
             SPRITES => self.sprites_key(),
-            GSU_RASTER if self.has_gsu() => {
+            GSU_BITMAP if self.has_gsu() => {
                 let fx = &self.core.superfx;
                 let (base, mode, plot) =
                     fx.stopped_screen
@@ -773,8 +773,8 @@ impl VideoDebug for SnesDebug {
         (resource.as_str() == SPRITES).then(|| sprites(&self.core))
     }
 
-    fn raster(&self, resource: &VideoResourceId) -> Option<RasterImage> {
-        (resource.as_str() == GSU_RASTER && self.has_gsu())
-            .then(|| superfx::bitmap_raster(&self.core))
+    fn bitmap(&self, resource: &VideoResourceId) -> Option<BitmapImage> {
+        (resource.as_str() == GSU_BITMAP && self.has_gsu())
+            .then(|| superfx::bitmap_image(&self.core))
     }
 }

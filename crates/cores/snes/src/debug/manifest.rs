@@ -105,7 +105,7 @@ pub(super) fn superfx_manifest(manifest: &mut ComponentManifest) {
         disasm_id.as_str(),
         panel::BREAKPOINTS,
         panel::MEMORY,
-        panel::RASTER,
+        panel::BITMAP,
         panel::LOG,
     ] {
         manifest.tag(id, WORKSPACE).expect("shipped panel id");
@@ -353,9 +353,9 @@ impl SnesDebug {
                 .insert_after(
                     panel::SPRITES,
                     PanelDescriptor::new(
-                        panel::RASTER,
-                        "Raster",
-                        PanelKind::Raster,
+                        panel::BITMAP,
+                        "Bitmap",
+                        PanelKind::Bitmap,
                         DockLocation::Center,
                         RefreshPolicy::OnPause,
                     )
@@ -369,10 +369,6 @@ impl SnesDebug {
         if self.has_sa1() {
             self::sa1_manifest(&mut manifest);
         }
-
-        manifest
-            .workspace_last(debugger_model::SCRIPT_WORKSPACE)
-            .expect("shipped workspace id");
 
         manifest
     }

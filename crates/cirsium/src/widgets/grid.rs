@@ -161,7 +161,7 @@ pub struct GridContent {
 #[derive(IntoElement)]
 pub struct GridPanel {
     id: &'static str,
-    title: &'static str,
+    title: SharedString,
     glyph: &'static str,
     meta: Option<SharedString>,
     content: Option<GridContent>,
@@ -193,7 +193,7 @@ impl GridPanel {
     ) -> Self {
         Self {
             id,
-            title,
+            title: title.into(),
             glyph,
             meta: None,
             content,
@@ -215,6 +215,11 @@ impl GridPanel {
             show_window_overlays: true,
             on_toggle_window_overlays: None,
         }
+    }
+
+    pub fn title(mut self, title: impl Into<SharedString>) -> Self {
+        self.title = title.into();
+        self
     }
 
     pub fn meta(mut self, meta: impl Into<SharedString>) -> Self {
@@ -411,25 +416,57 @@ pub(super) fn picker(
     layers: &[VideoResource],
     selected: usize,
     handler: Option<SelectCallback>,
-) -> Segmented {
-    let mut picker = Segmented::new(id).selected(selected.to_string());
-    for (index, layer) in layers.iter().enumerate() {
-        picker = if layer.enabled {
-            picker.option_label(index.to_string(), SharedString::from(layer.name.clone()))
+) -> Div {
+    let id = id.into();
+    let group_of = |index: usize| {
+        let name = &layers[index].name;
+        layers
+            .iter()
+            .position(|layer| &layer.name == name)
+            .unwrap_or(index)
+    };
+    let members = |group: usize| {
+        (0..layers.len()).filter(move |&index| layers[index].name == layers[group].name)
+    };
+    let segmented = |id: SharedString, key: usize| {
+        let mut segmented = Segmented::new(id).selected(key.to_string());
+        if let Some(handler) = handler.clone() {
+            segmented = segmented.on_select(move |key, window, cx| {
+                if let Ok(index) = key.parse() {
+                    handler(index, window, cx);
+                }
+            });
+        }
+        segmented
+    };
+
+    let current = (selected < layers.len()).then(|| group_of(selected));
+    let mut groups = segmented(id.clone(), current.unwrap_or(selected));
+    for group in (0..layers.len()).filter(|&index| group_of(index) == index) {
+        let label = layers[group].name.clone();
+        groups = if members(group).any(|index| layers[index].enabled) {
+            groups.option_label(group.to_string(), label)
         } else {
-            picker.option_disabled(index.to_string(), SharedString::from(layer.name.clone()))
+            groups.option_disabled(group.to_string(), label)
         };
     }
 
-    if let Some(handler) = handler {
-        picker = picker.on_select(move |key, window, cx| {
-            if let Ok(index) = key.parse() {
-                handler(index, window, cx);
-            }
-        });
+    let mut row = div().flex().items_center().gap_2().child(groups);
+    if let Some(group) = current.filter(|&group| members(group).count() > 1) {
+        let mut variants = segmented(format!("{id}-variant").into(), selected);
+        for index in members(group) {
+            let layer = &layers[index];
+            let label = layer.variant.as_ref().unwrap_or(&layer.name).clone();
+            variants = if layer.enabled {
+                variants.option_label(index.to_string(), label)
+            } else {
+                variants.option_disabled(index.to_string(), label)
+            };
+        }
+        row = row.child(variants);
     }
 
-    picker
+    row
 }
 
 fn measure(on_viewport: Option<ViewportCallback>) -> impl IntoElement {

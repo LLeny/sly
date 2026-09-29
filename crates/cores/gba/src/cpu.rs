@@ -128,7 +128,7 @@ impl Cpu {
         self.cpsr = spsr;
     }
 
-    fn switch_mode(&mut self, new: Mode) {
+    pub(crate) fn switch_mode(&mut self, new: Mode) {
         let old = self.cpsr.mode();
 
         // registers -> banks[old], user_bank -> registers
@@ -166,6 +166,10 @@ pub enum Mode {
 }
 
 impl Mode {
+    pub fn is_valid(bits: u32) -> bool {
+        matches!(bits & 0x1F, 0x10 | 0x11 | 0x12 | 0x13 | 0x17 | 0x1B | 0x1F)
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Mode::User => "User",

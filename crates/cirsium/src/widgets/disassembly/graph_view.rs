@@ -245,11 +245,14 @@ pub(super) fn render_graph(
             if !note.is_empty() {
                 row = row.child(
                     div()
-                        .ml_auto()
+                        .flex_1()
+                        .min_w(px(0.))
                         .pl_4()
                         .font_family(theme.mono_font)
                         .text_xs()
                         .text_color(theme.code_comment)
+                        .text_right()
+                        .whitespace_nowrap()
                         .child(note),
                 );
             }

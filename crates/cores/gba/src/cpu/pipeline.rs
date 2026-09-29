@@ -1,6 +1,6 @@
 #[derive(Default)]
 pub struct Pipeline {
-    stages: [Option<(u32, u32)>; 3],
+    pub(crate) stages: [Option<(u32, u32)>; 3],
 }
 
 impl Pipeline {

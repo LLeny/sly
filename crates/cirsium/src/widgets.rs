@@ -59,5 +59,5 @@ pub use table::{TablePanel, TableView};
 pub use tilemap::{TilemapView, TilemapWidget};
 pub use tileset::{TilesetView, TilesetWidget};
 
-pub mod raster;
-pub use raster::{RasterView, RasterWidget};
+pub mod bitmap;
+pub use bitmap::{BitmapView, BitmapWidget};

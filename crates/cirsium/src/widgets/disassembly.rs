@@ -182,7 +182,7 @@ pub struct DisassemblyWidget {
     view_mode: ViewMode,
     graph_offset: Point<Pixels>,
     on_set_view: Option<ViewCallback>,
-    decode: Option<(SharedString, ClickHandler)>,
+    decode: Option<Segmented>,
     on_pan_begin: Option<PanCallback>,
     on_pan_drag: Option<PanCallback>,
     follow: bool,
@@ -223,12 +223,24 @@ impl DisassemblyWidget {
         }
     }
 
-    pub fn decode_mode(
+    pub fn decode_modes(
         mut self,
-        label: Option<SharedString>,
-        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        modes: &[debugger_model::DecodeMode],
+        selected: Option<&str>,
+        handler: impl Fn(Option<&str>, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.decode = label.map(|label| (label, Box::new(handler) as ClickHandler));
+        self.decode = (!modes.is_empty()).then(|| {
+            let mut selector =
+                Segmented::new(format!("{}-decode", self.id)).option_label("live", "Live");
+            for mode in modes {
+                selector = selector.option_label(format!("mode:{}", mode.id), mode.label.clone());
+            }
+            selector
+                .selected(selected.map_or_else(|| "live".to_string(), |id| format!("mode:{id}")))
+                .on_select(move |key, window, cx| {
+                    handler(key.strip_prefix("mode:"), window, cx);
+                })
+        });
         self
     }
 
@@ -458,16 +470,8 @@ impl RenderOnce for DisassemblyWidget {
         };
 
         let mut actions = div().flex().items_center().gap_1();
-        if let Some((label, handler)) = decode {
-            actions = actions.child(
-                div()
-                    .id("decode-mode")
-                    .text_xs()
-                    .px_1()
-                    .cursor_pointer()
-                    .child(label)
-                    .on_click(handler),
-            );
+        if let Some(decode) = decode {
+            actions = actions.child(decode);
         }
 
         actions = actions.child(selector);

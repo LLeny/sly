@@ -104,10 +104,13 @@ impl Debugger {
             )
         });
 
+        let row_window = self.memory.row_window();
+        let first_scroll_row = row_window.start;
         let row_provider: RowProvider = {
             let this = this.clone();
             Rc::new(move |range, cx| {
                 let debugger = this.read(cx);
+                let range = first_scroll_row + range.start..first_scroll_row + range.end;
                 let rows = debugger.memory.cached_rows(range.clone());
                 let missing = debugger.memory.missing_pages(range);
 
@@ -166,11 +169,35 @@ impl Debugger {
             .child(jump_field);
         let memory_widget = MemoryWidget::new(
             row_provider,
-            self.memory.row_count(),
+            row_window.len(),
             memory::BYTES_PER_ROW,
             self.memory.scroll.clone(),
             self.memory.region_label(),
         )
+        .on_visible_rows({
+            let this = this.clone();
+            move |row_height, cx| {
+                let memory = &this.read(cx).memory;
+                if memory
+                    .recenter_target(first_scroll_row, row_height)
+                    .is_none()
+                {
+                    return;
+                }
+
+                let this = this.clone();
+                cx.defer(move |cx| {
+                    this.update(cx, |debugger, cx| {
+                        if debugger
+                            .memory
+                            .recenter_scroll(first_scroll_row, row_height)
+                        {
+                            cx.notify();
+                        }
+                    });
+                });
+            }
+        })
         .collapsed(self.is_collapsed(MemoryWidget::ID))
         .selection(self.memory.selection())
         .breakpoints(self.memory.breakpoint_ranges())

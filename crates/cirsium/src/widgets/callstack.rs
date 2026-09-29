@@ -111,6 +111,8 @@ impl RenderOnce for CallStackWidget {
             .id(SharedString::from(format!("{}-list", self.id)))
             .flex()
             .flex_col()
+            .w_full()
+            .min_w(px(0.))
             .when(self.scrollable, |d| {
                 d.flex_1()
                     .min_h(px(0.))
@@ -180,6 +182,7 @@ fn frame_row(theme: &Theme, widget_id: &str, ix: usize, frame: StackFrameView) -
 
     let address = Copyable::new(format!("{widget_id}-frame-{ix}"), location.clone()).child(
         div()
+            .whitespace_nowrap()
             .font_family(theme.mono_font)
             .text_xs()
             .text_color(theme.text_primary)
@@ -194,33 +197,52 @@ fn frame_row(theme: &Theme, widget_id: &str, ix: usize, frame: StackFrameView) -
         .text_color(theme.text_muted)
         .bg(theme.bg_panel_alt)
         .rounded_sm()
+        .whitespace_nowrap()
         .child(kind);
 
-    let mut row = div()
+    let notes = div()
         .flex()
+        .flex_1()
+        .min_w(px(0.))
+        .items_center()
+        .gap_2()
+        .when(!symbol.is_empty(), |notes| {
+            notes.child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .truncate()
+                    .text_xs()
+                    .text_color(theme.text_muted)
+                    .child(symbol),
+            )
+        })
+        .when(!caller.is_empty(), |notes| {
+            notes.child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .truncate()
+                    .text_right()
+                    .font_family(theme.mono_font)
+                    .text_xs()
+                    .text_color(theme.text_dim)
+                    .child(caller),
+            )
+        });
+
+    div()
+        .flex()
+        .flex_none()
+        .w_full()
+        .min_w(px(0.))
+        .overflow_hidden()
         .items_center()
         .gap_2()
         .px_1()
         .py(px(3.))
         .child(index)
-        .child(address)
-        .child(pill);
-
-    if !symbol.is_empty() {
-        row = row.child(div().text_xs().text_color(theme.text_muted).child(symbol));
-    }
-
-    row = row.child(div().flex_1());
-
-    if !caller.is_empty() {
-        row = row.child(
-            div()
-                .font_family(theme.mono_font)
-                .text_xs()
-                .text_color(theme.text_dim)
-                .child(caller),
-        );
-    }
-
-    row
+        .child(div().flex_none().child(address))
+        .child(pill)
+        .child(notes)
 }

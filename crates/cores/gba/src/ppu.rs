@@ -15,15 +15,32 @@ pub(crate) const VBLANK_START_CYCLES: u64 = VBLANK_START_SCANLINE as u64 * SCANL
 pub(crate) const VBLANK_END_CYCLES: u64 = VBLANK_END_SCANLINE as u64 * SCANLINE_CYCLES;
 pub(crate) const FRAME_CYCLES: u64 = SCANLINES_PER_FRAME as u64 * SCANLINE_CYCLES;
 
+#[cfg(feature = "debug")]
+#[derive(Clone, Copy)]
+pub(crate) struct Revisions {
+    pub(crate) palette: u64,
+    pub(crate) vram: u64,
+}
+
+#[cfg(feature = "debug")]
+impl Revisions {
+    pub(crate) fn bump(&mut self) {
+        self.palette += 1;
+        self.vram += 1;
+    }
+}
+
 pub struct Ppu {
+    #[cfg(feature = "debug")]
+    pub(crate) revisions: Revisions,
     pub(crate) dispstat: DisplayStatus,
     pub(crate) vcount: VerticalCount,
 
-    vram: [u8; 0x18000],
-    palette: [u8; 0x400],
-    oam: [u8; 0x400],
+    pub(crate) vram: [u8; 0x18000],
+    pub(crate) palette: [u8; 0x400],
+    pub(crate) oam: [u8; 0x400],
 
-    frame: [[u8; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize],
+    pub(crate) frame: [[u8; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize],
 }
 
 impl Default for Ppu {
@@ -35,6 +52,11 @@ impl Default for Ppu {
 impl Ppu {
     pub const fn new() -> Self {
         Self {
+            #[cfg(feature = "debug")]
+            revisions: Revisions {
+                palette: 0,
+                vram: 0,
+            },
             dispstat: DisplayStatus::zeroed().with_vcounter(true),
             vcount: VerticalCount::zeroed(),
             vram: [0; 0x18000],
@@ -42,6 +64,18 @@ impl Ppu {
             oam: [0; 0x400],
             frame: [[255; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize],
         }
+    }
+
+    pub(crate) fn reset(&mut self) {
+        *self = Self {
+            #[cfg(feature = "debug")]
+            revisions: {
+                let mut revisions = self.revisions;
+                revisions.bump();
+                revisions
+            },
+            ..Self::new()
+        };
     }
 
     pub(crate) fn start_hblank(&mut self) {
@@ -52,14 +86,13 @@ impl Ppu {
         self.dispstat.set_vblank(true);
 
         for (i, &palette_index) in self.vram[0..=0x95FF].iter().enumerate() {
-            let offset = usize::from(palette_index) * 2;
-            let color = u16::from_le_bytes([self.palette[offset], self.palette[offset + 1]]);
-            let expand = |shift: u32| {
-                let channel = ((color >> shift) & 0x1F) as u8;
-                (channel << 3) | (channel >> 2)
-            };
-            self.frame[i] = [expand(0), expand(5), expand(10), 255];
+            self.frame[i] = rgba(self.palette_color(palette_index.into()));
         }
+    }
+
+    pub(crate) fn palette_color(&self, index: usize) -> u16 {
+        let offset = (index * 2) & 0x3FF;
+        u16::from_le_bytes([self.palette[offset], self.palette[offset + 1]])
     }
 
     pub(crate) fn end_vblank(&mut self) {
@@ -82,6 +115,11 @@ impl Ppu {
     }
 
     fn write_palette(&mut self, address: u32, width: Width, value: u32) {
+        #[cfg(feature = "debug")]
+        {
+            self.revisions.palette += 1;
+        }
+
         self::write_memory(&mut self.palette, address, width, value, |address| {
             address as usize & 0x3FF
         });
@@ -92,6 +130,11 @@ impl Ppu {
     }
 
     fn write_vram(&mut self, address: u32, width: Width, value: u32) {
+        #[cfg(feature = "debug")]
+        {
+            self.revisions.vram += 1;
+        }
+
         self::write_memory(&mut self.vram, address, width, value, self::vram_offset);
     }
 
@@ -132,7 +175,16 @@ fn write_memory(
     }
 }
 
-fn vram_offset(address: u32) -> usize {
+pub(crate) fn rgba(color: u16) -> [u8; 4] {
+    let expand = |shift: u32| {
+        let channel = ((color >> shift) & 0x1F) as u8;
+        (channel << 3) | (channel >> 2)
+    };
+
+    [expand(0), expand(5), expand(10), 255]
+}
+
+pub(crate) fn vram_offset(address: u32) -> usize {
     // Each 128 KiB window repeats the last 32 KiB of the 96 KiB VRAM.
     let offset = address as usize & 0x1FFFF;
     if offset >= 0x18000 {

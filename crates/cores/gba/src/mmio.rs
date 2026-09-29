@@ -14,22 +14,22 @@ pub(crate) const IO_END: u32 = IO_BASE + IO_SIZE - 1;
 const BIOS_BASE: u32 = 0x0000_0000;
 const BIOS_END: u32 = BIOS_BASE + BIOS.len() as u32 - 1;
 
-const EWRAM_BASE: u32 = 0x0200_0000;
-const EWRAM_SIZE: u32 = 0x4_0000;
-const EWRAM_END: u32 = EWRAM_BASE + EWRAM_SIZE - 1;
+pub(crate) const EWRAM_BASE: u32 = 0x0200_0000;
+pub(crate) const EWRAM_SIZE: u32 = 0x4_0000;
+pub(crate) const EWRAM_END: u32 = EWRAM_BASE + EWRAM_SIZE - 1;
 
-const IWRAM_BASE: u32 = 0x0300_0000;
-const IWRAM_SIZE: u32 = 0x8000;
-const IWRAM_END: u32 = IWRAM_BASE + IWRAM_SIZE - 1;
+pub(crate) const IWRAM_BASE: u32 = 0x0300_0000;
+pub(crate) const IWRAM_SIZE: u32 = 0x8000;
+pub(crate) const IWRAM_END: u32 = IWRAM_BASE + IWRAM_SIZE - 1;
 
 // https://github.com/coolbho3k/emibios
 const BIOS: &[u8] = include_bytes!("../../../../bins/gba/emibios.bin");
 
 pub(crate) struct Mmio {
     pub(crate) map: MmioMap,
-    ewram: Vec<u8>,
-    iwram: Vec<u8>,
-    io: Vec<u8>, // Backing storage for unimplemented I/O registers.
+    pub(crate) ewram: Vec<u8>,
+    pub(crate) iwram: Vec<u8>,
+    pub(crate) io: Vec<u8>, // Backing storage for unimplemented I/O registers.
 }
 
 impl Mmio {

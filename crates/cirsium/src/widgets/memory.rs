@@ -3,8 +3,8 @@ use std::rc::Rc;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, ClickEvent, Pixels, Point, SharedString, UniformListScrollHandle, Window, div,
-    px, uniform_list,
+    AnyElement, App, Bounds, ClickEvent, Pixels, Point, SharedString, UniformListDecoration,
+    UniformListScrollHandle, Window, div, px, uniform_list,
 };
 
 use crate::assets::icon;
@@ -20,6 +20,25 @@ const MIN_LIST_HEIGHT: f32 = 200.;
 type ByteDownCallback = Rc<dyn Fn(u32, bool, &mut Window, &mut App) + 'static>;
 type ByteDragCallback = Rc<dyn Fn(u32, &mut Window, &mut App) + 'static>;
 type ContextCallback = Rc<dyn Fn(u32, Point<Pixels>, &mut Window, &mut App) + 'static>;
+type VisibleRowsCallback = Rc<dyn Fn(Pixels, &mut App) + 'static>;
+
+struct VisibleRows(VisibleRowsCallback);
+
+impl UniformListDecoration for VisibleRows {
+    fn compute(
+        &self,
+        _visible_range: Range<usize>,
+        _bounds: Bounds<Pixels>,
+        _scroll_offset: Point<Pixels>,
+        item_height: Pixels,
+        _item_count: usize,
+        _window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        (self.0)(item_height, cx);
+        div().into_any_element()
+    }
+}
 
 pub type RowProvider = Rc<dyn Fn(Range<usize>, &mut App) -> Vec<MemoryRow> + 'static>;
 
@@ -53,6 +72,7 @@ pub struct MemoryWidget {
     on_byte_down: Option<ByteDownCallback>,
     on_byte_drag: Option<ByteDragCallback>,
     on_context: Option<ContextCallback>,
+    on_visible_rows: Option<VisibleRowsCallback>,
 }
 
 impl MemoryWidget {
@@ -80,6 +100,7 @@ impl MemoryWidget {
             on_byte_down: None,
             on_byte_drag: None,
             on_context: None,
+            on_visible_rows: None,
         }
     }
 
@@ -140,6 +161,11 @@ impl MemoryWidget {
         self.on_context = Some(Rc::new(handler));
         self
     }
+
+    pub fn on_visible_rows(mut self, handler: impl Fn(Pixels, &mut App) + 'static) -> Self {
+        self.on_visible_rows = Some(Rc::new(handler));
+        self
+    }
 }
 
 impl RenderOnce for MemoryWidget {
@@ -169,16 +195,16 @@ impl RenderOnce for MemoryWidget {
         let breakpoints = Rc::new(self.breakpoints);
         let scroll = self.scroll.clone();
 
-        let list = uniform_list("mem-list", self.row_count, move |range, _window, cx| {
+        let mut list = uniform_list("mem-list", self.row_count, move |range, _window, cx| {
+            let count = range.len();
             let rows = provider(range, cx);
             let theme = Theme::global(cx);
             let t = &*theme;
-            rows.iter()
-                .enumerate()
-                .map(|(i, row)| {
+            (0..count)
+                .map(|i| {
                     row::mem_row(
                         t,
-                        row,
+                        rows.get(i),
                         i.checked_sub(1).and_then(|j| rows.get(j)),
                         rows.get(i + 1),
                         self.bytes_per_row,
@@ -194,6 +220,11 @@ impl RenderOnce for MemoryWidget {
         .track_scroll(&scroll)
         .flex_1()
         .min_h(px(MIN_LIST_HEIGHT));
+
+        if let Some(handler) = self.on_visible_rows {
+            list = list.with_decoration(VisibleRows(handler));
+        }
+
         let list = uniform_vertical_scroll_area(list, &scroll, t).flex_1();
 
         let body = div()

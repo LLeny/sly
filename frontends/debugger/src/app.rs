@@ -10,11 +10,11 @@ use cirsium::components::{
     title_bar,
 };
 use cirsium::widgets::{
-    AudioScopeView, AudioScopeWidget, AudioScopesView, BreakpointKind, BreakpointsWidget,
-    CallStackView, CallStackWidget, CartridgeView, CartridgeWidget, ChannelScopesWidget,
-    ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget, FramebufferView, FramebufferWidget,
-    GridPanel, LogWidget, MemoryWidget, MmioView, MmioWidget, PaletteView, PaletteWidget,
-    RasterView, RasterWidget, RowProvider, SavestatesWidget, ScriptBuiltinsWidget,
+    AudioScopeView, AudioScopeWidget, AudioScopesView, BitmapView, BitmapWidget, BreakpointKind,
+    BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView, CartridgeWidget,
+    ChannelScopesWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget,
+    FramebufferView, FramebufferWidget, GridPanel, LogWidget, MemoryWidget, MmioView, MmioWidget,
+    PaletteView, PaletteWidget, RowProvider, SavestatesWidget, ScriptBuiltinsWidget,
     ScriptConsoleWidget, ScriptEditorWidget, SpritesView, SpritesWidget, StructuredPanel,
     StructuredView, TablePanel, TableView, TilemapView, TilemapWidget, TilesetView, TilesetWidget,
     ViewMode,
@@ -184,9 +184,9 @@ pub(crate) struct Debugger {
     tileset: Option<TilesetView>,
     video_resources: Vec<VideoResource>,
     palette_ui: GridState,
-    raster: Option<RasterView>,
-    raster_ui: GridState,
-    raster_key: Option<VideoCacheKey>,
+    bitmap: Option<BitmapView>,
+    bitmap_ui: GridState,
+    bitmap_key: Option<VideoCacheKey>,
     tileset_ui: GridState,
     tilemap: Option<TilemapView>,
     tilemap_ui: GridState,
@@ -337,7 +337,7 @@ impl Debugger {
                 label: SharedString::from(t.label),
             })
             .collect();
-        let manifest = target.manifest();
+        let manifest = panels::prepare_manifest(target.manifest());
         let workspace = manifest
             .workspaces
             .first()
@@ -374,9 +374,9 @@ impl Debugger {
             tileset: None,
             video_resources: Vec::new(),
             palette_ui: GridState::default(),
-            raster: None,
-            raster_ui: GridState::default(),
-            raster_key: None,
+            bitmap: None,
+            bitmap_ui: GridState::default(),
+            bitmap_key: None,
             tileset_ui: GridState::default(),
             tilemap: None,
             tilemap_ui: GridState::default(),

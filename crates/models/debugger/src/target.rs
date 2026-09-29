@@ -359,7 +359,7 @@ pub mod panel {
     pub const TILESET: &str = "tileset";
     pub const TILEMAP: &str = "tilemap";
     pub const SPRITES: &str = "sprites";
-    pub const RASTER: &str = "raster";
+    pub const BITMAP: &str = "bitmap";
     pub const AUDIO_SCOPE: &str = "audio_scope";
 }
 

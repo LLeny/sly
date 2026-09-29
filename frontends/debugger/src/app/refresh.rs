@@ -43,7 +43,7 @@ impl Debugger {
         self.tilemap_key = None;
         self.tilemap_overlay_key = None;
         self.sprites_key = None;
-        self.raster_key = None;
+        self.bitmap_key = None;
     }
 
     pub(super) fn drop_grid_image(cx: &mut Context<Self>, image: Option<Arc<RenderImage>>) {
@@ -159,18 +159,18 @@ impl Debugger {
             .map(Into::into);
     }
 
-    pub(super) fn refresh_raster(&mut self, cx: &mut Context<Self>) {
-        let key = self.video_key(self.raster_ui.resource.as_ref(), None);
-        if key.is_some() && key == self.raster_key && self.raster.is_some() {
+    pub(super) fn refresh_bitmap(&mut self, cx: &mut Context<Self>) {
+        let key = self.video_key(self.bitmap_ui.resource.as_ref(), None);
+        if key.is_some() && key == self.bitmap_key && self.bitmap.is_some() {
             return;
         }
 
-        self.raster_key = key;
-        Self::drop_grid_image(cx, self.raster.take().and_then(|v| v.image));
-        self.raster = self
+        self.bitmap_key = key;
+        Self::drop_grid_image(cx, self.bitmap.take().and_then(|v| v.image));
+        self.bitmap = self
             .target
             .video()
-            .and_then(|v| v.raster(self.raster_ui.resource.as_ref()?))
+            .and_then(|v| v.bitmap(self.bitmap_ui.resource.as_ref()?))
             .map(Into::into);
     }
 
@@ -261,8 +261,8 @@ impl Debugger {
             .sync(&self.video_resources, VideoResourceKind::Tilemap);
         self.sprites_ui
             .sync(&self.video_resources, VideoResourceKind::Sprites);
-        self.raster_ui
-            .sync(&self.video_resources, VideoResourceKind::Raster);
+        self.bitmap_ui
+            .sync(&self.video_resources, VideoResourceKind::Bitmap);
         if self.wants_refresh(live, |k| matches!(k, PanelKind::Palette)) {
             self.refresh_palette();
         }
@@ -281,8 +281,8 @@ impl Debugger {
             self.refresh_sprites(cx);
         }
 
-        if self.wants_refresh(live, |k| matches!(k, PanelKind::Raster)) {
-            self.refresh_raster(cx);
+        if self.wants_refresh(live, |k| matches!(k, PanelKind::Bitmap)) {
+            self.refresh_bitmap(cx);
         }
     }
 
@@ -337,7 +337,7 @@ impl Debugger {
             TilesetWidget::ID => self.tileset_ui.selected(),
             TilemapWidget::ID => self.tilemap_ui.selected(),
             SpritesWidget::ID => self.sprites_ui.selected(),
-            RasterWidget::ID => self.raster_ui.selected(),
+            BitmapWidget::ID => self.bitmap_ui.selected(),
             _ => self.table_selection.get(id).copied().or(Some(0)),
         }
     }
@@ -472,7 +472,7 @@ impl Debugger {
 
     pub(super) fn wire_grid(
         &self,
-        panel: GridPanel,
+        mut panel: GridPanel,
         id: &'static str,
         state: &GridState,
         resources: Vec<VideoResource>,
@@ -481,6 +481,10 @@ impl Debugger {
         cx: &mut Context<Self>,
     ) -> GridPanel {
         let this = cx.entity();
+        if let Some(descriptor) = self.registry.descriptor(id) {
+            panel = panel.title(descriptor.title.clone());
+        }
+
         panel
             .layer(state.index(&resources))
             .layers(resources.clone())

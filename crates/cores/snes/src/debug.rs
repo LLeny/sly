@@ -3,11 +3,11 @@ use std::time::Duration;
 
 use core_model::{Core, SessionInfo, SoftwareFrame};
 use debugger_model::{
-    AccessSource, AccessTracking, AccessWidth, AudioScopesView, BreakpointKind, BreakpointMark,
-    CPU_WORKSPACE, CallStackView, CartridgeView, CpuDescriptor, CpuId, CpuView, DebugCore,
-    DebugMemoryError, DecodeMode, DisasmLine, DisasmToken, DisassemblyRequest, EventDescriptor,
-    EventHit, Field, FlagView, FlowKind, Highlight, HookHit, MemoryAddress, MemoryRegion,
-    MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView, RasterImage,
+    AccessSource, AccessTracking, AccessWidth, AudioScopesView, BitmapImage, BreakpointKind,
+    BreakpointMark, CPU_WORKSPACE, CallStackView, CartridgeView, CpuDescriptor, CpuId, CpuView,
+    DebugCore, DebugMemoryError, DecodeMode, DisasmLine, DisasmToken, DisassemblyRequest,
+    EventDescriptor, EventHit, Field, FlagView, FlowKind, Highlight, HookHit, MemoryAddress,
+    MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView,
     RegisterView, Row, RunOutcome, SOUND_WORKSPACE, Section, SpriteEntry, Sprites, StackFrame,
     StepTarget, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapOverlay,
     TilemapOverlayBand, TilemapViewport, Tileset, TilesetTile, TokenKind, VIDEO_WORKSPACE,

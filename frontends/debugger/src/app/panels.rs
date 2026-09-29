@@ -5,7 +5,12 @@ use std::rc::Rc;
 use cirsium::{PanelFactory, PanelHandle, PanelRefresh, RefreshablePanel};
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, Render, SharedString, Window, div};
-use workspace_model::PanelDescriptor;
+use workspace_model::{ComponentManifest, PanelDescriptor};
+
+pub(super) fn prepare_manifest(mut manifest: ComponentManifest) -> ComponentManifest {
+    let _ = manifest.workspace_last(debugger_model::SCRIPT_WORKSPACE);
+    manifest
+}
 
 #[derive(Clone, Default)]
 pub(super) struct PanelFrames(Rc<RefCell<HashMap<String, AnyElement>>>);

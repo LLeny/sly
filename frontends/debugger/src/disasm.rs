@@ -110,21 +110,31 @@ impl Disasm {
         }
     }
 
-    pub fn decode_label(&self) -> Option<SharedString> {
-        (!self.decode_modes.is_empty()).then(|| {
-            self.decode_mode.map_or_else(
-                || "Decode: live".into(),
-                |ix| format!("Decode: {}", self.decode_modes[ix].label).into(),
-            )
-        })
+    pub fn decode_modes(&self) -> &[DecodeMode] {
+        &self.decode_modes
     }
 
-    pub fn cycle_decode_mode(&mut self, target: &dyn DebugCore) {
-        self.decode_mode = match self.decode_mode {
-            None if !self.decode_modes.is_empty() => Some(0),
-            Some(ix) if ix + 1 < self.decode_modes.len() => Some(ix + 1),
-            _ => None,
+    pub fn decode_mode(&self) -> Option<&str> {
+        self.decode_mode.map(|ix| self.decode_modes[ix].id.as_ref())
+    }
+
+    pub fn set_decode_mode(&mut self, mode: Option<&str>, target: &dyn DebugCore) {
+        let Ok(selected) = mode
+            .map(|id| {
+                self.decode_modes
+                    .iter()
+                    .position(|mode| mode.id.as_ref() == id)
+                    .ok_or(())
+            })
+            .transpose()
+        else {
+            return;
         };
+        if self.decode_mode == selected {
+            return;
+        }
+
+        self.decode_mode = selected;
 
         self.fingerprint = None;
         self.rebuild(target, true);

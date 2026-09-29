@@ -5,12 +5,19 @@ use std::sync::Arc;
 use cirsium::components::ComboOption;
 use cirsium::widgets::{MemoryCell, MemoryRow, ascii_glyph};
 use debugger_model::{BreakpointKind, BreakpointMark, DebugCore, MemoryRegion};
-use gpui::{Pixels, Point, ScrollStrategy, SharedString, UniformListScrollHandle};
+use gpui::{Pixels, Point, ScrollStrategy, SharedString, UniformListScrollHandle, point, px};
 
 pub const BYTES_PER_ROW: usize = 16;
 pub const DEBUG_PAGE_SIZE: usize = 0x1000;
 const PAGE_ROWS: usize = DEBUG_PAGE_SIZE / BYTES_PER_ROW;
 const MAX_CACHED_PAGES: usize = 8;
+const SCROLL_WINDOW_ROWS: usize = 4096;
+const SCROLL_WINDOW_MARGIN: usize = 512;
+
+fn window_start(row: usize, total: usize) -> usize {
+    row.saturating_sub(SCROLL_WINDOW_ROWS / 2)
+        .min(total.saturating_sub(SCROLL_WINDOW_ROWS))
+}
 
 struct MemoryPage {
     region: Arc<str>,
@@ -39,6 +46,7 @@ pub struct Memory {
     follow: bool,
     breakpoints: Vec<BreakpointMark>,
     pages: VecDeque<MemoryPage>,
+    first_scroll_row: usize,
 }
 
 impl Memory {
@@ -59,6 +67,7 @@ impl Memory {
             follow: false,
             breakpoints: Vec::new(),
             pages: VecDeque::new(),
+            first_scroll_row: 0,
         };
         memory.load_page(0, target);
         memory
@@ -101,6 +110,51 @@ impl Memory {
 
     pub fn row_count(&self) -> usize {
         ((self.current.end() - u64::from(self.current.base)) as usize).div_ceil(BYTES_PER_ROW)
+    }
+
+    pub fn row_window(&self) -> Range<usize> {
+        self.first_scroll_row..(self.first_scroll_row + SCROLL_WINDOW_ROWS).min(self.row_count())
+    }
+
+    pub fn recenter_target(&self, expected_start: usize, row_height: Pixels) -> Option<usize> {
+        if self.first_scroll_row != expected_start || row_height <= px(0.) {
+            return None;
+        }
+
+        let scroll = self.scroll.0.borrow();
+        if scroll.deferred_scroll_to_item.is_some() {
+            return None;
+        }
+
+        let offset = scroll.base_handle.offset();
+        let local_row = (f32::from(-offset.y) / f32::from(row_height)).max(0.) as usize;
+        let window = self.row_window();
+        if (SCROLL_WINDOW_MARGIN..window.len().saturating_sub(SCROLL_WINDOW_MARGIN))
+            .contains(&local_row)
+        {
+            return None;
+        }
+
+        let total = self.row_count();
+        let absolute_row = (window.start + local_row).min(total.saturating_sub(1));
+        let new_start = window_start(absolute_row, total);
+        (new_start != window.start).then_some(new_start)
+    }
+
+    pub fn recenter_scroll(&mut self, expected_start: usize, row_height: Pixels) -> bool {
+        let Some(new_start) = self.recenter_target(expected_start, row_height) else {
+            return false;
+        };
+
+        let delta = new_start as i64 - self.first_scroll_row as i64;
+        let scroll = self.scroll.0.borrow();
+        let offset = scroll.base_handle.offset();
+        scroll
+            .base_handle
+            .set_offset(point(offset.x, offset.y + row_height * delta as f32));
+
+        self.first_scroll_row = new_start;
+        true
     }
 
     fn build_rows(&self, range: Range<usize>, target: &dyn DebugCore) -> Vec<MemoryRow> {
@@ -232,7 +286,9 @@ impl Memory {
 
         let clamped = addr.clamp(base, (self.current.end() - 1) as u32);
         let row = ((clamped - base) as usize) / BYTES_PER_ROW;
-        self.scroll.scroll_to_item_strict(row, ScrollStrategy::Top);
+        self.first_scroll_row = window_start(row, self.row_count());
+        self.scroll
+            .scroll_to_item_strict(row - self.first_scroll_row, ScrollStrategy::Top);
 
         Some(clamped)
     }
@@ -262,6 +318,7 @@ impl Memory {
             self.current = region.clone();
             self.selection = None;
             self.drag_anchor = None;
+            self.first_scroll_row = 0;
             self.scroll.scroll_to_item_strict(0, ScrollStrategy::Top);
             self.pages.clear();
         }

@@ -13,13 +13,13 @@ pub(crate) enum EventKind {
 pub(crate) struct Event {
     pub(crate) deadline: u64,
     pub(crate) kind: EventKind,
-    period: u64,
+    pub(crate) period: u64,
 }
 
 #[derive(Default)]
 pub(crate) struct Scheduler {
-    events: BinaryHeap<Reverse<Event>>,
-    cycles: u64,
+    pub(crate) events: BinaryHeap<Reverse<Event>>,
+    pub(crate) cycles: u64,
 }
 
 impl Scheduler {
@@ -53,5 +53,30 @@ impl Scheduler {
         }));
 
         Some(event)
+    }
+}
+
+#[cfg(feature = "debug")]
+impl EventKind {
+    pub(crate) fn bit(self) -> u8 {
+        1 << self as u8
+    }
+
+    pub(crate) fn debug_id(self) -> &'static str {
+        match self {
+            Self::HBlankStart => "gba.hblank",
+            Self::ScanlineStart => "gba.scanline",
+            Self::VBlankStart => "gba.vblank",
+            Self::VBlankEnd => "gba.vblank_end",
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::HBlankStart => "HBLANK",
+            Self::ScanlineStart => "Scanline",
+            Self::VBlankStart => "VBLANK",
+            Self::VBlankEnd => "VBLANK end",
+        }
     }
 }

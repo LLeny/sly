@@ -7,13 +7,13 @@ const ROM_BASE: u32 = 0x0800_0000;
 const ROM_END: u32 = 0x0DFF_FFFF;
 const ROM_MASK: u32 = 0x01FF_FFFF;
 
-const SRAM_BASE: u32 = 0x0E00_0000;
-const SRAM_SIZE: u32 = 0x1_0000;
-const SRAM_END: u32 = SRAM_BASE + SRAM_SIZE - 1;
+pub(crate) const SRAM_BASE: u32 = 0x0E00_0000;
+pub(crate) const SRAM_SIZE: u32 = 0x1_0000;
+pub(crate) const SRAM_END: u32 = SRAM_BASE + SRAM_SIZE - 1;
 
 pub struct GamePak {
     cartridge: Cartridge,
-    sram: Vec<u8>,
+    pub(crate) sram: Vec<u8>,
 }
 
 impl GamePak {

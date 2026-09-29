@@ -1,6 +1,9 @@
+mod access;
+mod callstack;
 mod cpu;
 mod disasm;
 mod mmio;
+mod video;
 
 use std::ops::RangeInclusive;
 use std::sync::Arc;
@@ -8,13 +11,16 @@ use std::time::Duration;
 
 use core_model::System;
 use debugger_model::{
-    BreakpointKind, BreakpointMark, CartridgeView, CpuDescriptor, CpuId, CpuView, DisasmLine,
-    DisassemblyRequest, Field, Highlight, HookHit, MemoryRegion, MmioView, Row, RunOutcome,
-    Section, StructuredView,
+    AccessSource, AccessTracking, AccessWidth, BreakpointKind, BreakpointMark, CallStackView,
+    CartridgeView, CpuDescriptor, CpuId, CpuView, DebugMemoryError, DecodeMode, DisasmLine,
+    DisassemblyRequest, EventDescriptor, EventHit, Field, Highlight, HookHit, MemoryRegion,
+    MmioView, Row, RunOutcome, Section, StepTarget, StructuredView, VideoDebug,
 };
 use workspace_model::{ComponentManifest, DockLocation};
 
-use crate::{Cartridge, Cpu, Gba};
+use crate::cpu::Bus;
+use crate::scheduler::EventKind;
+use crate::{Cartridge, Cpu, Gba, VIDEO_EVENTS};
 
 const CPU: &str = "gba.arm7tdmi";
 const SPACE: &str = "gba.bus";
@@ -39,11 +45,16 @@ pub struct GbaDebug {
     cartridge: CartridgeView,
     stopped_at: Option<u32>,
     hits: Vec<HookHit>,
+    accesses: access::Capture,
+    stack: callstack::Stack,
+    watched_events: u8,
+    event_hits: Vec<EventHit>,
 }
 
 struct Tick {
     executed: bool,
     frame: bool,
+    events: u8,
 }
 
 impl GbaDebug {
@@ -72,6 +83,10 @@ impl GbaDebug {
             },
             stopped_at: None,
             hits: Vec::new(),
+            accesses: access::Capture::default(),
+            stack: callstack::Stack::default(),
+            watched_events: 0,
+            event_hits: Vec::new(),
         }
     }
 
@@ -84,13 +99,76 @@ impl GbaDebug {
     }
 
     fn tick(&mut self) -> Tick {
-        let executed = self.core.cpu.pipeline.pending()[0].is_some();
-        self.core.step_cpu();
+        let before = callstack::Before::new(&self.core.cpu);
+        let executed = before.is_some();
+
+        self.accesses.begin_instruction(self.execution_address());
+        self.core.step_cpu_with(|cpu, bus| {
+            cpu.step(&mut access::TrackedBus {
+                bus,
+                capture: &mut self.accesses,
+            });
+        });
+
+        if let Some(before) = before {
+            self.stack.observe(before, &self.core.cpu);
+        }
+
+        let mut events = 0;
+        let frame = self.core.dispatch_due_with(|core, kind| {
+            events |= kind.bit();
+            if self.watched_events & kind.bit() != 0 {
+                let scanline = core.ppu.vcount.scanline();
+                self.event_hits.push(EventHit {
+                    id: kind.debug_id().into(),
+                    value: scanline.into(),
+                    detail: format!("scanline {scanline}").into(),
+                    pc: cpu::execution_address(&core.cpu),
+                });
+            }
+        });
 
         Tick {
             executed,
-            frame: self.core.dispatch_due(),
+            frame,
+            events,
         }
+    }
+
+    fn begin_run(&mut self, watch: bool) {
+        self.hits.clear();
+        self.event_hits.clear();
+        self.accesses.watch = watch;
+    }
+
+    fn clear_history(&mut self) {
+        self.stopped_at = None;
+        self.hits.clear();
+        self.event_hits.clear();
+        self.accesses.clear();
+        self.stack.clear();
+    }
+
+    fn check_transaction(
+        &self,
+        region: &str,
+        addr: u32,
+        width: AccessWidth,
+    ) -> Result<(), DebugMemoryError> {
+        let len = width.bytes() as usize;
+
+        if self.clamp_len(region, addr, len) != Some(len) {
+            return Err(DebugMemoryError::InvalidAddress);
+        }
+
+        if !addr.is_multiple_of(width.bytes()) {
+            return Err(DebugMemoryError::Misaligned {
+                address: addr,
+                width,
+            });
+        }
+
+        Ok(())
     }
 
     fn regions(&self) -> impl Iterator<Item = (&'static str, &'static str, u32, u32)> + '_ {
@@ -135,6 +213,24 @@ impl core_model::Core for GbaDebug {
         self.core.frame_interval()
     }
 
+    fn save_state(&self) -> Result<Vec<u8>, core_model::StateError> {
+        self.core.save_state()
+    }
+
+    fn load_state(&mut self, bytes: &[u8]) -> Result<(), core_model::StateError> {
+        self.core.load_state(bytes)?;
+        self.clear_history();
+        Ok(())
+    }
+
+    fn save_ram(&self) -> Option<&[u8]> {
+        self.core.save_ram()
+    }
+
+    fn load_save_ram(&mut self, bytes: &[u8]) -> bool {
+        self.core.load_save_ram(bytes)
+    }
+
     fn cartridge_info(&self) -> Option<core_model::CartridgeInfo> {
         self.core.cartridge_info()
     }
@@ -149,25 +245,28 @@ impl core_model::Core for GbaDebug {
 
     fn reset(&mut self) {
         self.core.reset();
-        self.core.skip_bios();
-        self.stopped_at = None;
-        self.hits.clear();
+        self.clear_history();
     }
 
     fn step(&mut self) {
-        self.core.step();
-        self.stopped_at = None;
+        debugger_model::DebugCore::debug_step(self);
     }
 
     fn run_frame(&mut self) {
-        self.core.run_frame();
         self.stopped_at = None;
+        self.begin_run(false);
+        while !self.tick().frame {}
     }
 }
 
 impl debugger_model::DebugCore for GbaDebug {
     fn cpus(&self) -> Vec<CpuDescriptor> {
-        vec![CpuDescriptor::new(CPU, "ARM7TDMI", SPACE)]
+        vec![
+            CpuDescriptor::new(CPU, "ARM7TDMI", SPACE).decode_modes(vec![
+                DecodeMode::new("arm", "ARM"),
+                DecodeMode::new("thumb", "Thumb"),
+            ]),
+        ]
     }
 
     fn pc(&self, cpu: &CpuId) -> u32 {
@@ -184,12 +283,143 @@ impl debugger_model::DebugCore for GbaDebug {
         }
 
         self.core.cpu.set_pc(addr);
-        self.stopped_at = None;
-        self.hits.clear();
+        self.clear_history();
     }
 
     fn cpu_view(&self, cpu: &CpuId) -> CpuView {
         self.arm(cpu).map(cpu::view).unwrap_or_default()
+    }
+
+    fn call_stack(&self, cpu: &CpuId) -> CallStackView {
+        if self.arm(cpu).is_none() {
+            return CallStackView::default();
+        }
+        self.stack.view(self.execution_address())
+    }
+
+    fn write_register(&mut self, cpu: &CpuId, name: &str, value: u32) -> bool {
+        if self.arm(cpu).is_none() || !cpu::write(&mut self.core.cpu, name, value) {
+            return false;
+        }
+        self.clear_history();
+        true
+    }
+
+    fn track_accesses(&mut self, tracking: AccessTracking) {
+        self.accesses.set_tracking(tracking);
+    }
+
+    fn patch_memory(&mut self, region: &str, addr: u32, bytes: &[u8]) -> usize {
+        let Some(len) = self.clamp_len(region, addr, bytes.len()) else {
+            return 0;
+        };
+        let written = self.core.patch(addr, &bytes[..len]);
+        if written > 0 {
+            let pc = self.execution_address();
+            self.core.cpu.set_pc(pc);
+            self.clear_history();
+        }
+        written
+    }
+
+    fn read_bus(
+        &mut self,
+        region: &str,
+        addr: u32,
+        width: AccessWidth,
+    ) -> Result<u32, DebugMemoryError> {
+        self.check_transaction(region, addr, width)?;
+
+        let mut bus = self.core.bus();
+        Ok(match width {
+            AccessWidth::Byte => u32::from(bus.read8(addr)),
+            AccessWidth::Halfword => u32::from(bus.read16(addr)),
+            AccessWidth::Word => bus.read32(addr),
+        })
+    }
+
+    fn write_bus(
+        &mut self,
+        region: &str,
+        addr: u32,
+        width: AccessWidth,
+        value: u32,
+    ) -> Result<(), DebugMemoryError> {
+        self.check_transaction(region, addr, width)?;
+
+        let mut bus = self.core.bus();
+        match width {
+            AccessWidth::Byte => bus.write8(addr, value as u8),
+            AccessWidth::Halfword => bus.write16(addr, value as u16),
+            AccessWidth::Word => bus.write32(addr, value),
+        }
+
+        Ok(())
+    }
+
+    fn video(&self) -> Option<&dyn VideoDebug> {
+        Some(self)
+    }
+
+    fn structured_view(&self, id: &str, _selection: Option<usize>) -> StructuredView {
+        if id == debugger_model::panel::PPU {
+            video::ppu_view(&self.core)
+        } else {
+            StructuredView::default()
+        }
+    }
+
+    fn step_targets(&self) -> Vec<StepTarget> {
+        [
+            EventKind::HBlankStart,
+            EventKind::VBlankStart,
+            EventKind::ScanlineStart,
+        ]
+        .into_iter()
+        .map(|kind| StepTarget::new(kind.debug_id(), kind.label()))
+        .collect()
+    }
+
+    fn run_until(&mut self, target: &str) -> RunOutcome {
+        let Some((kind, ..)) = VIDEO_EVENTS
+            .into_iter()
+            .find(|(kind, ..)| kind.debug_id() == target)
+        else {
+            return RunOutcome::Unsupported;
+        };
+
+        self.stopped_at = None;
+        self.begin_run(false);
+        for _ in 0..RUN_BUDGET {
+            let tick = self.tick();
+            if tick.events & kind.bit() != 0 {
+                return RunOutcome::TargetReached;
+            }
+            if !self.event_hits.is_empty() {
+                return RunOutcome::Event;
+            }
+        }
+
+        RunOutcome::BudgetExhausted
+    }
+
+    fn events(&self) -> Vec<EventDescriptor> {
+        VIDEO_EVENTS
+            .into_iter()
+            .map(|(kind, ..)| EventDescriptor::new(kind.debug_id(), kind.label()))
+            .collect()
+    }
+
+    fn watch_events(&mut self, ids: &[Arc<str>]) {
+        self.watched_events = VIDEO_EVENTS
+            .into_iter()
+            .filter(|(kind, ..)| ids.iter().any(|id| id.as_ref() == kind.debug_id()))
+            .fold(0, |mask, (kind, ..)| mask | kind.bit());
+        self.event_hits.clear();
+    }
+
+    fn take_events(&mut self) -> Vec<EventHit> {
+        std::mem::take(&mut self.event_hits)
     }
 
     fn disassemble(&self, cpu: &CpuId, request: &DisassemblyRequest) -> Vec<DisasmLine> {
@@ -200,12 +430,16 @@ impl debugger_model::DebugCore for GbaDebug {
 
     fn debug_step(&mut self) {
         self.stopped_at = None;
-        self.hits.clear();
+        self.begin_run(false);
         while !self.tick().executed {}
     }
 
     fn debug_run_frame(&mut self, breakpoints: &[BreakpointMark]) -> RunOutcome {
-        self.hits.clear();
+        self.begin_run(
+            breakpoints
+                .iter()
+                .any(|mark| mark.kind != BreakpointKind::Execute),
+        );
 
         let cpu = CpuId::from(CPU);
         let execute: Vec<RangeInclusive<u32>> = breakpoints
@@ -231,6 +465,13 @@ impl debugger_model::DebugCore for GbaDebug {
 
             let tick = self.tick();
             skip_stop &= !tick.executed;
+            self.hits.extend(self.accesses.matching_hits(breakpoints));
+            if !self.hits.is_empty() {
+                return RunOutcome::Breakpoint;
+            }
+            if !self.event_hits.is_empty() {
+                return RunOutcome::Event;
+            }
             if tick.frame {
                 return RunOutcome::FrameComplete;
             }
@@ -271,12 +512,16 @@ impl debugger_model::DebugCore for GbaDebug {
             )
             .expect("shipped panel id");
 
+        video::extend_manifest(&mut manifest);
         manifest
     }
 
     fn memory_regions(&self) -> Vec<MemoryRegion> {
         self.regions()
-            .map(|(id, name, base, size)| MemoryRegion::new(id, name, base, size))
+            .map(|(id, name, base, size)| {
+                MemoryRegion::new(id, name, base, size)
+                    .watch_sources(vec![AccessSource::Cpu(CpuId::from(CPU))])
+            })
             .collect()
     }
 
@@ -311,13 +556,13 @@ impl debugger_model::DebugCore for GbaDebug {
                 } else if marks(pipeline, address) {
                     Highlight::Pipeline
                 } else {
-                    Highlight::None
+                    self.accesses.highlight(address)
                 }
             })
             .collect()
     }
 
     fn latest_access(&self) -> Option<(Arc<str>, u32)> {
-        None
+        self.accesses.latest.map(|addr| (SPACE.into(), addr))
     }
 }

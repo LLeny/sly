@@ -4372,6 +4372,8 @@ dependencies = [
  "core-model",
  "crc32fast",
  "debugger-model",
+ "postcard",
+ "serde",
  "sha1",
  "thiserror 2.0.18",
  "tracing",

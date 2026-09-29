@@ -7,6 +7,7 @@ mod input;
 pub mod mmio;
 pub mod ppu;
 mod scheduler;
+mod state;
 
 #[cfg(feature = "debug")]
 pub mod debug;
@@ -30,6 +31,13 @@ const CLOCK_HZ: f64 = 16_777_216.0;
 
 const SCREEN_WIDTH: u32 = 240;
 const SCREEN_HEIGHT: u32 = 160;
+
+const VIDEO_EVENTS: [(EventKind, u64, u64); 4] = [
+    (EventKind::HBlankStart, HBLANK_START_CYCLES, SCANLINE_CYCLES),
+    (EventKind::ScanlineStart, SCANLINE_CYCLES, SCANLINE_CYCLES),
+    (EventKind::VBlankStart, VBLANK_START_CYCLES, FRAME_CYCLES),
+    (EventKind::VBlankEnd, VBLANK_END_CYCLES, FRAME_CYCLES),
+];
 
 pub struct Gba {
     cpu: Cpu,
@@ -96,31 +104,33 @@ impl Gba {
     }
 
     fn schedule_video_events(&mut self) {
-        let events = [
-            (HBLANK_START_CYCLES, SCANLINE_CYCLES, EventKind::HBlankStart),
-            (SCANLINE_CYCLES, SCANLINE_CYCLES, EventKind::ScanlineStart),
-            (VBLANK_START_CYCLES, FRAME_CYCLES, EventKind::VBlankStart),
-            (VBLANK_END_CYCLES, FRAME_CYCLES, EventKind::VBlankEnd),
-        ];
-
-        for (deadline, period, kind) in events {
+        for (kind, deadline, period) in VIDEO_EVENTS {
             self.scheduler.schedule_periodic_at(deadline, period, kind);
         }
     }
 
     fn step_cpu(&mut self) {
-        let (cpu, mut bus) = self.split();
-        cpu.step(&mut bus);
+        self.step_cpu_with(|cpu, mut bus| cpu.step(&mut bus));
+    }
+
+    fn step_cpu_with(&mut self, step: impl FnOnce(&mut Cpu, CpuBus<'_>)) {
+        let (cpu, bus) = self.split();
+        step(cpu, bus);
 
         // TODO: account for CPU internal cycles and bus wait states.
         self.scheduler.advance_by(1);
     }
 
     fn dispatch_due(&mut self) -> bool {
+        self.dispatch_due_with(|_, _| {})
+    }
+
+    fn dispatch_due_with(&mut self, mut on_event: impl FnMut(&Self, EventKind)) -> bool {
         let mut vblank = false;
         while let Some(event) = self.scheduler.pop_due() {
             vblank |= event.kind == EventKind::VBlankStart;
             self.dispatch_event(event);
+            on_event(self, event.kind);
         }
 
         vblank
@@ -133,6 +143,30 @@ impl Gba {
             EventKind::VBlankStart => self.ppu.start_vblank(),
             EventKind::VBlankEnd => self.ppu.end_vblank(),
         }
+    }
+
+    #[cfg(feature = "debug")]
+    fn patch(&mut self, address: u32, bytes: &[u8]) -> usize {
+        use crate::gamepak::{SRAM_BASE, SRAM_END};
+        use crate::mmio::{EWRAM_BASE, EWRAM_END, IWRAM_BASE, IWRAM_END};
+
+        let (memory, offset): (&mut [u8], usize) = match address {
+            EWRAM_BASE..=EWRAM_END => (&mut self.mmio.ewram, (address - EWRAM_BASE) as usize),
+            IWRAM_BASE..=IWRAM_END => (&mut self.mmio.iwram, (address - IWRAM_BASE) as usize),
+            0x0500_0000..=0x05FF_FFFF => (&mut self.ppu.palette, (address & 0x3FF) as usize),
+            0x0600_0000..=0x06FF_FFFF => (&mut self.ppu.vram, ppu::vram_offset(address)),
+            0x0700_0000..=0x07FF_FFFF => (&mut self.ppu.oam, (address & 0x3FF) as usize),
+            SRAM_BASE..=SRAM_END => (&mut self.gamepak.sram, (address - SRAM_BASE) as usize),
+            _ => return 0,
+        };
+
+        let len = bytes.len().min(memory.len() - offset);
+        memory[offset..offset + len].copy_from_slice(&bytes[..len]);
+        if len > 0 {
+            self.ppu.revisions.bump();
+        }
+
+        len
     }
 
     fn split(&mut self) -> (&mut Cpu, CpuBus<'_>) {
@@ -157,11 +191,14 @@ impl core_model::Core for Gba {
     }
 
     fn reset(&mut self) {
-        self.cpu = Cpu::new();
-        self.ppu = Ppu::new();
+        self.ppu.reset();
         self.input = Input::new();
         self.scheduler = Scheduler::new();
 
+        self.mmio.ewram.fill(0);
+        self.mmio.iwram.fill(0);
+        self.mmio.io.fill(0);
+        self.skip_bios();
         self.schedule_video_events();
     }
 
@@ -196,6 +233,26 @@ impl core_model::Core for Gba {
 
     fn frame_interval(&self) -> Option<Duration> {
         Some(Duration::from_secs_f64(FRAME_CYCLES as f64 / CLOCK_HZ))
+    }
+
+    fn save_state(&self) -> Result<Vec<u8>, core_model::StateError> {
+        self.encode_state()
+    }
+
+    fn load_state(&mut self, bytes: &[u8]) -> Result<(), core_model::StateError> {
+        self.restore_state(bytes)
+    }
+
+    fn save_ram(&self) -> Option<&[u8]> {
+        Some(&self.gamepak.sram)
+    }
+
+    fn load_save_ram(&mut self, bytes: &[u8]) -> bool {
+        if bytes.len() != self.gamepak.sram.len() {
+            return false;
+        }
+        self.gamepak.sram.copy_from_slice(bytes);
+        true
     }
 
     fn cartridge_info(&self) -> Option<core_model::CartridgeInfo> {
