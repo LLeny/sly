@@ -3,7 +3,7 @@ pub(crate) mod regs;
 
 use crate::bus::Width;
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
-use regs::{DisplayStatus, VerticalCount, DisplayControl};
+use regs::{DisplayControl, DisplayStatus, VerticalCount};
 
 const SCANLINES_PER_FRAME: u8 = 228;
 const VBLANK_START_SCANLINE: u8 = 160;
@@ -33,7 +33,7 @@ impl Revisions {
 pub struct Ppu {
     #[cfg(feature = "debug")]
     pub(crate) revisions: Revisions,
-    
+
     pub(crate) dispstat: DisplayStatus,
     pub(crate) dispctrl: DisplayControl,
     pub(crate) vcount: VerticalCount,

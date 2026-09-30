@@ -391,7 +391,8 @@ impl<B: Bus> arm::Ops for Interpreter<'_, B> {
         }
     }
 
-    fn on_invalid(&mut self, _inst: arm::Instruction) {
+    fn on_invalid(&mut self, inst: arm::Instruction) {
+        tracing::error!(pc = %format_args!("{:#010x}", self.cpu.pc()), instr = %format_args!("{:#010x}", inst.0), "SOMETHING FUCKY HAPPENED");
         let return_address = self.cpu.pc().wrapping_sub(4);
         self.cpu
             .enter_exception(Mode::Undefined, 0x04, return_address);
@@ -736,7 +737,8 @@ impl<B: Bus> thumb::Ops for Interpreter<'_, B> {
             .enter_exception(Mode::Supervisor, 0x08, return_address);
     }
 
-    fn on_invalid(&mut self, _inst: thumb::Instruction) {
+    fn on_invalid(&mut self, inst: thumb::Instruction) {
+        tracing::error!(pc = %format_args!("{:#010x}", self.cpu.pc()), instr = %format_args!("{:#010x}", inst.0), "SOMETHING FUCKY HAPPENED");
         let return_address = self.cpu.pc().wrapping_sub(2);
         self.cpu
             .enter_exception(Mode::Undefined, 0x04, return_address);
