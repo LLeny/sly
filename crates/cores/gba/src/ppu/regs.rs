@@ -32,6 +32,77 @@ impl DisplayStatus {
         Self::WRITE_MASK | Self::VBLANK_MASK | Self::HBLANK_MASK | Self::VCOUNTER_MASK;
 }
 
+#[chapa::bitenum]
+pub enum BackgroundMode {
+    Mode0 = 0,
+    Mode1 = 1,
+    Mode2 = 2,
+    Mode3 = 3,
+    Mode4 = 4,
+    Mode5 = 5,
+    #[fallback]
+    Unknown = 6,
+}
+
+#[chapa::bitenum]
+pub enum DisplayFrame {
+    #[fallback]
+    Frame0 = 0,
+    Frame1 = 1,
+}
+
+#[chapa::bitenum]
+pub enum SpriteMapping {
+    #[fallback]
+    OneDimensional = 0,
+    TwoDimensional = 1,
+}
+
+#[chapa::bitfield(u16, order = lsb0)]
+pub struct DisplayControl {
+    #[bits(0..=2)]
+    pub mode: BackgroundMode,
+
+    #[bits(3)]
+    pub cgb_mode: bool,
+
+    #[bits(4)]
+    pub frame_select: DisplayFrame,
+
+    #[bits(5)]
+    pub hblank_interval_free: bool,
+
+    #[bits(6)]
+    pub sprite_mapping: SpriteMapping,
+
+    #[bits(7)]
+    pub forced_blank: bool,
+
+    #[bits(8)]
+    pub enable_bg0: bool,
+
+    #[bits(9)]
+    pub enable_bg1: bool,
+
+    #[bits(10)]
+    pub enable_bg2: bool,
+
+    #[bits(11)]
+    pub enable_bg3: bool,
+
+    #[bits(12)]
+    pub enable_obj: bool,
+
+    #[bits(13)]
+    pub enable_window0: bool,
+
+    #[bits(14)]
+    pub enable_window1: bool,
+
+    #[bits(15)]
+    pub enable_obj_window: bool,
+}
+
 #[chapa::bitfield(u16, order = lsb0)]
 pub struct VerticalCount {
     #[bits(0..=7)]

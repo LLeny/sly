@@ -1,4 +1,4 @@
-use super::regs::{DisplayStatus, VerticalCount};
+use super::regs::*;
 use crate::mmio::{Handler, MmioMap, Register};
 
 const DISPSTAT: Register<DisplayStatus> = Register::new(
@@ -15,6 +15,14 @@ const DISPSTAT: Register<DisplayStatus> = Register::new(
     *status = DisplayStatus::from_raw((status.raw() & !mask) | (value.raw() & mask));
     status.set_vcounter(status.vcount_compare() == bus.ppu.vcount.scanline());
 });
+
+const DISPCTL: Register<DisplayControl> = Register::new(
+    0x0400_0000,
+    "DISPCTL",
+    "PPU",
+    |bus| bus.ppu.dispctrl,
+    |bus| &mut bus.ppu.dispctrl,
+);
 
 const VCOUNT: Register<VerticalCount> = Register::new(
     0x0400_0006,
@@ -45,6 +53,7 @@ const OAM: Handler = Handler {
 };
 
 pub(crate) fn register(map: &mut MmioMap) {
+    map.register(&DISPCTL);
     map.register(&DISPSTAT);
     map.register(&VCOUNT);
     map.map(0x0500_0000..=0x05FF_FFFF, PALETTE);

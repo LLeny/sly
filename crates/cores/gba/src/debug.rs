@@ -43,6 +43,7 @@ const REGIONS: [(&str, &str, u32, u32); 10] = [
 pub struct GbaDebug {
     core: Gba,
     cartridge: CartridgeView,
+    label: Arc<str>,
     stopped_at: Option<u32>,
     hits: Vec<HookHit>,
     accesses: access::Capture,
@@ -59,6 +60,7 @@ struct Tick {
 
 impl GbaDebug {
     pub fn new(cartridge: Cartridge, name: String, cover: Option<Arc<str>>) -> Self {
+        let title = cartridge.title().into();
         let details = StructuredView {
             sections: vec![Section {
                 rows: vec![
@@ -67,7 +69,6 @@ impl GbaDebug {
                         "ROM size",
                         core_model::format_byte_size(cartridge.rom().len()),
                     )),
-                    Row::Field(Field::new("Header title", cartridge.title())),
                 ],
                 ..Default::default()
             }],
@@ -77,10 +78,11 @@ impl GbaDebug {
         Self {
             core: Gba::new(cartridge),
             cartridge: CartridgeView {
-                title: name.into(),
+                title,
                 details,
                 cover,
             },
+            label: name.into(),
             stopped_at: None,
             hits: Vec::new(),
             accesses: access::Capture::default(),
@@ -238,7 +240,7 @@ impl core_model::Core for GbaDebug {
     fn session_info(&self) -> core_model::SessionInfo {
         core_model::SessionInfo {
             system: System::Gba.name().into(),
-            session: self.cartridge.title.clone(),
+            session: self.label.clone(),
             segments: Vec::new(),
         }
     }
