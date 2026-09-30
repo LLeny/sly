@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::cpu::Bus;
 use crate::gamepak::GamePak;
 use crate::input::Input;
-use crate::mmio::{Mmio, MmioMap, Target, mask};
+use crate::mmio::{Mapping, Mmio, MmioMap, Target, mask};
 use crate::ppu::Ppu;
 
 pub struct CpuBus<'a> {
@@ -30,12 +30,32 @@ impl CpuBus<'_> {
         }
     }
 
+    #[inline]
     fn read(&mut self, address: u32, width: Width) -> u32 {
-        let mut value = 0;
-        let mut offset = 0;
+        let mapping = self.mmio.map.mapping(address);
 
-        while offset < width.bytes() {
-            let lane = Lane::new(&self.mmio.map, address, width, offset);
+        match mapping.device_covering(address, width) {
+            Some(handler) => (handler.read)(self, address, width),
+            None => self.read_lanes(mapping, address, width),
+        }
+    }
+
+    #[inline]
+    fn write(&mut self, address: u32, width: Width, value: u32) {
+        let mapping = self.mmio.map.mapping(address);
+
+        match mapping.device_covering(address, width) {
+            Some(handler) => (handler.write)(self, address, width, value),
+            None => self.write_lanes(mapping, address, width, value),
+        }
+    }
+
+    #[inline(never)]
+    fn read_lanes(&mut self, mapping: Mapping, address: u32, width: Width) -> u32 {
+        let mut value = 0;
+        let mut next = Some(Lane::new(mapping, address, width, 0));
+
+        while let Some(lane) = next {
             let part = match lane.target {
                 Target::Device(handler) => (handler.read)(self, lane.address, lane.width()),
                 Target::Register(register) => {
@@ -44,18 +64,19 @@ impl CpuBus<'_> {
             };
 
             value |= lane.place(part);
-            offset += lane.bytes;
+            next = lane.next(&self.mmio.map, width);
         }
 
         value
     }
 
-    fn write(&mut self, address: u32, width: Width, value: u32) {
-        let mut offset = 0;
+    #[inline(never)]
+    fn write_lanes(&mut self, mapping: Mapping, address: u32, width: Width, value: u32) {
+        let mut next = Some(Lane::new(mapping, address, width, 0));
 
-        while offset < width.bytes() {
-            let lane = Lane::new(&self.mmio.map, address, width, offset);
+        while let Some(lane) = next {
             let part = lane.extract(value);
+
             match lane.target {
                 Target::Device(handler) => (handler.write)(self, lane.address, lane.width(), part),
                 Target::Register(register) => {
@@ -63,7 +84,7 @@ impl CpuBus<'_> {
                 }
             }
 
-            offset += lane.bytes;
+            next = lane.next(&self.mmio.map, width);
         }
     }
 }
@@ -81,19 +102,29 @@ impl BusView<'_> {
         self.peek(address, Width::Word)
     }
 
+    #[inline]
     fn peek(&self, address: u32, width: Width) -> u32 {
-        let mut value = 0;
-        let mut offset = 0;
+        let mapping = self.mmio.map.mapping(address);
 
-        while offset < width.bytes() {
-            let lane = Lane::new(&self.mmio.map, address, width, offset);
+        match mapping.device_covering(address, width) {
+            Some(handler) => (handler.peek)(self, address, width),
+            None => self.peek_lanes(mapping, address, width),
+        }
+    }
+
+    #[inline(never)]
+    fn peek_lanes(&self, mapping: Mapping, address: u32, width: Width) -> u32 {
+        let mut value = 0;
+        let mut next = Some(Lane::new(mapping, address, width, 0));
+
+        while let Some(lane) = next {
             let part = match lane.target {
                 Target::Device(handler) => (handler.peek)(self, lane.address, lane.width()),
                 Target::Register(register) => register.peek(self) >> lane.shift,
             };
 
             value |= lane.place(part);
-            offset += lane.bytes;
+            next = lane.next(&self.mmio.map, width);
         }
 
         value
@@ -143,13 +174,11 @@ struct Lane {
 }
 
 impl Lane {
-    fn new(map: &MmioMap, address: u32, width: Width, offset: u32) -> Self {
-        let address = address.wrapping_add(offset);
-        let mapping = map.mapping(address);
+    fn new(mapping: Mapping, address: u32, width: Width, offset: u32) -> Self {
         let bytes = (mapping.end - address).min(width.bytes() - offset - 1) + 1;
-        let bytes = match mapping.target {
-            Target::Device(_) => Width::fitting(bytes).bytes(),
-            Target::Register(_) => bytes,
+        let (bytes, shift) = match mapping.target {
+            Target::Device(_) => (Width::fitting(bytes).bytes(), 0),
+            Target::Register(_) => (bytes, (address - mapping.start) * 8),
         };
 
         Self {
@@ -157,8 +186,17 @@ impl Lane {
             address,
             offset,
             bytes,
-            shift: (address - mapping.start) * 8,
+            shift,
         }
+    }
+
+    fn next(&self, map: &MmioMap, width: Width) -> Option<Self> {
+        let offset = self.offset + self.bytes;
+
+        (offset < width.bytes()).then(|| {
+            let address = self.address.wrapping_add(self.bytes);
+            Self::new(map.mapping(address), address, width, offset)
+        })
     }
 
     fn width(&self) -> Width {
@@ -210,9 +248,12 @@ impl Width {
 
 #[inline(always)]
 pub(crate) fn load(memory: &[u8]) -> u32 {
-    let mut bytes = [0; 4];
-    bytes[..memory.len()].copy_from_slice(memory);
-    u32::from_le_bytes(bytes)
+    match *memory {
+        [byte] => u32::from(byte),
+        [lo, hi] => u32::from_le_bytes([lo, hi, 0, 0]),
+        [a, b, c, d] => u32::from_le_bytes([a, b, c, d]),
+        _ => unreachable!("bus loads are 1, 2 or 4 bytes"),
+    }
 }
 
 #[inline(always)]

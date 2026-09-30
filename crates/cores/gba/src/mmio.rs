@@ -22,6 +22,9 @@ pub(crate) const IWRAM_BASE: u32 = 0x0300_0000;
 pub(crate) const IWRAM_SIZE: u32 = 0x8000;
 pub(crate) const IWRAM_END: u32 = IWRAM_BASE + IWRAM_SIZE - 1;
 
+const REGION_SHIFT: u32 = 24;
+const REGION_COUNT: usize = 1 << (32 - REGION_SHIFT);
+
 // https://github.com/coolbho3k/emibios
 const BIOS: &[u8] = include_bytes!("../../../../bins/gba/emibios.bin");
 
@@ -108,9 +111,19 @@ pub(crate) struct Mapping {
     pub(crate) target: Target,
 }
 
+impl Mapping {
+    pub(crate) fn device_covering(&self, address: u32, width: Width) -> Option<Handler> {
+        match self.target {
+            Target::Device(handler) if width.bytes() - 1 <= self.end - address => Some(handler),
+            _ => None,
+        }
+    }
+}
+
 pub(crate) struct MmioMap {
     mappings: Vec<Mapping>,
     fallback: Handler,
+    regions: [Option<Mapping>; REGION_COUNT],
 }
 
 impl MmioMap {
@@ -118,6 +131,7 @@ impl MmioMap {
         Self {
             mappings: Vec::new(),
             fallback,
+            regions: [None; REGION_COUNT],
         }
     }
 
@@ -175,9 +189,25 @@ impl MmioMap {
         );
 
         self.mappings.insert(index, Mapping { start, end, target });
+        self.rebuild_regions();
+    }
+
+    fn rebuild_regions(&mut self) {
+        self.regions = std::array::from_fn(|region| {
+            let start = (region as u32) << REGION_SHIFT;
+            let end = start | mask(REGION_SHIFT as u8);
+            let mapping = self.mapping_slow(start);
+
+            (mapping.end >= end).then_some(mapping)
+        });
     }
 
     pub(crate) fn mapping(&self, address: u32) -> Mapping {
+        self.regions[(address >> REGION_SHIFT) as usize]
+            .unwrap_or_else(|| self.mapping_slow(address))
+    }
+
+    fn mapping_slow(&self, address: u32) -> Mapping {
         let index = self
             .mappings
             .partition_point(|mapping| mapping.start <= address);
