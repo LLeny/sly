@@ -1,0 +1,33 @@
+[package]
+name = "modern-launcher"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+artwork = { path = "../../crates/artwork", features = ["fetch"] }
+audio = { path = "../../crates/audio" }
+bytemuck = { version = "1.25.2", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive"] }
+core-loader = { path = "../../crates/core-loader" }
+core-model = { path = "../../crates/models/core" }
+game-database = { path = "../../crates/game-database" }
+glyphon = "=0.12.0"
+gilrs = "0.11.2"
+glam = { version = "0.33.12", features = ["bytemuck"] }
+gltf = { version = "1.4.1", default-features = false, features = ["utils", "names", "extras"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+hound = "3.5.1"
+lewton = "0.10.2"
+pollster = "1.0.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+storage = { path = "../../crates/storage" }
+thiserror = "2.0.21"
+toml = "1.1.6"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+unicode-normalization = "0.1.25"
+walkdir = "2.5.0"
+wgpu = "=30.0.1"
+winit = "=0.30.13"

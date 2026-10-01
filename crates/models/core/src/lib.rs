@@ -120,7 +120,7 @@ impl std::fmt::Display for TvSystem {
 }
 
 /// The market a game was released for, as declared by its ROM/disc metadata.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Region {
     Japan,
     NorthAmerica,
