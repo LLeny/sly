@@ -29,7 +29,7 @@ gpui = { git = "https://github.com/ioncodes/zed", rev = "1f0b390b2024a7235a166f9
 gpui_platform = { git = "https://github.com/ioncodes/zed", rev = "1f0b390b2024a7235a166f9f3c6f1c3775b7e045" }
 gpui_web = { git = "https://github.com/ioncodes/zed", rev = "1f0b390b2024a7235a166f9f3c6f1c3775b7e045" }
 reqwest_client = { git = "https://github.com/ioncodes/zed", rev = "1f0b390b2024a7235a166f9f3c6f1c3775b7e045" }
-tracing = { version = "0.1.44", features = ["release_max_level_off"] }
+tracing = { version = "0.1.44", features = ["release_max_level_error"] }
 tracing-subscriber = { version = "0.3.23", features = ["registry", "fmt", "ansi", "std", "env-filter"] }
 
 [patch.crates-io]

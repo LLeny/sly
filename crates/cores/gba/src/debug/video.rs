@@ -1,7 +1,7 @@
 use debugger_model::{
-    BitmapImage, BitmapSource, Field, MemoryAddress, PaletteColor, PaletteView, Row, Section,
-    StructuredView, VideoDebug, VideoResource, VideoResourceId, VideoResourceKind, VideoRevision,
-    panel,
+    BitmapImage, BitmapSource, Field, FlagView, MemoryAddress, PaletteColor, PaletteView, Row,
+    Section, StructuredView, VideoDebug, VideoResource, VideoResourceId, VideoResourceKind,
+    VideoRevision, panel,
 };
 use workspace_model::{
     ComponentManifest, DockLocation, PanelDescriptor, PanelKind, RefreshPolicy,
@@ -9,17 +9,16 @@ use workspace_model::{
 };
 
 use super::GbaDebug;
+use crate::ppu::regs::DisplayFrame;
 use crate::ppu::rgba;
 use crate::{Gba, SCREEN_HEIGHT, SCREEN_WIDTH};
 
 const PALETTE: &str = "gba.palette";
 
-const MODE4_FRAMES: [u32; 2] = [0x0000, 0xA000];
-
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum BgLayer {
     Stub,
-    Mode4(usize),
+    Mode4(DisplayFrame),
 }
 
 const BG_LAYERS: [(&str, &str, Option<&str>, BgLayer); 3] = [
@@ -27,13 +26,13 @@ const BG_LAYERS: [(&str, &str, Option<&str>, BgLayer); 3] = [
         "gba.bg.mode4.frame0",
         "Mode 4",
         Some("Frame 0"),
-        BgLayer::Mode4(0),
+        BgLayer::Mode4(DisplayFrame::Frame0),
     ),
     (
         "gba.bg.mode4.frame1",
         "Mode 4",
         Some("Frame 1"),
-        BgLayer::Mode4(1),
+        BgLayer::Mode4(DisplayFrame::Frame1),
     ),
     ("gba.bg.mode5", "Mode 5 (stub)", None, BgLayer::Stub),
 ];
@@ -108,10 +107,9 @@ impl VideoDebug for GbaDebug {
     }
 }
 
-fn mode4(core: &Gba, frame: usize) -> BitmapImage {
-    let base = MODE4_FRAMES[frame] as usize;
-    let len = (SCREEN_WIDTH * SCREEN_HEIGHT) as usize;
-    let bitmap = &core.ppu.vram[base..base + len];
+fn mode4(core: &Gba, frame: DisplayFrame) -> BitmapImage {
+    let base = frame.vram_offset();
+    let bitmap = &core.ppu.vram[base..base + core.ppu.frame.len()];
 
     BitmapImage {
         width: SCREEN_WIDTH,
@@ -133,18 +131,47 @@ fn mode4(core: &Gba, frame: usize) -> BitmapImage {
 }
 
 pub(super) fn ppu_view(core: &Gba) -> StructuredView {
+    let control = core.ppu.dispctrl;
     let status = core.ppu.dispstat;
+    let vcount = core.ppu.vcount;
     let field = |label: &str, value: String| Row::Field(Field::new(label, value));
 
     StructuredView {
-        sections: vec![Section {
-            rows: vec![
-                field("Scanline", core.ppu.vcount.scanline().to_string()),
-                field("VCOUNT compare", status.vcount_compare().to_string()),
-                field("VCOUNT IRQ", status.vcounter_irq().to_string()),
-            ],
-            ..Default::default()
-        }],
+        sections: vec![
+            Section {
+                title: Some("Display".into()),
+                rows: vec![
+                    field("Background Mode", control.mode().to_string()),
+                    field("Frame Select", control.frame_select().to_string()),
+                ],
+                ..Default::default()
+            },
+            Section {
+                title: Some("Enabled layers".into()),
+                rows: vec![Row::Flags {
+                    flags: vec![
+                        FlagView::new("BG0", control.enable_bg0()),
+                        FlagView::new("BG1", control.enable_bg1()),
+                        FlagView::new("BG2", control.enable_bg2()),
+                        FlagView::new("BG3", control.enable_bg3()),
+                        FlagView::new("OBJ", control.enable_obj()),
+                        FlagView::new("WIN0", control.enable_window0()),
+                        FlagView::new("WIN1", control.enable_window1()),
+                    ],
+                    note: None,
+                }],
+                ..Default::default()
+            },
+            Section {
+                title: Some("Status".into()),
+                rows: vec![
+                    field("Scanline", vcount.scanline().to_string()),
+                    field("VCOUNT Compare", status.vcount_compare().to_string()),
+                    field("VCOUNT IRQ", status.vcounter_irq().to_string()),
+                ],
+                ..Default::default()
+            },
+        ],
         ..Default::default()
     }
 }
@@ -170,7 +197,7 @@ pub(super) fn extend_manifest(manifest: &mut ComponentManifest) {
         ),
         (
             panel::BITMAP,
-            "BG modes",
+            "Background Layers",
             PanelKind::Bitmap,
             DockLocation::Center,
         ),

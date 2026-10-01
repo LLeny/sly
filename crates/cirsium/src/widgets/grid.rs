@@ -451,7 +451,7 @@ pub(super) fn picker(
         };
     }
 
-    let mut row = div().flex().items_center().gap_2().child(groups);
+    let mut row = div().flex().items_center().gap_2();
     if let Some(group) = current.filter(|&group| members(group).count() > 1) {
         let mut variants = segmented(format!("{id}-variant").into(), selected);
         for index in members(group) {
@@ -466,7 +466,7 @@ pub(super) fn picker(
         row = row.child(variants);
     }
 
-    row
+    row.child(groups)
 }
 
 fn measure(on_viewport: Option<ViewportCallback>) -> impl IntoElement {

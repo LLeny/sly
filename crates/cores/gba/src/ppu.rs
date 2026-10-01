@@ -81,21 +81,36 @@ impl Ppu {
         };
     }
 
-    pub(crate) fn start_hblank(&mut self) {
-        self.dispstat.set_hblank(true);
-    }
+    pub(crate) fn render_scanline(&mut self) {
+        let frame = self.dispctrl.frame_select();
+        let line = self.vcount.scanline() as usize;
+        let start = line * SCREEN_WIDTH as usize;
+        let end = start + SCREEN_WIDTH as usize;
 
-    pub(crate) fn start_vblank(&mut self) {
-        self.dispstat.set_vblank(true);
+        let base = frame.vram_offset();
+        let page = &self.vram[base + start..base + end];
 
-        for (i, &palette_index) in self.vram[0..=0x95FF].iter().enumerate() {
-            self.frame[i] = rgba(self.palette_color(palette_index.into()));
+        for (x, &index) in page.iter().enumerate() {
+            let pixel = self.palette_color(index.into());
+            self.frame[start + x] = rgba(pixel);
         }
     }
 
     pub(crate) fn palette_color(&self, index: usize) -> u16 {
         let offset = (index * 2) & 0x3FF;
         u16::from_le_bytes([self.palette[offset], self.palette[offset + 1]])
+    }
+
+    pub(crate) fn start_hblank(&mut self) {
+        self.dispstat.set_hblank(true);
+
+        if self.vcount.scanline() < SCREEN_HEIGHT as u8 {
+            self.render_scanline();
+        }
+    }
+
+    pub(crate) fn start_vblank(&mut self) {
+        self.dispstat.set_vblank(true);
     }
 
     pub(crate) fn end_vblank(&mut self) {

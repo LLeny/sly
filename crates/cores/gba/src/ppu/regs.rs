@@ -44,11 +44,45 @@ pub enum BackgroundMode {
     Unknown = 6,
 }
 
+impl std::fmt::Display for BackgroundMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            BackgroundMode::Mode0 => "Mode 0",
+            BackgroundMode::Mode1 => "Mode 1",
+            BackgroundMode::Mode2 => "Mode 2",
+            BackgroundMode::Mode3 => "Mode 3",
+            BackgroundMode::Mode4 => "Mode 4",
+            BackgroundMode::Mode5 => "Mode 5",
+            BackgroundMode::Unknown => "Unknown",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[chapa::bitenum]
 pub enum DisplayFrame {
     #[fallback]
     Frame0 = 0,
     Frame1 = 1,
+}
+
+impl DisplayFrame {
+    pub(crate) const fn vram_offset(self) -> usize {
+        match self {
+            Self::Frame0 => 0,
+            Self::Frame1 => 0xA000,
+        }
+    }
+}
+
+impl std::fmt::Display for DisplayFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            DisplayFrame::Frame0 => "Frame 0",
+            DisplayFrame::Frame1 => "Frame 1",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 #[chapa::bitenum]
