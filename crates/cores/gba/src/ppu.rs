@@ -38,11 +38,11 @@ pub struct Ppu {
     pub(crate) dispctrl: DisplayControl,
     pub(crate) vcount: VerticalCount,
 
-    pub(crate) vram: [u8; 0x18000],
-    pub(crate) palette: [u8; 0x400],
-    pub(crate) oam: [u8; 0x400],
+    pub(crate) vram: Vec<u8>,
+    pub(crate) palette: Vec<u8>,
+    pub(crate) oam: Vec<u8>,
 
-    pub(crate) frame: [[u8; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize],
+    pub(crate) frame: Vec<[u8; 4]>,
 }
 
 impl Default for Ppu {
@@ -52,7 +52,7 @@ impl Default for Ppu {
 }
 
 impl Ppu {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             #[cfg(feature = "debug")]
             revisions: Revisions {
@@ -62,10 +62,10 @@ impl Ppu {
             dispstat: DisplayStatus::zeroed().with_vcounter(true),
             dispctrl: DisplayControl::zeroed(),
             vcount: VerticalCount::zeroed(),
-            vram: [0; 0x18000],
-            palette: [0; 0x400],
-            oam: [0; 0x400],
-            frame: [[255; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize],
+            vram: vec![0; 0x18000],
+            palette: vec![0; 0x400],
+            oam: vec![0; 0x400],
+            frame: vec![[255; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize],
         }
     }
 
@@ -168,7 +168,7 @@ impl Ppu {
         });
     }
 
-    pub fn frame(&self) -> &[[u8; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize] {
+    pub fn frame(&self) -> &[[u8; 4]] {
         &self.frame
     }
 }

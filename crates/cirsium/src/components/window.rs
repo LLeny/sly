@@ -22,11 +22,16 @@ pub fn traffic_light_position() -> Point<Pixels> {
 /// A titlebar region that swallows left-clicks so its contents don't start a
 /// window drag.
 fn drag_shield() -> Div {
-    div()
+    let shield = div()
         .flex()
         .items_center()
         .h_full()
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+
+    #[cfg(target_os = "windows")]
+    let shield = shield.occlude();
+
+    shield
 }
 
 pub fn title_bar(
@@ -111,7 +116,10 @@ pub fn title_bar(
         .child(center)
         .child(right);
 
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(target_os = "windows")]
+    let bar = bar.window_control_area(gpui::WindowControlArea::Drag);
+
+    #[cfg(all(not(target_os = "windows"), not(target_family = "wasm")))]
     let bar = bar.on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move());
 
     bar
