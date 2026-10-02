@@ -59,17 +59,17 @@ jobs:
           - platform: linux-x86_64
             runner: ubuntu-24.04
             debugger_archive: sly-debugger-linux-x86_64.tar.gz
-            launcher_archive: sly-launcher-linux-x86_64.tar.gz
+            launcher_archive: modern-launcher-linux-x86_64.tar.gz
             qt_archive: sly-desktop-qt-linux-x86_64.tar.gz
           - platform: macos-aarch64
             runner: macos-15
             debugger_archive: sly-debugger-macos-aarch64.tar.gz
-            launcher_archive: sly-launcher-macos-aarch64.tar.gz
+            launcher_archive: modern-launcher-macos-aarch64.tar.gz
             qt_archive: sly-desktop-qt-macos-aarch64.tar.gz
           - platform: windows-x86_64
             runner: windows-2022
             debugger_archive: sly-debugger-windows-x86_64.zip
-            launcher_archive: sly-launcher-windows-x86_64.zip
+            launcher_archive: modern-launcher-windows-x86_64.zip
             qt_archive: sly-desktop-qt-windows-x86_64.zip
     runs-on: ${{ matrix.runner }}
 
@@ -185,8 +185,8 @@ jobs:
       - name: Build debugger
         run: cargo build --release --locked -p debugger
 
-      - name: Build launcher
-        run: cargo build --release --locked -p sly-launcher
+      - name: Build modern launcher
+        run: cargo build --release --locked -p modern-launcher
 
       - name: Configure Qt client
         if: runner.os != 'Windows'
@@ -221,30 +221,30 @@ jobs:
         if: github.event_name == 'push' && runner.os != 'Windows'
         shell: bash
         run: |
-          mkdir -p stage/debugger stage/launcher dist
+          mkdir -p stage/debugger stage/modern-launcher dist
           install -m 755 target/release/debugger stage/debugger/sly-debugger
-          install -m 755 target/release/sly-launcher stage/launcher/sly-launcher
-          install -m 644 configs/sly-launcher.toml stage/launcher/sly-launcher.toml
-          install -m 644 LICENSE stage/debugger/LICENSE
-          install -m 644 LICENSE stage/launcher/LICENSE
-          install -m 644 LICENSE stage/desktop-qt/LICENSE
+          install -m 755 target/release/modern-launcher stage/modern-launcher/modern-launcher
+          for application in debugger modern-launcher desktop-qt; do
+            install -m 644 LICENSE "stage/$application/LICENSE"
+            cp -R licenses "stage/$application/"
+          done
           tar -czf "dist/${{ matrix.debugger_archive }}" -C stage/debugger .
-          tar -czf "dist/${{ matrix.launcher_archive }}" -C stage/launcher .
+          tar -czf "dist/${{ matrix.launcher_archive }}" -C stage/modern-launcher .
           tar -czf "dist/${{ matrix.qt_archive }}" -C stage/desktop-qt .
 
       - name: Package Windows applications
         if: github.event_name == 'push' && runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path stage/debugger, stage/launcher, dist | Out-Null
+          New-Item -ItemType Directory -Force -Path stage/debugger, stage/modern-launcher, dist | Out-Null
           Copy-Item target/release/debugger.exe stage/debugger/sly-debugger.exe
-          Copy-Item target/release/sly-launcher.exe stage/launcher/sly-launcher.exe
-          Copy-Item configs/sly-launcher.toml stage/launcher/sly-launcher.toml
-          Copy-Item LICENSE stage/debugger/LICENSE
-          Copy-Item LICENSE stage/launcher/LICENSE
-          Copy-Item LICENSE stage/desktop-qt/LICENSE
+          Copy-Item target/release/modern-launcher.exe stage/modern-launcher/modern-launcher.exe
+          foreach ($application in @("debugger", "modern-launcher", "desktop-qt")) {
+            Copy-Item LICENSE "stage/$application/LICENSE"
+            Copy-Item licenses "stage/$application/" -Recurse -Force
+          }
           Compress-Archive -Path stage/debugger/* -DestinationPath "dist/${{ matrix.debugger_archive }}"
-          Compress-Archive -Path stage/launcher/* -DestinationPath "dist/${{ matrix.launcher_archive }}"
+          Compress-Archive -Path stage/modern-launcher/* -DestinationPath "dist/${{ matrix.launcher_archive }}"
           Compress-Archive -Path stage/desktop-qt/* -DestinationPath "dist/${{ matrix.qt_archive }}"
 
       - name: Upload desktop archives
@@ -252,7 +252,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.platform }}
-          path: dist/sly-*
+          path: |
+            dist/sly-*
+            dist/modern-launcher-*
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
@@ -297,8 +299,10 @@ jobs:
         run: |
           mkdir -p dist/Payload
           cp -R build/ios/Build/Products/Release-iphoneos/Sly.app dist/Payload/
+          install -m 644 LICENSE dist/LICENSE
+          cp -R licenses dist/
           cd dist
-          zip -qry sly-ios-arm64-unsigned.ipa Payload
+          zip -qry sly-ios-arm64-unsigned.ipa Payload LICENSE licenses
 
       - name: Upload iOS archive
         if: github.event_name == 'push'

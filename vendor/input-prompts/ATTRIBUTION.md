@@ -1,4 +1,4 @@
-Keyboard and touch prompt icons (`keyboard_*.png`, `touch_*.png`, "Double" resolution variants) from "Input Prompts" (1.5) by Kenney:
+Keyboard and touch prompt icons from "Input Prompts" (1.5) by Kenney:
 
 - Source: https://kenney.nl/assets/input-prompts
 - Author: Kenney, https://kenney.nl

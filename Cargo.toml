@@ -1,27 +1,30 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/cores/gba",
+    "crates/cores/snes",
+
+    "crates/models/core",
+    "crates/models/debugger",
+    "crates/models/workspace",
+
+    "bindings/c",
+    "bindings/cxx",
+
+    "frontends/debugger",
+    "frontends/runner",
+    "frontends/modern-launcher",
+
     "crates/artwork",
     "crates/audio",
     "crates/cirsium",
     "crates/core-loader",
     "crates/game-database",
-    "crates/cores/gba",
-    "crates/cores/snes",
-    "bindings/c",
-    "bindings/cxx",
-    "crates/models/core",
-    "crates/models/debugger",
-    "crates/models/workspace",
     "crates/playground",
     "crates/screenshotter",
     "crates/scripting",
     "crates/storage",
     "crates/testrunner",
-
-    "frontends/debugger",
-    "frontends/runner",
-    "frontends/sly-launcher",
 ]
 
 [workspace.dependencies]

@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use core_model::{CartridgeInfo, RomIdentity};
+use core_model::{CartridgeInfo, Region, RomIdentity};
 use sha1::{Digest, Sha1};
 
 use crate::error::GbaError;
@@ -32,10 +32,23 @@ impl Cartridge {
         CartridgeInfo {
             system: core_model::System::Gba,
             title: self.title(),
-            region: None,
+            region: self.region(),
             tv_system: None,
             rom: self::identity(&self.rom),
             backup: None,
+        }
+    }
+
+    fn region(&self) -> Option<Region> {
+        match self.rom[0xAF] {
+            b'J' => Some(Region::Japan),
+            b'E' => Some(Region::NorthAmerica),
+            b'P' => Some(Region::Europe),
+            b'D' => Some(Region::Germany),
+            b'F' => Some(Region::France),
+            b'I' => Some(Region::Italy),
+            b'S' => Some(Region::Spain),
+            _ => None,
         }
     }
 }

@@ -22,6 +22,10 @@ impl FsStore {
         Self { root: root.into() }
     }
 
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     fn path(&self, game: &GameId, entry: Entry) -> PathBuf {
         self.root.join(entry_path(game, entry))
     }

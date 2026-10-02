@@ -53,6 +53,7 @@ pub fn resolve_metadata(
 ) -> Result<ArtworkManifest, serde_json::Error> {
     let metadata = parse_metadata(bytes)?;
     let url = |kind| select_art(&metadata.art, kind, regions).map(|art| art_url(game, &art));
+
     Ok(ArtworkManifest {
         title: metadata.title,
         front: url("box-front"),
@@ -68,6 +69,7 @@ pub fn select_art(available: &[String], kind: &str, regions: &[Region]) -> Optio
         &["wor", "us", "eu", "jp", "de", "fr", "sp", "au", "br", "ss"];
 
     let prefix = format!("{kind}/");
+
     regions
         .iter()
         .flat_map(|region| art_variants(*region))
@@ -75,6 +77,7 @@ pub fn select_art(available: &[String], kind: &str, regions: &[Region]) -> Optio
         .find_map(|variant| {
             let candidate = format!("{prefix}{variant}");
             let numbered = format!("{candidate}_");
+
             available
                 .iter()
                 .find(|item| **item == candidate || item.starts_with(&numbered))
@@ -88,34 +91,75 @@ pub fn select_art(available: &[String], kind: &str, regions: &[Region]) -> Optio
         })
 }
 
+/// A market's own scans first, then markets that shared its packaging.
 fn art_variants(region: Region) -> &'static [&'static str] {
     match region {
-        Region::Japan | Region::China => &["jp"],
-        Region::NorthAmerica | Region::SouthKorea => &["us"],
-        Region::Canada => &["us", "fr"],
+        Region::Japan => &["jp"],
+        Region::China => &["cn", "jp"],
+        Region::NorthAmerica => &["us"],
+        Region::SouthKorea => &["kr", "us"],
+        Region::Canada => &["ca", "us", "fr"],
         Region::Brazil => &["br"],
         Region::Common | Region::Other(_) => &["wor"],
+        Region::Europe => &["eu"],
         Region::Germany => &["de", "eu"],
         Region::France => &["fr", "eu"],
         Region::Spain => &["sp", "eu"],
+        Region::Italy => &["it", "eu"],
+        Region::Netherlands => &["nl", "eu"],
         Region::Australia => &["au", "eu"],
-        Region::Scandinavia | Region::Finland | Region::Denmark => &["ss", "eu"],
-        Region::Europe | Region::Netherlands | Region::Italy | Region::Indonesia => &["eu"],
+        Region::Scandinavia => &["ss", "eu"],
+        Region::Finland => &["fi", "ss", "eu"],
+        Region::Denmark => &["dk", "ss", "eu"],
+        Region::Indonesia => &["id", "eu"],
     }
 }
 
+/// Art for exactly this market. Unknown markets match worldwide art.
+pub fn select_art_strict(
+    available: &[String],
+    kind: &str,
+    region: Option<Region>,
+) -> Option<String> {
+    let variant = region.map_or("wor", |region| art_variants(region)[0]);
+
+    let exact = format!("{kind}/{variant}");
+
+    if available.contains(&exact) {
+        return Some(exact);
+    }
+
+    let numbered = format!("{exact}_");
+
+    available
+        .iter()
+        .filter(|name| {
+            name.strip_prefix(&numbered).is_some_and(|suffix| {
+                !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+            })
+        })
+        .min()
+        .cloned()
+}
+
 #[cfg(all(feature = "fetch", not(target_family = "wasm")))]
-pub use fetch::{ArtworkBundle, fetch_bundle, fetch_wheel};
+pub use fetch::{ArtworkBundle, fetch_bundle_strict, fetch_wheel};
 
 #[cfg(all(feature = "fetch", not(target_family = "wasm")))]
 mod fetch {
-    use std::path::PathBuf;
+    use std::io::Read;
+    use std::path::{Path, PathBuf};
     use std::sync::LazyLock;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
 
     use core_model::{GameId, Region};
 
     use super::Metadata;
+
+    const MAX_METADATA_BYTES: u64 = 512 * 1024;
+    const MAX_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+    const METADATA_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
     static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
         ureq::Agent::config_builder()
@@ -132,144 +176,191 @@ mod fetch {
         pub back: Option<Vec<u8>>,
         pub spine: Option<Vec<u8>>,
         pub label: Option<Vec<u8>>,
+        pub label_front: Option<Vec<u8>>,
+        pub label_top: Option<Vec<u8>>,
     }
 
-    pub fn fetch_bundle(game: &GameId, region: Option<Region>) -> Result<ArtworkBundle, String> {
-        if let Some(cached) = load_cached_bundle(game) {
-            return Ok(cached);
-        }
-
-        let metadata = fetch_metadata(game)?;
-
-        let bundle = ArtworkBundle {
-            title: metadata.title,
-            front: fetch_kind(game, &metadata.art, "box-front", region),
-            back: fetch_kind(game, &metadata.art, "box-back", region),
-            spine: fetch_kind(game, &metadata.art, "box-spine", region),
-            label: fetch_kind(game, &metadata.art, "support-texture", region),
+    pub fn fetch_bundle_strict(
+        game: &GameId,
+        region: Option<Region>,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<ArtworkBundle, String> {
+        let check = || {
+            if cancelled() {
+                Err("Artwork request cancelled".to_string())
+            } else {
+                Ok(())
+            }
         };
 
-        if bundle.front.is_some() {
-            write_cached_bundle(game, &bundle);
+        check()?;
+
+        let directory = cache_directory(game);
+        let metadata_path = directory.join("metadata-v1.json");
+
+        let fresh = std::fs::metadata(&metadata_path)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age < METADATA_MAX_AGE);
+
+        let cached = read_bounded(&metadata_path, MAX_METADATA_BYTES);
+
+        let (metadata, refreshed) = metadata_with_fallback(cached.as_deref(), fresh, || {
+            get_bounded(&super::metadata_url(game), MAX_METADATA_BYTES)
+        })?;
+
+        if let Some(bytes) = refreshed {
+            write_atomic(&metadata_path, &bytes);
         }
 
-        Ok(bundle)
+        let sources = directory.join("sources");
+
+        let fetch = |kind: &str| -> Result<Option<Vec<u8>>, String> {
+            check()?;
+
+            let Some(selected) = super::select_art_strict(&metadata.art, kind, region) else {
+                return Ok(None);
+            };
+
+            // `selected` is a known role and variant, so it is a safe path.
+            let path = sources.join(&selected);
+
+            if let Some(bytes) = read_bounded(&path, MAX_IMAGE_BYTES) {
+                return Ok(Some(bytes));
+            }
+
+            match get_bounded(&super::art_url(game, &selected), MAX_IMAGE_BYTES) {
+                Ok(bytes) => {
+                    check()?;
+                    write_atomic(&path, &bytes);
+                    Ok(Some(bytes))
+                }
+                Err(error) => {
+                    eprintln!("artwork {selected}: {error}");
+                    Ok(None)
+                }
+            }
+        };
+
+        let front = fetch("box-front")?;
+        let back = fetch("box-back")?;
+        let spine = fetch("box-spine")?;
+        let label = fetch("support-texture")?;
+        let label_front = fetch("support-texture-front")?;
+        let label_top = fetch("support-texture-top")?;
+
+        Ok(ArtworkBundle {
+            title: metadata.title,
+            front,
+            back,
+            spine,
+            label,
+            label_front,
+            label_top,
+        })
     }
 
     pub fn fetch_wheel(game: &GameId, region: Option<Region>) -> Result<Option<Vec<u8>>, String> {
-        let cache_name = format!(
-            "wheel-{}",
-            region
-                .map(super::art_variants)
-                .unwrap_or_default()
-                .join("-")
-        );
+        let variants = region.map(super::art_variants).unwrap_or_default();
+        let path = cache_directory(game).join(format!("wheel-{}", variants.join("-")));
 
-        let path = bundle_cache_dir(game).join(&cache_name);
-        if let Some(cached) = read_cache_bytes(&path) {
+        if let Some(cached) = read_bounded(&path, MAX_IMAGE_BYTES) {
             return Ok(Some(cached));
         }
 
-        let metadata = fetch_metadata(game)?;
-        let wheel = fetch_kind(game, &metadata.art, "wheel", region);
+        let metadata = get_bounded(&super::metadata_url(game), MAX_METADATA_BYTES)
+            .map_err(|error| format!("metadata unavailable: {error}"))?;
+        let metadata = super::parse_metadata(&metadata)
+            .map_err(|error| format!("invalid artwork metadata: {error}"))?;
+
+        let Some(selected) = super::select_art(&metadata.art, "wheel", region.as_slice()) else {
+            return Ok(None);
+        };
+
+        let wheel = get_bounded(&super::art_url(game, &selected), MAX_IMAGE_BYTES).ok();
+
         if let Some(bytes) = &wheel {
-            write_cache_bytes(game, &cache_name, bytes);
+            write_atomic(&path, bytes);
         }
 
         Ok(wheel)
     }
 
-    fn cache_root() -> PathBuf {
+    /// Uses fresh cached metadata as is, and stale cache if the refresh fails.
+    fn metadata_with_fallback(
+        cached: Option<&[u8]>,
+        fresh: bool,
+        refresh: impl FnOnce() -> Result<Vec<u8>, String>,
+    ) -> Result<(Metadata, Option<Vec<u8>>), String> {
+        let cached = cached.and_then(|bytes| super::parse_metadata(bytes).ok());
+
+        if fresh && let Some(metadata) = cached {
+            return Ok((metadata, None));
+        }
+
+        let refreshed = refresh().and_then(|bytes| {
+            let metadata = super::parse_metadata(&bytes).map_err(|error| error.to_string())?;
+            Ok((metadata, Some(bytes)))
+        });
+
+        refreshed.or_else(|error| cached.map(|metadata| (metadata, None)).ok_or(error))
+    }
+
+    fn cache_directory(game: &GameId) -> PathBuf {
         dirs::cache_dir()
             .map(|dir| dir.join("sly").join("artwork"))
             .unwrap_or_else(|| PathBuf::from("artwork"))
+            .join(super::game_path(game))
     }
 
-    fn bundle_cache_dir(game: &GameId) -> PathBuf {
-        cache_root().join(super::game_path(game))
+    fn read_bounded(path: &Path, limit: u64) -> Option<Vec<u8>> {
+        let file = std::fs::File::open(path).ok()?;
+
+        if file.metadata().ok()?.len() > limit {
+            return None;
+        }
+
+        let mut bytes = Vec::new();
+        file.take(limit + 1).read_to_end(&mut bytes).ok()?;
+        (!bytes.is_empty() && bytes.len() as u64 <= limit).then_some(bytes)
     }
 
-    fn load_cached_bundle(game: &GameId) -> Option<ArtworkBundle> {
-        let dir = bundle_cache_dir(game);
-        let front = read_cache_bytes(&dir.join("front"))?;
-        let title = std::fs::read_to_string(dir.join("title"))
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        Some(ArtworkBundle {
-            title,
-            front: Some(front),
-            back: read_cache_bytes(&dir.join("back")),
-            spine: read_cache_bytes(&dir.join("spine")),
-            label: read_cache_bytes(&dir.join("label")),
-        })
-    }
+    /// Write a temp file and rename it so readers never see a partial file.
+    fn write_atomic(path: &Path, bytes: &[u8]) {
+        static NEXT_WRITE: AtomicU64 = AtomicU64::new(0);
 
-    fn read_cache_bytes(path: &std::path::Path) -> Option<Vec<u8>> {
-        std::fs::read(path).ok().filter(|bytes| !bytes.is_empty())
-    }
-
-    fn fetch_metadata(game: &GameId) -> Result<Metadata, String> {
-        get(&super::metadata_url(game))
-            .map_err(|err| format!("metadata unavailable: {err}"))?
-            .body_mut()
-            .read_json()
-            .map_err(|err| format!("invalid artwork metadata: {err}"))
-    }
-
-    fn write_cache_bytes(game: &GameId, name: &str, bytes: &[u8]) {
-        let dir = bundle_cache_dir(game);
-        if let Err(err) = std::fs::create_dir_all(&dir) {
-            eprintln!("artwork cache: failed to create {}: {err}", dir.display());
+        let Some(parent) = path.parent() else {
             return;
-        }
-
-        if let Err(err) = std::fs::write(dir.join(name), bytes) {
-            eprintln!("artwork cache: failed to write {name} for {game:?}: {err}");
-        }
-    }
-
-    fn write_cached_bundle(game: &GameId, bundle: &ArtworkBundle) {
-        let dir = bundle_cache_dir(game);
-        if let Err(err) = std::fs::create_dir_all(&dir) {
-            eprintln!("artwork cache: failed to create {}: {err}", dir.display());
-            return;
-        }
-
-        let write = |name: &str, bytes: &Option<Vec<u8>>| {
-            if let Some(bytes) = bytes
-                && let Err(err) = std::fs::write(dir.join(name), bytes)
-            {
-                eprintln!("artwork cache: failed to write {name} for {game:?}: {err}");
-            }
         };
 
-        write("front", &bundle.front);
-        write("back", &bundle.back);
-        write("spine", &bundle.spine);
-        write("label", &bundle.label);
-
-        if let Err(err) = std::fs::write(dir.join("title"), &bundle.title) {
-            eprintln!("artwork cache: failed to write title for {game:?}: {err}");
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
         }
+
+        let temporary = path.with_extension(format!(
+            "{}-{}.tmp",
+            std::process::id(),
+            NEXT_WRITE.fetch_add(1, Ordering::Relaxed)
+        ));
+
+        if std::fs::write(&temporary, bytes).is_ok() {
+            let _ = std::fs::rename(&temporary, path);
+        }
+
+        let _ = std::fs::remove_file(temporary);
     }
 
-    fn get(url: &str) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+    fn get_bounded(url: &str, limit: u64) -> Result<Vec<u8>, String> {
         AGENT
             .get(url)
             .header("Authorization", super::authorization())
             .call()
-    }
-
-    fn fetch_kind(
-        game: &GameId,
-        available: &[String],
-        kind: &str,
-        region: Option<Region>,
-    ) -> Option<Vec<u8>> {
-        let selected = super::select_art(available, kind, region.as_slice())?;
-        get(&super::art_url(game, &selected))
-            .and_then(|response| response.into_body().read_to_vec())
-            .ok()
+            .map_err(|error| error.to_string())?
+            .body_mut()
+            .with_config()
+            .limit(limit)
+            .read_to_vec()
+            .map_err(|error| error.to_string())
     }
 }

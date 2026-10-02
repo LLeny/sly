@@ -6,7 +6,6 @@ docker-build/
 .github/
 .DS_Store
 docs/
-licenses/
 roms/
 private/
 design/

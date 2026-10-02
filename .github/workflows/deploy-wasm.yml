@@ -48,6 +48,8 @@ jobs:
             --enable-nontrapping-float-to-int --enable-threads \
             -o _site/debugger_bg.wasm _site/debugger_bg.wasm
           cp frontends/debugger-web/index.html _site/index.html
+          cp LICENSE _site/LICENSE
+          cp -R licenses _site/
 
       - uses: actions/upload-pages-artifact@v3
 

@@ -30,7 +30,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
       --enable-sign-ext --enable-multivalue --enable-simd \
       --enable-nontrapping-float-to-int --enable-threads \
       -o /site/debugger_bg.wasm /site/debugger_bg.wasm \
- && cp frontends/debugger-web/index.html /site/index.html
+ && cp frontends/debugger-web/index.html /site/index.html \
+ && cp LICENSE /site/LICENSE \
+ && cp -R licenses /site/
 
 FROM nginx:alpine
 COPY --from=builder /site /usr/share/nginx/html
