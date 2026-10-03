@@ -26,9 +26,24 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install
 
+      - name: Read wasm-bindgen version from Cargo.lock
+        id: wasm-bindgen
+        shell: python
+        run: |
+          import os
+          import tomllib
+
+          with open("Cargo.lock", "rb") as lockfile:
+              packages = tomllib.load(lockfile)["package"]
+          versions = {p["version"] for p in packages if p["name"] == "wasm-bindgen"}
+          if len(versions) != 1:
+              raise SystemExit(f"Expected one wasm-bindgen version, found: {sorted(versions)}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"version={versions.pop()}", file=output)
+
       - uses: jetli/wasm-bindgen-action@v0.2.0
         with:
-          version: "0.2.126"
+          version: ${{ steps.wasm-bindgen.outputs.version }}
 
       - name: Install binaryen (wasm-opt)
         run: sudo apt-get update && sudo apt-get install -y binaryen
@@ -39,7 +54,7 @@ jobs:
 
       - name: Build web bundle
         run: |
-          cargo build --profile web-release --target wasm32-unknown-unknown -p debugger
+          cargo build --locked --profile web-release --target wasm32-unknown-unknown -p debugger
           wasm-bindgen target/wasm32-unknown-unknown/web-release/debugger.wasm \
             --target web --no-typescript --out-dir _site --out-name debugger
           wasm-opt -O3 \

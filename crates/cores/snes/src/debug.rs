@@ -5,11 +5,11 @@ use core_model::{Core, SessionInfo, SoftwareFrame};
 use debugger_model::{
     AccessSource, AccessTracking, AccessWidth, AudioScopesView, BitmapImage, BreakpointKind,
     BreakpointMark, CPU_WORKSPACE, CallStackView, CartridgeView, CpuDescriptor, CpuId, CpuView,
-    DebugCore, DebugMemoryError, DecodeMode, DisasmLine, DisasmToken, DisassemblyRequest,
-    EventDescriptor, EventHit, Field, FlagView, FlowKind, Highlight, HookHit, MemoryAddress,
-    MemoryRegion, MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView,
-    RegisterView, Row, RunOutcome, SOUND_WORKSPACE, Section, SpriteEntry, Sprites, StackFrame,
-    StepTarget, StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapOverlay,
+    DebugCore, DebugMemoryError, DisasmLine, DisasmToken, DisassemblyRequest, EventDescriptor,
+    EventHit, Field, FlagView, FlowKind, Highlight, HookHit, MemoryAddress, MemoryRegion,
+    MmioFieldView, MmioGroup, MmioRegisterView, MmioView, PaletteColor, PaletteView, RegisterView,
+    Row, RunOutcome, SOUND_WORKSPACE, Section, SpriteEntry, Sprites, StackFrame, StepTarget,
+    StructuredView, SyntaxSpec, TableView, Tilemap, TilemapEntry, TilemapOverlay,
     TilemapOverlayBand, TilemapViewport, Tileset, TilesetTile, TokenKind, VIDEO_WORKSPACE,
     VideoDebug, VideoResource, VideoResourceId, VideoResourceKind, VideoRevision, format_bytes,
     hex, standard_manifest, strip_symbol_sigils, tokenize,
@@ -210,7 +210,7 @@ impl Core for SnesDebug {
 impl DebugCore for SnesDebug {
     fn cpus(&self) -> Vec<CpuDescriptor> {
         let mut cpus = vec![
-            CpuDescriptor::new(CPU_MAIN, "65C816", "bus").decode_modes(decode_modes()),
+            CpuDescriptor::new(CPU_MAIN, "65C816", "bus"),
             CpuDescriptor::new(CPU_SPC, "SPC700", "spc"),
         ];
 
@@ -278,18 +278,16 @@ impl DebugCore for SnesDebug {
     }
 
     fn disassemble(&self, cpu: &CpuId, request: &DisassemblyRequest) -> Vec<DisasmLine> {
+        if request.mode.is_some() {
+            return Vec::new();
+        }
+
         match cpu.as_str() {
-            CPU_SPC if request.mode.is_none() => {
-                spc_disasm_view(&self.core.apu, request.base as u16, request.count)
-            }
+            CPU_SPC => spc_disasm_view(&self.core.apu, request.base as u16, request.count),
             sa1::CPU => sa1::disasm_view(&self.core, request),
-            superfx::CPU_GSU if request.mode.is_none() => {
-                superfx::disasm_view(&self.core, request.base, request.count)
-            }
+            superfx::CPU_GSU => superfx::disasm_view(&self.core, request.base, request.count),
             CPU_MAIN => {
-                let Some(decoded) = decode_cpu(&self.core.cpu, request) else {
-                    return Vec::new();
-                };
+                let decoded = decode_cpu(&self.core.cpu, request.base);
 
                 disasm_view_on(&decoded, &self.core.bus, request.base as u16, request.count)
             }

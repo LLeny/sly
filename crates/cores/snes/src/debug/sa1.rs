@@ -23,7 +23,7 @@ impl CpuPeek for BusView<'_> {
 }
 
 pub fn descriptor() -> CpuDescriptor {
-    CpuDescriptor::new(CPU, "65C816", "sa1").decode_modes(super::decode_modes())
+    CpuDescriptor::new(CPU, "65C816", "sa1")
 }
 
 pub fn bus_peek(snes: &Snes, addr: Address) -> u8 {
@@ -37,9 +37,7 @@ pub fn cpu_view(snes: &Snes) -> CpuView {
 }
 
 pub fn disasm_view(snes: &Snes, request: &DisassemblyRequest) -> Vec<DisasmLine> {
-    let Some(decoded) = super::decode_cpu(&snes.sa1.cpu, request) else {
-        return Vec::new();
-    };
+    let decoded = super::decode_cpu(&snes.sa1.cpu, request.base);
 
     disasm_view_on(
         &decoded,
@@ -49,14 +47,14 @@ pub fn disasm_view(snes: &Snes, request: &DisassemblyRequest) -> Vec<DisasmLine>
     )
 }
 
-pub fn fingerprint(snes: &Snes, request: &DisassemblyRequest) -> Option<u64> {
-    let decoded = super::decode_cpu(&snes.sa1.cpu, request)?;
-    Some(fingerprint_65c816(
+pub fn fingerprint(snes: &Snes, request: &DisassemblyRequest) -> u64 {
+    let decoded = super::decode_cpu(&snes.sa1.cpu, request.base);
+    fingerprint_65c816(
         &decoded,
         &BusView { snes },
         request.base as u16,
         request.count,
-    ))
+    )
 }
 
 fn register16(sa1: &Sa1, addr: u16) -> u16 {

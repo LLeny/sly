@@ -70,40 +70,18 @@ pub(super) fn cpu_view(cpu: &crate::Cpu) -> CpuView {
     }
 }
 
-/// ID, label, emulation flag and M/X bits for each decode mode.
-const DECODE_MODES: [(&str, &str, bool, u8); 5] = [
-    ("emulation", "Emulation", true, 0x30),
-    ("m8x8", "M8 X8", false, 0x30),
-    ("m8x16", "M8 X16", false, 0x20),
-    ("m16x8", "M16 X8", false, 0x10),
-    ("m16x16", "M16 X16", false, 0),
-];
-
-pub(super) fn decode_modes() -> Vec<DecodeMode> {
-    DECODE_MODES
-        .iter()
-        .map(|&(id, label, ..)| DecodeMode::new(id, label))
-        .collect()
-}
-
-pub(super) fn decode_cpu(cpu: &crate::Cpu, request: &DisassemblyRequest) -> Option<crate::Cpu> {
-    let mut decoded = crate::Cpu::new(request.base as u16);
+pub(super) fn decode_cpu(cpu: &crate::Cpu, base: u32) -> crate::Cpu {
+    let mut decoded = crate::Cpu::new(base as u16);
     decoded.acc = cpu.acc;
     decoded.index_x = cpu.index_x;
     decoded.index_y = cpu.index_y;
     decoded.data_bank = cpu.data_bank;
     decoded.direct_page = cpu.direct_page;
-    decoded.program_bank = (request.base >> 16) as u8;
+    decoded.program_bank = (base >> 16) as u8;
     decoded.stack_pointer = cpu.stack_pointer;
     decoded.flags = crate::cpu::Flags::from_raw(cpu.flags.raw());
     decoded.emulation = cpu.emulation;
-    if let Some(mode) = request.mode.as_deref() {
-        let &(.., emulation, bits) = DECODE_MODES.iter().find(|(id, ..)| *id == mode)?;
-        decoded.emulation = emulation;
-        decoded.flags = crate::cpu::Flags::from_raw((cpu.flags.raw() & !0x30) | bits);
-    }
-
-    Some(decoded)
+    decoded
 }
 
 pub(super) fn disasm_line_on<B: CpuPeek>(
@@ -339,22 +317,16 @@ pub(super) const SNES_SYNTAX: SyntaxSpec =
 impl SnesDebug {
     pub(super) fn fingerprint(&self, cpu: &CpuId, request: &DisassemblyRequest) -> Option<u64> {
         use std::hash::{DefaultHasher, Hasher};
+        if request.mode.is_some() {
+            return None;
+        }
+
         let base = request.base as u16;
         let count = request.count;
         Some(match cpu.as_str() {
-            sa1::CPU => sa1::fingerprint(&self.core, request)?,
-            superfx::CPU_GSU => {
-                if request.mode.is_some() {
-                    return None;
-                }
-
-                superfx::fingerprint(&self.core, request.base, count)
-            }
+            sa1::CPU => sa1::fingerprint(&self.core, request),
+            superfx::CPU_GSU => superfx::fingerprint(&self.core, request.base, count),
             CPU_SPC => {
-                if request.mode.is_some() {
-                    return None;
-                }
-
                 let mut hasher = DefaultHasher::new();
                 for offset in 0..count.saturating_mul(3) {
                     hasher.write_u8(self.core.apu.peek(base.wrapping_add(offset as u16)));
@@ -363,7 +335,7 @@ impl SnesDebug {
                 hasher.finish()
             }
             CPU_MAIN => {
-                let decoded = decode_cpu(&self.core.cpu, request)?;
+                let decoded = decode_cpu(&self.core.cpu, request.base);
                 fingerprint_65c816(&decoded, &self.core.bus, base, count)
             }
             _ => return None,

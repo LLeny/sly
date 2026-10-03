@@ -37,7 +37,7 @@ use crate::renderer::Renderer;
 use crate::settings::Settings;
 
 #[derive(Parser)]
-#[command(about = "Modern Launcher, a controller-first library and player")]
+#[command(about = "Sly Launcher, a modern take on emulation frontends")]
 struct Cli {
     /// ROM files or directories. Overrides saved library roots.
     roms: Vec<PathBuf>,
@@ -305,7 +305,7 @@ impl ApplicationHandler for Runtime {
             let window = Arc::new(
                 event_loop.create_window(
                     Window::default_attributes()
-                        .with_title("Modern Launcher")
+                        .with_title("Sly Launcher")
                         .with_inner_size(LogicalSize::new(self.size[0], self.size[1]))
                         .with_min_inner_size(LogicalSize::new(480, 360)),
                 )?,
