@@ -1,10 +1,11 @@
 pub mod bus;
 pub mod cartridge;
 pub mod cpu;
+pub mod dma;
 pub mod error;
 pub mod gamepak;
 mod input;
-mod irq;
+pub mod irq;
 pub mod mmio;
 pub mod ppu;
 mod scheduler;
@@ -20,6 +21,7 @@ use std::time::Duration;
 
 use crate::bus::{BusView, CpuBus};
 use crate::cpu::{Bus, Mode, Psr};
+use crate::dma::Dma;
 use crate::gamepak::GamePak;
 use crate::input::Input;
 use crate::irq::Irq;
@@ -42,6 +44,7 @@ const VIDEO_EVENTS: [(EventKind, u64, u64); 4] = [
 ];
 
 pub struct Gba {
+    dma: Dma,
     cpu: Cpu,
     ppu: Ppu,
     gamepak: GamePak,
@@ -58,8 +61,10 @@ impl Gba {
         gamepak::io::register(&mut map);
         input::register(&mut map);
         irq::io::register(&mut map);
+        dma::io::register(&mut map);
 
         let mut gba = Self {
+            dma: Dma::new(),
             cpu: Cpu::new(),
             ppu: Ppu::new(),
             gamepak: GamePak::new(cartridge),
@@ -97,6 +102,7 @@ impl Gba {
 
     pub fn bus_view(&self) -> BusView<'_> {
         BusView {
+            dma: &self.dma,
             ppu: &self.ppu,
             gamepak: &self.gamepak,
             input: &self.input,
@@ -206,6 +212,7 @@ impl Gba {
 
     fn split(&mut self) -> (&mut Cpu, CpuBus<'_>) {
         let bus = CpuBus {
+            dma: &mut self.dma,
             ppu: &mut self.ppu,
             gamepak: &mut self.gamepak,
             input: &mut self.input,
@@ -227,6 +234,7 @@ impl core_model::Core for Gba {
     }
 
     fn reset(&mut self) {
+        self.dma = Dma::new();
         self.ppu.reset();
         self.input = Input::new();
         self.scheduler = Scheduler::new();

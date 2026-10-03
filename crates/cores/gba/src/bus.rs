@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use crate::cpu::Bus;
+use crate::dma::Dma;
 use crate::gamepak::GamePak;
 use crate::input::Input;
 use crate::irq::Irq;
@@ -8,6 +9,7 @@ use crate::mmio::{Mapping, Mmio, MmioMap, Target, mask};
 use crate::ppu::Ppu;
 
 pub struct CpuBus<'a> {
+    pub(crate) dma: &'a mut Dma,
     pub(crate) ppu: &'a mut Ppu,
     pub(crate) gamepak: &'a mut GamePak,
     pub(crate) input: &'a mut Input,
@@ -16,6 +18,7 @@ pub struct CpuBus<'a> {
 }
 
 pub struct BusView<'a> {
+    pub(crate) dma: &'a Dma,
     pub(crate) ppu: &'a Ppu,
     pub(crate) gamepak: &'a GamePak,
     pub(crate) input: &'a Input,
@@ -26,6 +29,7 @@ pub struct BusView<'a> {
 impl CpuBus<'_> {
     pub fn view(&self) -> BusView<'_> {
         BusView {
+            dma: self.dma,
             ppu: self.ppu,
             gamepak: self.gamepak,
             input: self.input,

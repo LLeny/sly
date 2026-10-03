@@ -3,7 +3,7 @@ pub(crate) mod regs;
 
 use regs::{InterruptEnable, InterruptMasterEnable, InterruptRequest};
 
-pub(crate) struct Irq {
+pub struct Irq {
     pub ime: InterruptMasterEnable,
     pub interrupt_enable: InterruptEnable,
     pub interrupt_request: InterruptRequest,

@@ -40,6 +40,8 @@ struct State<'a> {
 
 impl Gba {
     pub(crate) fn encode_state(&self) -> Result<Vec<u8>, StateError> {
+        let mut io = self.mmio.io.clone();
+        self.dma.save_io(&mut io);
         let state = State {
             registers: self.cpu.registers,
             cpsr: self.cpu.cpsr.raw(),
@@ -49,7 +51,7 @@ impl Gba {
             pipeline: self.cpu.pipeline.stages,
             ewram: Cow::Borrowed(&self.mmio.ewram),
             iwram: Cow::Borrowed(&self.mmio.iwram),
-            io: Cow::Borrowed(&self.mmio.io),
+            io: Cow::Owned(io),
             vram: Cow::Borrowed(&self.ppu.vram),
             palette: Cow::Borrowed(&self.ppu.palette),
             oam: Cow::Borrowed(&self.ppu.oam),
@@ -118,6 +120,7 @@ impl Gba {
         self.mmio.ewram = state.ewram.into_owned();
         self.mmio.iwram = state.iwram.into_owned();
         self.mmio.io = state.io.into_owned();
+        self.dma.load_io(&self.mmio.io);
         self.ppu.vram.copy_from_slice(&state.vram);
         self.ppu.palette.copy_from_slice(&state.palette);
         self.ppu.oam.copy_from_slice(&state.oam);
