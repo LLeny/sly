@@ -2,6 +2,7 @@ pub(crate) mod io;
 pub(crate) mod regs;
 
 use crate::bus::Width;
+use crate::ppu::regs::BackgroundMode;
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use regs::{DisplayControl, DisplayStatus, VerticalCount};
 
@@ -142,7 +143,14 @@ impl Ppu {
         })
     }
 
-    fn write_palette(&mut self, address: u32, width: Width, value: u32) {
+    fn write_palette(&mut self, mut address: u32, width: Width, value: u32) {
+        if width == Width::Byte {
+            address &= !1;
+            self::write_memory(&mut self.palette, address + 1, width, value, |address| {
+                address as usize & (PALETTE_SIZE as usize - 1)
+            });
+        }
+
         #[cfg(feature = "debug")]
         {
             self.revisions.palette += 1;
@@ -157,7 +165,16 @@ impl Ppu {
         self::read_memory(&self.vram, address, width, self::vram_offset)
     }
 
-    fn write_vram(&mut self, address: u32, width: Width, value: u32) {
+    fn write_vram(&mut self, mut address: u32, width: Width, value: u32) {
+        if width == Width::Byte {
+            if self::vram_offset(address) >= self.obj_offset() {
+                return;
+            }
+
+            address &= !1;
+            self::write_memory(&mut self.vram, address + 1, width, value, self::vram_offset);
+        }
+
         #[cfg(feature = "debug")]
         {
             self.revisions.vram += 1;
@@ -173,9 +190,21 @@ impl Ppu {
     }
 
     fn write_oam(&mut self, address: u32, width: Width, value: u32) {
+        if width == Width::Byte {
+            tracing::error!("Attempted to write to OAM with byte width");
+            return;
+        }
+
         self::write_memory(&mut self.oam, address, width, value, |address| {
             address as usize & (OAM_SIZE as usize - 1)
         });
+    }
+
+    fn obj_offset(&self) -> usize {
+        match self.dispctrl.mode() {
+            BackgroundMode::Mode0 | BackgroundMode::Mode1 | BackgroundMode::Mode2 => 0x10000,
+            _ => 0x14000,
+        }
     }
 
     pub fn frame(&self) -> &[[u8; 4]] {

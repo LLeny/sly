@@ -220,7 +220,7 @@ impl Lane {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Width {
     Byte,
     Halfword,
