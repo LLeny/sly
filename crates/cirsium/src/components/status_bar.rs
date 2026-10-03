@@ -11,6 +11,7 @@ pub fn console_pill(theme: &Theme, label: impl Into<SharedString>) -> Div {
         .items_center()
         .h(px(18.))
         .px_2()
+        .rounded_sm()
         .bg(theme.accent_soft)
         .text_color(theme.accent)
         .font_weight(FontWeight::SEMIBOLD)

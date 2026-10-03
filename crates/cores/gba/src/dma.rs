@@ -46,6 +46,16 @@ impl Dma {
         }
     }
 
+    /// 0 == channel's maximum.
+    pub fn units(&self, channel: usize) -> u32 {
+        let (count, max) = if channel == 3 {
+            (self.word_count[channel].count3(), 0x10000)
+        } else {
+            (self.word_count[channel].count(), 0x4000)
+        };
+        if count == 0 { max } else { u32::from(count) }
+    }
+
     pub fn new() -> Self {
         Self {
             src_addr: [Address::zeroed(); 4],

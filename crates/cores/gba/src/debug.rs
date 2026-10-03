@@ -2,6 +2,7 @@ mod access;
 mod callstack;
 mod cpu;
 mod disasm;
+mod dma;
 mod mmio;
 mod video;
 
@@ -364,10 +365,10 @@ impl debugger_model::DebugCore for GbaDebug {
     }
 
     fn structured_view(&self, id: &str, _selection: Option<usize>) -> StructuredView {
-        if id == debugger_model::panel::PPU {
-            video::ppu_view(&self.core)
-        } else {
-            StructuredView::default()
+        match id {
+            debugger_model::panel::PPU => video::ppu_view(&self.core),
+            debugger_model::panel::DMA => dma::view(&self.core),
+            _ => StructuredView::default(),
         }
     }
 
@@ -509,12 +510,33 @@ impl debugger_model::DebugCore for GbaDebug {
             .place_after(
                 debugger_model::panel::FRAMEBUFFER,
                 debugger_model::CPU_WORKSPACE,
-                debugger_model::panel::MMIO,
-                DockLocation::Right,
+                debugger_model::panel::MEMORY,
+                DockLocation::Center,
             )
             .expect("shipped panel id");
 
         video::extend_manifest(&mut manifest);
+        manifest
+            .insert_after(
+                debugger_model::panel::MMIO,
+                workspace_model::PanelDescriptor::new(
+                    debugger_model::panel::DMA,
+                    "DMA",
+                    workspace_model::PanelKind::Structured,
+                    DockLocation::Right,
+                    workspace_model::RefreshPolicy::OnPause,
+                )
+                .tag(debugger_model::CPU_WORKSPACE)
+                .tag(debugger_model::VIDEO_WORKSPACE),
+            )
+            .expect("shipped panel id");
+
+        manifest.compose_in(
+            debugger_model::CPU_WORKSPACE,
+            debugger_model::panel::MEMORY,
+            debugger_model::panel::FRAMEBUFFER,
+            workspace_model::PanelGroupLayout::CompanionRail,
+        );
         manifest
     }
 

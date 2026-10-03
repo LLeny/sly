@@ -28,6 +28,19 @@ pub enum DestinationAddressControl {
     Unknown = 4,
 }
 
+impl std::fmt::Display for DestinationAddressControl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            DestinationAddressControl::Increment => "Increment",
+            DestinationAddressControl::Decrement => "Decrement",
+            DestinationAddressControl::Fixed => "Fixed",
+            DestinationAddressControl::IncrementReload => "Increment / reload",
+            DestinationAddressControl::Unknown => "Unknown",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[chapa::bitenum]
 pub enum SourceAddressControl {
     Increment = 0,
@@ -35,6 +48,18 @@ pub enum SourceAddressControl {
     Fixed = 2,
     #[fallback]
     Prohibited = 3,
+}
+
+impl std::fmt::Display for SourceAddressControl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            SourceAddressControl::Increment => "Increment",
+            SourceAddressControl::Decrement => "Decrement",
+            SourceAddressControl::Fixed => "Fixed",
+            SourceAddressControl::Prohibited => "Prohibited",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 #[chapa::bitenum]
@@ -45,6 +70,17 @@ pub enum TransferSize {
     Unknown = 2,
 }
 
+impl std::fmt::Display for TransferSize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            TransferSize::HalfWord => "16-bit",
+            TransferSize::Word => "32-bit",
+            TransferSize::Unknown => "Unknown",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[chapa::bitenum]
 pub enum StartTiming {
     Immediate = 0,
@@ -53,6 +89,19 @@ pub enum StartTiming {
     Special = 3,
     #[fallback]
     Unknown = 4,
+}
+
+impl std::fmt::Display for StartTiming {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            StartTiming::Immediate => "Immediate",
+            StartTiming::VBlank => "VBlank",
+            StartTiming::HBlank => "HBlank",
+            StartTiming::Special => "Special",
+            StartTiming::Unknown => "Unknown",
+        };
+        write!(f, "{}", s)
+    }
 }
 
 #[chapa::bitfield(u16, order = lsb0)]

@@ -6,8 +6,8 @@ use gpui::prelude::*;
 use gpui::{App, Div, ScrollHandle, SharedString, Window, div, px};
 
 use crate::components::{
-    PanelChrome, RowCallback, chevron_slot, label_text, meter_bar_scaled, mono_text, row_toggle,
-    section_header, status_flag, vertical_scroll_area,
+    PanelChrome, RowCallback, bool_chip, chevron_slot, label_text, meter_bar_scaled, mono_text,
+    row_toggle, section_header, vertical_scroll_area,
 };
 
 use crate::theme::Theme;
@@ -224,8 +224,14 @@ fn kv(t: &Theme, field: &Field) -> Div {
 
 fn flag_row(t: &Theme, flags: &[FlagView], note: &Option<(Arc<str>, Tone)>) -> Div {
     let mut row = flags.iter().fold(
-        div().flex().items_center().gap_2().px_1().h(px(17.)),
-        |row, flag| row.child(status_flag(t, flag.name.clone(), flag.set)),
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_1()
+            .p_1()
+            .min_h(px(17.)),
+        |row, flag| row.child(bool_chip(t, flag.name.clone(), flag.set)),
     );
 
     if let Some((text, tone)) = note {

@@ -84,6 +84,8 @@ impl RenderOnce for CpuWidget {
 
         let flags = div()
             .flex()
+            .flex_wrap()
+            .gap_1()
             .items_center()
             .justify_between()
             .pt_2()

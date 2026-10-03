@@ -8,6 +8,8 @@ use crate::theme::{MONO_FONT, Theme, with_alpha};
 pub fn badge(text: impl Into<SharedString>, color: Hsla) -> Div {
     div()
         .px_1()
+        .rounded_sm()
+        .whitespace_nowrap()
         .font_family(MONO_FONT)
         .text_xs()
         .bg(with_alpha(color, 0.15))
@@ -18,7 +20,12 @@ pub fn badge(text: impl Into<SharedString>, color: Hsla) -> Div {
 /// A monospace on/off chip, accented when set (CPU flags, MMIO bit fields).
 pub fn bool_chip(theme: &Theme, text: impl Into<SharedString>, on: bool) -> Div {
     div()
+        .flex_none()
         .px_1()
+        .border_1()
+        .border_color(theme.border_subtle)
+        .rounded_sm()
+        .whitespace_nowrap()
         .font_family(theme.mono_font)
         .text_xs()
         .font_weight(FontWeight::MEDIUM)

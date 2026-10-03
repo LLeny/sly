@@ -5,8 +5,8 @@ use gpui::prelude::*;
 use gpui::{App, Div, Window, div, px};
 
 use crate::components::{
-    PanelChrome, empty_state_centered, header_rule, label_text, meter_bar_scaled, mono_text,
-    status_flag,
+    PanelChrome, bool_chip, empty_state_centered, header_rule, label_text, meter_bar_scaled,
+    mono_text,
 };
 use crate::theme::Theme;
 
@@ -166,9 +166,10 @@ fn render_cell(t: &Theme, cell: &Cell, first: bool, active: bool) -> Div {
             }
             row.child(meter_bar_scaled(t, *value, *max, active))
         }
-        Cell::FlagChips(flags) => flags.iter().fold(
-            div().flex().items_center().gap(px(2.)).whitespace_nowrap(),
-            |row, flag| row.child(status_flag(t, flag.name.clone(), flag.set).whitespace_nowrap()),
-        ),
+        Cell::FlagChips(flags) => flags
+            .iter()
+            .fold(div().flex().items_center().gap(px(2.)), |row, flag| {
+                row.child(bool_chip(t, flag.name.clone(), flag.set))
+            }),
     }
 }
