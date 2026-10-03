@@ -93,3 +93,15 @@ pub struct InterruptRequest {
     #[bits(13)]
     pub gamepak: bool,
 }
+
+impl InterruptRequest {
+    pub(crate) fn request_dma(&mut self, channel: usize) {
+        match channel {
+            0 => self.set_dma0(true),
+            1 => self.set_dma1(true),
+            2 => self.set_dma2(true),
+            3 => self.set_dma3(true),
+            _ => unreachable!("DMA channel {channel}"),
+        }
+    }
+}

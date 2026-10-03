@@ -6,6 +6,7 @@ use core_model::{StateError, System};
 use serde::{Deserialize, Serialize};
 
 use crate::cpu::{Mode, Psr};
+use crate::dma::{LatchedTransfer, control_from_io};
 use crate::gamepak::SRAM_SIZE;
 use crate::input::KeyInput;
 use crate::mmio::{EWRAM_SIZE, IO_SIZE, IWRAM_SIZE};
@@ -13,7 +14,7 @@ use crate::ppu::regs::{DisplayStatus, VerticalCount};
 use crate::scheduler::Event;
 use crate::{Gba, SCREEN_HEIGHT, SCREEN_WIDTH, VIDEO_EVENTS};
 
-const VERSION: u16 = 1;
+const VERSION: u16 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct State<'a> {
@@ -36,6 +37,7 @@ struct State<'a> {
     keyinput: u16,
     cycles: u64,
     deadlines: [u64; 4],
+    dma_latches: [LatchedTransfer; 4],
 }
 
 impl Gba {
@@ -70,6 +72,7 @@ impl Gba {
                     .0
                     .deadline
             }),
+            dma_latches: self.dma.latches,
         };
 
         let payload = postcard::to_allocvec(&state)
@@ -121,6 +124,7 @@ impl Gba {
         self.mmio.iwram = state.iwram.into_owned();
         self.mmio.io = state.io.into_owned();
         self.dma.load_io(&self.mmio.io);
+        self.dma.latches = state.dma_latches;
         self.ppu.vram.copy_from_slice(&state.vram);
         self.ppu.palette.copy_from_slice(&state.palette);
         self.ppu.oam.copy_from_slice(&state.oam);
@@ -202,6 +206,15 @@ impl State<'_> {
             {
                 return Err(corrupt("invalid scheduler deadline"));
             }
+        }
+
+        if self
+            .dma_latches
+            .iter()
+            .enumerate()
+            .any(|(channel, latch)| !latch.is_valid(channel, control_from_io(&self.io, channel)))
+        {
+            return Err(corrupt("invalid DMA latch"));
         }
 
         Ok(())

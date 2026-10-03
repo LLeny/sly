@@ -39,7 +39,7 @@ impl CpuBus<'_> {
     }
 
     #[inline]
-    fn read(&mut self, address: u32, width: Width) -> u32 {
+    pub(crate) fn read(&mut self, address: u32, width: Width) -> u32 {
         let mapping = self.mmio.map.mapping(address);
 
         match mapping.device_covering(address, width) {
@@ -49,7 +49,7 @@ impl CpuBus<'_> {
     }
 
     #[inline]
-    fn write(&mut self, address: u32, width: Width, value: u32) {
+    pub(crate) fn write(&mut self, address: u32, width: Width, value: u32) {
         let mapping = self.mmio.map.mapping(address);
 
         match mapping.device_covering(address, width) {

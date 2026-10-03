@@ -22,6 +22,7 @@ use std::time::Duration;
 use crate::bus::{BusView, CpuBus};
 use crate::cpu::{Bus, Mode, Psr};
 use crate::dma::Dma;
+use crate::dma::regs::StartTiming;
 use crate::gamepak::GamePak;
 use crate::input::Input;
 use crate::irq::Irq;
@@ -126,6 +127,12 @@ impl Gba {
     }
 
     fn step_cpu_with(&mut self, step: impl FnOnce(&mut Cpu, CpuBus<'_>)) {
+        if self.dma.has_pending_transfers() {
+            let cycles = self.bus().process_transfers();
+            self.scheduler.advance_by(cycles);
+            return;
+        }
+
         if self.irq.pending() && !self.cpu.cpsr.irq_disable() {
             self.cpu.take_irq();
         } else {
@@ -157,6 +164,10 @@ impl Gba {
             EventKind::HBlankStart => {
                 self.ppu.start_hblank();
 
+                if self.ppu.vcount.scanline() < SCREEN_HEIGHT as u8 {
+                    self.dma.set_pending_for(StartTiming::HBlank);
+                }
+
                 if self.ppu.dispstat.hblank_irq() {
                     self.irq.interrupt_request.set_hblank(true);
                 }
@@ -170,6 +181,8 @@ impl Gba {
             }
             EventKind::VBlankStart => {
                 self.ppu.start_vblank();
+
+                self.dma.set_pending_for(StartTiming::VBlank);
 
                 if self.ppu.dispstat.vblank_irq() {
                     self.irq.interrupt_request.set_vblank(true);

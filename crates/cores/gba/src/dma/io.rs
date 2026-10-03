@@ -47,6 +47,11 @@ const fn control<const CHANNEL: usize>() -> Register<Control> {
     )
     .read_mask(control_mask(CHANNEL))
     .write_mask(control_mask(CHANNEL))
+    .write_with(|bus, value, mask| {
+        let old = bus.dma.control[CHANNEL].raw();
+        let control = Control::from_raw((old & !mask) | (value.raw() & mask));
+        bus.dma.write_control(CHANNEL, control);
+    })
 }
 
 pub(super) const fn control_mask(channel: usize) -> u16 {

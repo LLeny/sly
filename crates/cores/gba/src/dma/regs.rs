@@ -19,6 +19,7 @@ pub struct WordCount {
 }
 
 #[chapa::bitenum]
+#[derive(PartialEq, Eq)]
 pub enum DestinationAddressControl {
     Increment = 0,
     Decrement = 1,
@@ -82,6 +83,7 @@ impl std::fmt::Display for TransferSize {
 }
 
 #[chapa::bitenum]
+#[derive(PartialEq, Eq)]
 pub enum StartTiming {
     Immediate = 0,
     VBlank = 1,
