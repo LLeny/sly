@@ -1,4 +1,5 @@
 use super::regs::*;
+use super::{OAM_BASE, OAM_END, PALETTE_BASE, PALETTE_END, VRAM_BASE, VRAM_END};
 use crate::mmio::{Handler, MmioMap, Register};
 
 const DISPSTAT: Register<DisplayStatus> = Register::new(
@@ -56,7 +57,7 @@ pub(crate) fn register(map: &mut MmioMap) {
     map.register(&DISPCTL);
     map.register(&DISPSTAT);
     map.register(&VCOUNT);
-    map.map(0x0500_0000..=0x05FF_FFFF, PALETTE);
-    map.map(0x0600_0000..=0x06FF_FFFF, VRAM);
-    map.map(0x0700_0000..=0x07FF_FFFF, OAM);
+    map.map(PALETTE_BASE..=PALETTE_END, PALETTE);
+    map.map(VRAM_BASE..=VRAM_END, VRAM);
+    map.map(OAM_BASE..=OAM_END, OAM);
 }

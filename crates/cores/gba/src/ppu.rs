@@ -9,6 +9,16 @@ const SCANLINES_PER_FRAME: u8 = 228;
 const VBLANK_START_SCANLINE: u8 = 160;
 const VBLANK_END_SCANLINE: u8 = 227;
 
+pub(crate) const PALETTE_BASE: u32 = 0x0500_0000;
+pub(crate) const PALETTE_END: u32 = 0x05FF_FFFF;
+pub(crate) const PALETTE_SIZE: u32 = 0x400;
+pub(crate) const VRAM_BASE: u32 = 0x0600_0000;
+pub(crate) const VRAM_END: u32 = 0x06FF_FFFF;
+pub(crate) const VRAM_SIZE: u32 = 0x18000;
+pub(crate) const OAM_BASE: u32 = 0x0700_0000;
+pub(crate) const OAM_END: u32 = 0x07FF_FFFF;
+pub(crate) const OAM_SIZE: u32 = 0x400;
+
 pub(crate) const SCANLINE_CYCLES: u64 = 1232;
 pub(crate) const HBLANK_START_CYCLES: u64 = 1006;
 pub(crate) const VBLANK_START_CYCLES: u64 = VBLANK_START_SCANLINE as u64 * SCANLINE_CYCLES;
@@ -62,9 +72,9 @@ impl Ppu {
             dispstat: DisplayStatus::zeroed().with_vcounter(true),
             dispctrl: DisplayControl::zeroed(),
             vcount: VerticalCount::zeroed(),
-            vram: vec![0; 0x18000],
-            palette: vec![0; 0x400],
-            oam: vec![0; 0x400],
+            vram: vec![0; VRAM_SIZE as usize],
+            palette: vec![0; PALETTE_SIZE as usize],
+            oam: vec![0; OAM_SIZE as usize],
             frame: vec![[255; 4]; (SCREEN_WIDTH * SCREEN_HEIGHT) as usize],
         }
     }
@@ -97,7 +107,7 @@ impl Ppu {
     }
 
     pub(crate) fn palette_color(&self, index: usize) -> u16 {
-        let offset = (index * 2) & 0x3FF;
+        let offset = (index * 2) & (PALETTE_SIZE as usize - 1);
         u16::from_le_bytes([self.palette[offset], self.palette[offset + 1]])
     }
 
@@ -128,7 +138,7 @@ impl Ppu {
 
     fn read_palette(&self, address: u32, width: Width) -> u32 {
         self::read_memory(&self.palette, address, width, |address| {
-            address as usize & 0x3FF
+            address as usize & (PALETTE_SIZE as usize - 1)
         })
     }
 
@@ -139,7 +149,7 @@ impl Ppu {
         }
 
         self::write_memory(&mut self.palette, address, width, value, |address| {
-            address as usize & 0x3FF
+            address as usize & (PALETTE_SIZE as usize - 1)
         });
     }
 
@@ -158,13 +168,13 @@ impl Ppu {
 
     fn read_oam(&self, address: u32, width: Width) -> u32 {
         self::read_memory(&self.oam, address, width, |address| {
-            address as usize & 0x3FF
+            address as usize & (OAM_SIZE as usize - 1)
         })
     }
 
     fn write_oam(&mut self, address: u32, width: Width, value: u32) {
         self::write_memory(&mut self.oam, address, width, value, |address| {
-            address as usize & 0x3FF
+            address as usize & (OAM_SIZE as usize - 1)
         });
     }
 
@@ -205,7 +215,7 @@ pub(crate) fn rgba(color: u16) -> [u8; 4] {
 pub(crate) fn vram_offset(address: u32) -> usize {
     // Each 128 KiB window repeats the last 32 KiB of the 96 KiB VRAM.
     let offset = address as usize & 0x1FFFF;
-    if offset >= 0x18000 {
+    if offset >= VRAM_SIZE as usize {
         offset - 0x8000
     } else {
         offset

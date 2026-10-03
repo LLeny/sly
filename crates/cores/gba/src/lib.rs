@@ -120,8 +120,12 @@ impl Gba {
     }
 
     fn step_cpu_with(&mut self, step: impl FnOnce(&mut Cpu, CpuBus<'_>)) {
-        let (cpu, bus) = self.split();
-        step(cpu, bus);
+        if self.irq.pending() && !self.cpu.cpsr.irq_disable() {
+            self.cpu.take_irq();
+        } else {
+            let (cpu, bus) = self.split();
+            step(cpu, bus);
+        }
 
         // TODO: account for CPU internal cycles and bus wait states.
         self.scheduler.advance_by(1);
@@ -144,9 +148,27 @@ impl Gba {
 
     fn dispatch_event(&mut self, event: Event) {
         match event.kind {
-            EventKind::HBlankStart => self.ppu.start_hblank(),
-            EventKind::ScanlineStart => self.ppu.start_scanline(),
-            EventKind::VBlankStart => self.ppu.start_vblank(),
+            EventKind::HBlankStart => {
+                self.ppu.start_hblank();
+
+                if self.ppu.dispstat.hblank_irq() {
+                    self.irq.interrupt_request.set_hblank(true);
+                }
+            }
+            EventKind::ScanlineStart => {
+                self.ppu.start_scanline();
+
+                if self.ppu.dispstat.vcounter() && self.ppu.dispstat.vcounter_irq() {
+                    self.irq.interrupt_request.set_vcounter(true);
+                }
+            }
+            EventKind::VBlankStart => {
+                self.ppu.start_vblank();
+
+                if self.ppu.dispstat.vblank_irq() {
+                    self.irq.interrupt_request.set_vblank(true);
+                }
+            }
             EventKind::VBlankEnd => self.ppu.end_vblank(),
         }
     }
@@ -155,13 +177,20 @@ impl Gba {
     fn patch(&mut self, address: u32, bytes: &[u8]) -> usize {
         use crate::gamepak::{SRAM_BASE, SRAM_END};
         use crate::mmio::{EWRAM_BASE, EWRAM_END, IWRAM_BASE, IWRAM_END};
+        use crate::ppu::{
+            OAM_BASE, OAM_END, OAM_SIZE, PALETTE_BASE, PALETTE_END, PALETTE_SIZE, VRAM_BASE,
+            VRAM_END,
+        };
 
         let (memory, offset): (&mut [u8], usize) = match address {
             EWRAM_BASE..=EWRAM_END => (&mut self.mmio.ewram, (address - EWRAM_BASE) as usize),
             IWRAM_BASE..=IWRAM_END => (&mut self.mmio.iwram, (address - IWRAM_BASE) as usize),
-            0x0500_0000..=0x05FF_FFFF => (&mut self.ppu.palette, (address & 0x3FF) as usize),
-            0x0600_0000..=0x06FF_FFFF => (&mut self.ppu.vram, ppu::vram_offset(address)),
-            0x0700_0000..=0x07FF_FFFF => (&mut self.ppu.oam, (address & 0x3FF) as usize),
+            PALETTE_BASE..=PALETTE_END => (
+                &mut self.ppu.palette,
+                (address & (PALETTE_SIZE - 1)) as usize,
+            ),
+            VRAM_BASE..=VRAM_END => (&mut self.ppu.vram, ppu::vram_offset(address)),
+            OAM_BASE..=OAM_END => (&mut self.ppu.oam, (address & (OAM_SIZE - 1)) as usize),
             SRAM_BASE..=SRAM_END => (&mut self.gamepak.sram, (address - SRAM_BASE) as usize),
             _ => return 0,
         };

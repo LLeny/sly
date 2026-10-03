@@ -43,6 +43,14 @@ impl Cpu {
         }
     }
 
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn take_irq(&mut self) {
+        let [decode, fetch] = self.pipeline.pending();
+        let next_address = decode.or(fetch).map_or(self.pc(), |(address, _)| address);
+        self.enter_exception(Mode::Irq, 0x18, next_address.wrapping_add(4));
+    }
+
     pub(crate) fn flush_pipeline(&mut self) {
         self.pipeline.flush();
     }

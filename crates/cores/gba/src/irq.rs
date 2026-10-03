@@ -10,6 +10,11 @@ pub(crate) struct Irq {
 }
 
 impl Irq {
+    pub(crate) fn pending(&self) -> bool {
+        self.ime.enable_interrupts()
+            && (self.interrupt_enable.raw() & self.interrupt_request.raw() & 0x3FFF) != 0
+    }
+
     pub fn new() -> Self {
         Self {
             ime: InterruptMasterEnable::zeroed(),
