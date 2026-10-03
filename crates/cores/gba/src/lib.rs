@@ -4,6 +4,7 @@ pub mod cpu;
 pub mod error;
 pub mod gamepak;
 mod input;
+mod irq;
 pub mod mmio;
 pub mod ppu;
 mod scheduler;
@@ -21,6 +22,7 @@ use crate::bus::{BusView, CpuBus};
 use crate::cpu::{Bus, Mode, Psr};
 use crate::gamepak::GamePak;
 use crate::input::Input;
+use crate::irq::Irq;
 use crate::mmio::{Handler, Mmio, MmioMap, RegisterInfo};
 use crate::ppu::{
     FRAME_CYCLES, HBLANK_START_CYCLES, Ppu, SCANLINE_CYCLES, VBLANK_END_CYCLES, VBLANK_START_CYCLES,
@@ -46,6 +48,7 @@ pub struct Gba {
     input: Input,
     mmio: Mmio,
     scheduler: Scheduler,
+    irq: Irq,
 }
 
 impl Gba {
@@ -54,6 +57,7 @@ impl Gba {
         ppu::io::register(&mut map);
         gamepak::io::register(&mut map);
         input::register(&mut map);
+        irq::io::register(&mut map);
 
         let mut gba = Self {
             cpu: Cpu::new(),
@@ -62,6 +66,7 @@ impl Gba {
             input: Input::new(),
             mmio: Mmio::new(map),
             scheduler: Scheduler::new(),
+            irq: Irq::new(),
         };
 
         gba.skip_bios();
@@ -96,6 +101,7 @@ impl Gba {
             gamepak: &self.gamepak,
             input: &self.input,
             mmio: &self.mmio,
+            irq: &self.irq,
         }
     }
 
@@ -175,6 +181,7 @@ impl Gba {
             gamepak: &mut self.gamepak,
             input: &mut self.input,
             mmio: &mut self.mmio,
+            irq: &mut self.irq,
         };
 
         (&mut self.cpu, bus)
