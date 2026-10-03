@@ -176,15 +176,15 @@ impl Gba {
     #[cfg(feature = "debug")]
     fn patch(&mut self, address: u32, bytes: &[u8]) -> usize {
         use crate::gamepak::{SRAM_BASE, SRAM_END};
-        use crate::mmio::{EWRAM_BASE, EWRAM_END, IWRAM_BASE, IWRAM_END};
+        use crate::mmio::{EWRAM_BASE, EWRAM_END, EWRAM_SIZE, IWRAM_BASE, IWRAM_END, IWRAM_SIZE};
         use crate::ppu::{
             OAM_BASE, OAM_END, OAM_SIZE, PALETTE_BASE, PALETTE_END, PALETTE_SIZE, VRAM_BASE,
             VRAM_END,
         };
 
         let (memory, offset): (&mut [u8], usize) = match address {
-            EWRAM_BASE..=EWRAM_END => (&mut self.mmio.ewram, (address - EWRAM_BASE) as usize),
-            IWRAM_BASE..=IWRAM_END => (&mut self.mmio.iwram, (address - IWRAM_BASE) as usize),
+            EWRAM_BASE..=EWRAM_END => (&mut self.mmio.ewram, (address & (EWRAM_SIZE - 1)) as usize),
+            IWRAM_BASE..=IWRAM_END => (&mut self.mmio.iwram, (address & (IWRAM_SIZE - 1)) as usize),
             PALETTE_BASE..=PALETTE_END => (
                 &mut self.ppu.palette,
                 (address & (PALETTE_SIZE - 1)) as usize,

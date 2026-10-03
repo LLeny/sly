@@ -16,11 +16,11 @@ const BIOS_END: u32 = BIOS_BASE + BIOS.len() as u32 - 1;
 
 pub(crate) const EWRAM_BASE: u32 = 0x0200_0000;
 pub(crate) const EWRAM_SIZE: u32 = 0x4_0000;
-pub(crate) const EWRAM_END: u32 = EWRAM_BASE + EWRAM_SIZE - 1;
+pub(crate) const EWRAM_END: u32 = 0x02FF_FFFF;
 
 pub(crate) const IWRAM_BASE: u32 = 0x0300_0000;
 pub(crate) const IWRAM_SIZE: u32 = 0x8000;
-pub(crate) const IWRAM_END: u32 = IWRAM_BASE + IWRAM_SIZE - 1;
+pub(crate) const IWRAM_END: u32 = 0x03FF_FFFF;
 
 const REGION_SHIFT: u32 = 24;
 const REGION_COUNT: usize = 1 << (32 - REGION_SHIFT);
@@ -62,8 +62,8 @@ impl Mmio {
     fn route(&self, address: u32, width: Width) -> Option<&[u8]> {
         let (memory, offset): (&[u8], _) = match address {
             BIOS_BASE..=BIOS_END => (BIOS, address - BIOS_BASE),
-            EWRAM_BASE..=EWRAM_END => (&self.ewram, address - EWRAM_BASE),
-            IWRAM_BASE..=IWRAM_END => (&self.iwram, address - IWRAM_BASE),
+            EWRAM_BASE..=EWRAM_END => (&self.ewram, address & (EWRAM_SIZE - 1)),
+            IWRAM_BASE..=IWRAM_END => (&self.iwram, address & (IWRAM_SIZE - 1)),
             IO_BASE..=IO_END => (&self.io, address - IO_BASE),
             _ => return None,
         };
@@ -73,8 +73,8 @@ impl Mmio {
 
     fn route_mut(&mut self, address: u32, width: Width) -> Option<&mut [u8]> {
         let (memory, offset): (&mut [u8], _) = match address {
-            EWRAM_BASE..=EWRAM_END => (&mut self.ewram, address - EWRAM_BASE),
-            IWRAM_BASE..=IWRAM_END => (&mut self.iwram, address - IWRAM_BASE),
+            EWRAM_BASE..=EWRAM_END => (&mut self.ewram, address & (EWRAM_SIZE - 1)),
+            IWRAM_BASE..=IWRAM_END => (&mut self.iwram, address & (IWRAM_SIZE - 1)),
             IO_BASE..=IO_END => (&mut self.io, address - IO_BASE),
             _ => return None,
         };
