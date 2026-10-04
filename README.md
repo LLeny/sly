@@ -161,7 +161,9 @@ Keys are matched by position, so the labels below are for a US QWERTY keyboard. 
 | Back to library   | Esc               |
 | Fullscreen        | F11               |
 
-## Development Setup
+## Development
+
+### Building
 
 See the [build workflow](.github/workflows/binaries.yml) for platform dependencies, including Linux audio and windowing libraries. Run everything from the repository root.
 
@@ -191,6 +193,60 @@ cmake --build build/desktop-qt
 ```
 
 **iOS** needs a Mac with Xcode 26. Open `frontends/ios/Sly.xcodeproj`, choose your signing team and run the `Sly` scheme.
+
+### Project layout
+
+Emulated hardware lives in `crates/cores/`, the shared interfaces in `crates/models/` and the frontends in `frontends/`. If you want to add a system, the [GBA core](crates/cores/gba/src/lib.rs) is the easiest one to read. The [SNES core](crates/cores/snes/src/lib.rs) is a good example of multiple CPUs and cartridge coprocessors.
+
+The crates you'll touch most:
+
+* [core-model](crates/models/core/src/lib.rs): the `Core` trait every system implements for playback (frames, audio, input, save states).
+* [debugger-model](crates/models/debugger/src/target.rs): `DebugCore`, which adds registers, disassembly, stepping, breakpoints and memory access on top of `Core`.
+* [workspace-model](crates/models/workspace/src/lib.rs): describes the debugger's workspaces and panels.
+* [core-loader](crates/core-loader/src/lib.rs): detects ROMs and creates the right core. New systems get hooked up here.
+* [cirsium](crates/cirsium): the debugger's UI components.
+
+### Adding a core
+
+1. Create a crate in `crates/cores/<system>/` and add it to the [workspace](Cargo.toml). Copy the setup from the [GBA Cargo.toml](crates/cores/gba/Cargo.toml) if you want debugger support behind a `debug` feature.
+2. Implement `core_model::Core` for your machine. Only `reset`, `step` and `run_frame` are required. Everything else has a default, so you can add video, audio, input and save states as you go.
+3. Add the system to `core_model::System` and to the save-state tags in [state.rs](crates/models/core/src/state.rs). Don't change the existing tags.
+4. Hook it up in [core-loader](crates/core-loader/src/lib.rs): `identity`, `inspect`, `load`, and `load_debug` once the debugger works.
+5. Check the frontends and bindings for anything system-specific, like controls or assets.
+
+While you're working on a new core, the [runner](frontends/runner/src/main.rs) is handy. It's a tiny SDL app that just loads a ROM and plays it, so there's much less in the way than with the other frontends. It only needs `cartridge_info` and `frame_interval` on top of the basics.
+
+```sh
+cargo run -p runner -- path/to/game.gba
+```
+
+### Adding debugger support
+
+Wrap your machine in a debug type that implements both `Core` and `DebugCore`, like [GbaDebug](crates/cores/gba/src/debug.rs) or [SnesDebug](crates/cores/snes/src/debug.rs). Start with CPUs, registers, disassembly, memory regions and stepping. Call stacks, event stepping and scripting can come later.
+
+A few things to keep in mind:
+
+* Use the same IDs everywhere (for example `gba.arm7tdmi` and `gba.bus`). Breakpoints and views refer to them.
+* `peek_memory` must not change the machine's state. `read_bus` / `write_bus` go through the bus with all side effects and `patch_memory` edits memory directly.
+* The default `manifest` gives you the standard panels. Override it to add your own workspaces, like the [SNES core](crates/cores/snes/src/debug/manifest.rs) does for its coprocessors and call `ComponentManifest::validate()` to check it.
+
+### Testing
+
+```sh
+cargo fmt --all --check
+cargo clippy -p gba -p snes --features gba/debug,snes/debug
+cargo test -p gba -p snes --features gba/debug,snes/debug
+```
+
+CPU tests run against the [SSTs](https://github.com/SingleStepTests) in `submodules/`:
+
+```sh
+cargo run --release -p testrunner -- snes
+cargo run --release -p testrunner -- gba
+cargo run --release -p testrunner -- spc700 --opcodes 00 --limit 100
+```
+
+New CPUs can be registered in [testrunner](crates/testrunner/src/cores.rs).
 
 ## License
 

@@ -36,8 +36,8 @@ enum Edge {
 
 fn overflow_shadow(scroll: ScrollHandle, theme: &Theme, edge: Edge) -> impl IntoElement {
     let shadow = match theme.mode {
-        ThemeMode::Dark => rgba(0x00000090),
-        ThemeMode::Light => rgba(0x00000030),
+        ThemeMode::Dark => rgba(0x00000048),
+        ThemeMode::Light => rgba(0x00000018),
     };
     // Fades from transparent towards the edge it sits on.
     let angle = match edge {
