@@ -6743,6 +6743,7 @@ dependencies = [
  "clap",
  "core-model",
  "crc32fast",
+ "gba",
  "gif 0.14.2",
  "owo-colors",
  "oxipng",

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+gba = { path = "../cores/gba" }
 snes = { path = "../cores/snes" }
 core-model = { path = "../models/core" }
 anyhow = "1.0.103"
