@@ -8,7 +8,7 @@ use core_model::{BackupKind, CartridgeInfo, StateError, System, TvSystem};
 
 use crate::runtime::{Runtime, button_from_index, inspect_cartridge, system_from_index};
 
-pub const SLY_ABI_VERSION: u32 = 2;
+pub const SLY_ABI_VERSION: u32 = 3;
 
 /// Anything but `Ok` leaves a description in `sly_last_error()`.
 #[repr(C)]

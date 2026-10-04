@@ -11,6 +11,7 @@ impl Debugger {
         self.accent = index;
         let mode = Theme::global(cx).mode;
         set_theme(cx, super::render::themed(mode, index));
+        self.save_preferences(cx);
         cx.notify();
     }
 

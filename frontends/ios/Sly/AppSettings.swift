@@ -6,6 +6,7 @@ enum AppSettings {
     static let showFileExtensionsKey = "showFileExtensions"
     static let autoLoadQuickSaveKey = "autoLoadQuickSave"
     static let artworkRegionKey = "artworkRegion"
+    static let artworkAPIKeyKey = "artworkAPIKey"
 
     static let defaultImageFiltering = ImageFiltering.sharpPixels
     static let defaultShowFileExtensions = false

@@ -226,6 +226,9 @@ const RomEntry* RomListModel::entry_at(const int row) const noexcept {
 
 void RomListModel::load_banners() {
     for (int row = 0; row < entries_.size(); ++row) {
+        if (!entries_.at(row).banner.isNull()) {
+            continue;
+        }
         const auto system_index = entries_.at(row).system_index;
         const auto path = entries_.at(row).path;
         auto* watcher = new QFutureWatcher<QImage>(this);

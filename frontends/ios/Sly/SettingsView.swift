@@ -14,6 +14,14 @@ struct SettingsView: View {
     @AppStorage(AppSettings.artworkRegionKey)
     private var artworkRegion = AppSettings.defaultArtworkRegion
 
+    @AppStorage(AppSettings.artworkAPIKeyKey)
+    private var artworkAPIKey = ""
+
+    @State private var apiKeyDraft = ""
+    @State private var revealKey = false
+
+    private static let accountURL = URL(string: "https://art.layle.dev/account")!
+
     var body: some View {
         NavigationStack {
             Form {
@@ -68,8 +76,46 @@ struct SettingsView: View {
                         "when one is available."
                     )
                 }
+
+                Section("Artwork") {
+                    HStack {
+                        Group {
+                            if revealKey {
+                                TextField("Anonymous", text: $apiKeyDraft)
+                            } else {
+                                SecureField("Anonymous", text: $apiKeyDraft)
+                            }
+                        }
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                        Button {
+                            revealKey.toggle()
+                        } label: {
+                            Image(systemName: revealKey ? "eye.slash" : "eye")
+                        }
+                    }
+
+                    HStack {
+                        Button("Save") {
+                            artworkAPIKey = apiKeyDraft.trimmingCharacters(in: .whitespaces)
+                        }
+
+                        Button("Clear") {
+                            apiKeyDraft = ""
+                        }
+
+                        Spacer()
+
+                        Link("Get Key", destination: Self.accountURL)
+                    }
+                }
+                .buttonStyle(.borderless)
             }
             .navigationTitle("Settings")
+            .onAppear {
+                apiKeyDraft = artworkAPIKey
+            }
         }
     }
 }

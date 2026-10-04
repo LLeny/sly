@@ -151,7 +151,7 @@ impl GameButton {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Controls {
     pub repeat_delay: f64,
     pub repeat_interval: f64,
@@ -308,7 +308,7 @@ fn resolve<T: Copy>(
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Settings {
     pub rom_directories: Vec<PathBuf>,
     pub data_directory: Option<PathBuf>,
@@ -347,54 +347,24 @@ impl Default for Settings {
 
 #[derive(Debug, Error)]
 pub enum SettingsError {
-    #[error("settings I/O at {path}: {source}")]
-    Io {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("invalid settings: {0}")]
-    Parse(#[from] toml::de::Error),
-    #[error("cannot encode settings: {0}")]
-    Encode(#[from] toml::ser::Error),
+    #[error("{0}")]
+    Shared(String),
     #[error("invalid setting: {0}")]
     Invalid(&'static str),
 }
 
 impl Settings {
     pub fn load(path: &Path) -> Result<Self, SettingsError> {
-        Ok(Self::read(path)?.unwrap_or_default())
+        settings::initialize(Some(path)).map_err(SettingsError::Shared)?;
+
+        settings::frontend::<Self>("launcher")
+            .map_err(SettingsError::Shared)?
+            .normalize()
     }
 
-    /// Falls back to the old `3d-launcher.toml` when the new file doesn't exist.
-    pub fn load_default(path: &Path) -> Result<Self, SettingsError> {
-        match Self::read(path)? {
-            Some(settings) => Ok(settings),
-            None => Self::load(&path.with_file_name("3d-launcher.toml")),
-        }
-    }
-
-    fn read(path: &Path) -> Result<Option<Self>, SettingsError> {
-        let text = match std::fs::read_to_string(path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(None);
-            }
-            Err(source) => {
-                return Err(SettingsError::Io {
-                    path: path.into(),
-                    source,
-                });
-            }
-        };
-
-        Self::parse(&text).map(Some)
-    }
-
-    pub fn parse(text: &str) -> Result<Self, SettingsError> {
-        let mut settings: Self = toml::from_str(text)?;
-
-        for (hash, release) in std::mem::take(&mut settings.release_overrides) {
-            if settings
+    fn normalize(mut self) -> Result<Self, SettingsError> {
+        for (hash, release) in std::mem::take(&mut self.release_overrides) {
+            if self
                 .release_overrides
                 .insert(hash.to_ascii_lowercase(), release)
                 .is_some()
@@ -405,8 +375,8 @@ impl Settings {
             }
         }
 
-        for (game, finish) in std::mem::take(&mut settings.cartridge_finishes) {
-            if settings
+        for (game, finish) in std::mem::take(&mut self.cartridge_finishes) {
+            if self
                 .cartridge_finishes
                 .insert(game.to_ascii_lowercase(), finish)
                 .is_some()
@@ -417,8 +387,8 @@ impl Settings {
             }
         }
 
-        settings.validate()?;
-        Ok(settings)
+        self.validate()?;
+        Ok(self)
     }
 
     pub fn validate(&self) -> Result<(), SettingsError> {
@@ -472,40 +442,8 @@ impl Settings {
 
     pub fn save(&self, path: &Path) -> Result<(), SettingsError> {
         self.validate()?;
-        let text = toml::to_string_pretty(self)?;
-
-        if let Some(parent) = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            std::fs::create_dir_all(parent).map_err(|source| SettingsError::Io {
-                path: parent.into(),
-                source,
-            })?;
-        }
-
-        let temporary = path.with_extension(format!("toml.{}.tmp", std::process::id()));
-
-        let result = (|| {
-            use std::io::Write;
-            let mut file = std::fs::File::create(&temporary)?;
-            file.write_all(text.as_bytes())?;
-            file.sync_all()?;
-            std::fs::rename(&temporary, path)
-        })();
-
-        if result.is_err() {
-            let _ = std::fs::remove_file(&temporary);
-        }
-
-        result.map_err(|source| SettingsError::Io {
-            path: path.into(),
-            source,
-        })
-    }
-
-    pub fn default_path() -> PathBuf {
-        storage::FsStore::new().root().join("modern-launcher.toml")
+        settings::select_path(path).map_err(SettingsError::Shared)?;
+        settings::save_frontend("launcher", self).map_err(SettingsError::Shared)
     }
 
     pub fn cartridge_finish(&self, game: &core_model::GameId) -> Option<&str> {

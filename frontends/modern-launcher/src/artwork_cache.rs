@@ -169,6 +169,17 @@ pub struct ArtworkCache {
 }
 
 impl ArtworkCache {
+    pub fn retry_failed(&mut self) {
+        self.failed.clear();
+        self.resident
+            .retain(|_, cached| cached.artwork.front.is_some());
+        self.bytes = self
+            .resident
+            .values()
+            .map(|cached| cached.artwork.byte_len())
+            .sum();
+    }
+
     pub fn new(cpu_budget_bytes: usize, workers: usize) -> io::Result<Self> {
         let cache = Self {
             mailbox: Arc::new((Mutex::new(Mailbox::default()), Condvar::new())),

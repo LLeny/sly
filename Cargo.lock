@@ -319,6 +319,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
+name = "arboard"
+version = "3.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0348a1c054491f4bfe6ab86a7b6ab1e44e45d899005de92f58b3df180b36ddaf"
+dependencies = [
+ "clipboard-win",
+ "log",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "parking_lot",
+ "percent-encoding",
+ "windows-sys 0.59.0",
+ "x11rb",
+]
+
+[[package]]
 name = "arg_enum_proc_macro"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -349,7 +366,9 @@ dependencies = [
  "dirs",
  "serde",
  "serde_json",
+ "settings",
  "ureq",
+ "url",
  "urlencoding",
 ]
 
@@ -1314,6 +1333,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "clipboard-win"
+version = "5.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bde03770d3df201d4fb868f2c9c59e66a3e4e2bd06692a0fe701e7103c7e84d4"
+dependencies = [
+ "error-code",
+]
+
+[[package]]
 name = "cmake"
 version = "0.1.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1969,6 +1997,8 @@ dependencies = [
  "js-sys",
  "reqwest_client",
  "scripting",
+ "serde",
+ "settings",
  "storage",
  "tracing",
  "tracing-subscriber",
@@ -2273,6 +2303,12 @@ dependencies = [
  "libc",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "error-code"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7"
 
 [[package]]
 name = "etagere"
@@ -4554,6 +4590,7 @@ name = "modern-launcher"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "artwork",
  "audio",
  "bytemuck",
@@ -4568,12 +4605,13 @@ dependencies = [
  "hound",
  "image",
  "lewton",
+ "open",
  "pollster 1.0.1",
  "serde",
  "serde_json",
+ "settings",
  "storage",
  "thiserror 2.0.21",
- "toml 1.1.6+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
  "unicode-normalization",
@@ -4987,6 +5025,7 @@ dependencies = [
  "bitflags 2.13.0",
  "objc2 0.6.4",
  "objc2-core-foundation",
+ "objc2-core-graphics",
  "objc2-foundation 0.3.2",
 ]
 
@@ -5094,6 +5133,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e022c9d066895efa1345f8e33e584b9f958da2fd4cd116792e15e07e4720a807"
 dependencies = [
+ "bitflags 2.13.0",
  "dispatch2",
  "objc2 0.6.4",
  "objc2-core-foundation",
@@ -5381,13 +5421,12 @@ dependencies = [
 
 [[package]]
 name = "open"
-version = "5.3.5"
+version = "5.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fbaa89d2ddc8473c78a3adf69eea8cffa28c483b8e02a971ef31527cd0fc92c"
+checksum = "aa576c76302b7b808eecc68061e67336c47833ef9d22caa74dda10fa9675eebc"
 dependencies = [
  "is-wsl",
  "libc",
- "pathdiff",
 ]
 
 [[package]]
@@ -5500,12 +5539,6 @@ name = "pastey"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec"
-
-[[package]]
-name = "pathdiff"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "pathfinder_geometry"
@@ -7020,6 +7053,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "settings"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "serde",
+ "serde_json",
+ "storage",
+ "tempfile",
+ "toml 1.1.6+spec-1.1.0",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "sha1"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7168,6 +7216,7 @@ dependencies = [
  "core-model",
  "cxx",
  "cxx-build",
+ "settings",
  "sly-ffi",
 ]
 

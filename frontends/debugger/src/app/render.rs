@@ -153,6 +153,7 @@ impl Render for Debugger {
             cx.listener(|this, _, _, cx| {
                 let next = Theme::global(cx).mode.toggled();
                 set_theme(cx, self::themed(next, this.accent));
+                this.save_preferences(cx);
                 cx.notify();
             }),
         );

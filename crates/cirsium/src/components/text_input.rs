@@ -74,6 +74,8 @@ pub struct TextInput {
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
     hex_only: bool,
+    secret: bool,
+    masked: bool,
     max_len: Option<usize>,
 }
 
@@ -90,8 +92,32 @@ impl TextInput {
             last_bounds: None,
             is_selecting: false,
             hex_only: false,
+            secret: false,
+            masked: false,
             max_len: None,
         }
+    }
+
+    pub fn secret(mut self) -> Self {
+        self.secret = true;
+        self.masked = true;
+        self
+    }
+
+    pub fn masked(&self) -> bool {
+        self.masked
+    }
+
+    pub fn set_masked(&mut self, masked: bool, cx: &mut Context<Self>) {
+        self.masked = masked;
+        cx.notify();
+    }
+
+    pub fn set_content(&mut self, content: &str, cx: &mut Context<Self>) {
+        self.content = self.sanitize("", "", content).into();
+        self.selected_range = self.content.len()..self.content.len();
+        self.marked_range = None;
+        cx.notify();
     }
 
     pub fn hex_only(mut self, yes: bool) -> Self {
@@ -310,6 +336,7 @@ impl TextInput {
             .unwrap_or(usize::MAX);
         new_text
             .chars()
+            .filter(|c| !self.secret || (c.is_ascii() && !c.is_control()))
             .filter(|c| !self.hex_only || c.is_ascii_hexdigit())
             .take(budget)
             .collect()

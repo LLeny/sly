@@ -49,11 +49,13 @@ enum SettingsRow {
     Rescan,
     Controls,
     GameAppearance,
+    ArtworkKey,
+    ArtworkAccount,
     SaveAndReturn,
 }
 
 impl SettingsRow {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 15] = [
         Self::View,
         Self::Quality,
         Self::ReduceMotion,
@@ -66,6 +68,8 @@ impl SettingsRow {
         Self::Rescan,
         Self::Controls,
         Self::GameAppearance,
+        Self::ArtworkKey,
+        Self::ArtworkAccount,
         Self::SaveAndReturn,
     ];
 
@@ -87,6 +91,8 @@ impl SettingsRow {
             Self::Rescan => "Rescan library",
             Self::Controls => "Controls",
             Self::GameAppearance => "Game appearance",
+            Self::ArtworkKey => "Artwork key",
+            Self::ArtworkAccount => "Get artwork key",
             Self::SaveAndReturn => "Save and return",
         }
     }
@@ -96,6 +102,8 @@ const STATUS_DURATION: Duration = Duration::from_secs(8);
 
 pub struct App {
     pub settings: Settings,
+    pub editing_artwork_key: bool,
+    artwork_key_draft: String,
     pub input: Input,
     pub animation: Animation,
     pub entries: Vec<LibraryEntry>,
@@ -140,6 +148,7 @@ pub struct App {
 
 impl App {
     pub fn new(settings: Settings, settings_path: PathBuf) -> Result<Self> {
+        settings::select_path(&settings_path).map_err(anyhow::Error::msg)?;
         let discovery = Discovery::start(settings.rom_directories.clone())?;
         let input = Input::new(&settings);
         let animation = Animation::new(0, settings.layout, settings.reduced_motion);
@@ -147,6 +156,8 @@ impl App {
         let profiles = models::profiles()?;
 
         Ok(Self {
+            artwork_key_draft: settings::api_key().map_err(anyhow::Error::msg)?,
+            editing_artwork_key: false,
             settings,
             input,
             animation,
@@ -155,7 +166,7 @@ impl App {
             console_selections: HashMap::new(),
             alphabet: Vec::new(),
             selected: 0,
-            status: "Reading library...".into(),
+            status: String::new(),
             menu: None,
             menu_focus: 0,
             menu_motion: MenuMotion::default(),
@@ -283,11 +294,10 @@ impl App {
             }
             Action::Launch if self.context() == InputContext::Browsing => {
                 if let Some(entry) = self.entries.get(self.selected) {
-                    let status = format!("Loading {}...", entry.title);
                     self.loader
                         .request((entry.clone(), self.settings.data_directory.clone()));
                     self.loaded = None;
-                    self.notice(status);
+                    self.status.clear();
                     self.invalidate_artwork();
                     self.animation.begin_launch();
                     self.clear_inputs();
@@ -299,7 +309,7 @@ impl App {
                     self.loader.cancel();
                     self.loaded = None;
                     self.animation.cancel_launch();
-                    self.notice("Launch cancelled".into());
+                    self.status.clear();
                     self.clear_inputs();
                     self.play_sound(Cue::Back);
                 } else if self.session.is_some() {
@@ -351,7 +361,8 @@ impl App {
         match Discovery::start(self.settings.rom_directories.clone()) {
             Ok(discovery) => {
                 self.discovery = discovery;
-                self.notice("Reading library...".into());
+                self.status.clear();
+                self.needs_redraw = true;
             }
             Err(error) => self.notice(error.to_string()),
         }
@@ -546,6 +557,76 @@ impl App {
         self.needs_redraw = true;
     }
 
+    fn commit_artwork_key(&mut self, key: &str) {
+        if let Err(error) = settings::set_api_key(key) {
+            self.notice(error);
+            return;
+        }
+
+        self.artwork_key_draft = key.trim().to_owned();
+        self.editing_artwork_key = false;
+
+        self.invalidate_artwork();
+        self.artwork.retry_failed();
+        self.prepared_artwork_generation = None;
+        self.artwork_refresh_at = Instant::now();
+    }
+
+    fn finish_artwork_key_edit(&mut self, save: bool) {
+        if save {
+            let draft = self.artwork_key_draft.clone();
+            self.commit_artwork_key(&draft);
+        } else {
+            self.editing_artwork_key = false;
+            self.artwork_key_draft = settings::api_key().unwrap_or_default();
+        }
+    }
+
+    pub fn artwork_key_input(
+        &mut self,
+        event: &winit::event::KeyEvent,
+        modifiers: winit::keyboard::ModifiersState,
+    ) {
+        use winit::keyboard::{KeyCode, PhysicalKey};
+
+        if event.state != winit::event::ElementState::Pressed {
+            return;
+        }
+
+        match event.physical_key {
+            PhysicalKey::Code(KeyCode::Enter) => self.finish_artwork_key_edit(true),
+            PhysicalKey::Code(KeyCode::Escape) => self.finish_artwork_key_edit(false),
+            PhysicalKey::Code(KeyCode::Backspace) => {
+                self.artwork_key_draft.pop();
+            }
+            PhysicalKey::Code(KeyCode::KeyA)
+                if modifiers.control_key() || modifiers.super_key() =>
+            {
+                self.artwork_key_draft.clear()
+            }
+            PhysicalKey::Code(KeyCode::KeyV)
+                if modifiers.control_key() || modifiers.super_key() =>
+            {
+                match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
+                    Ok(text) => match settings::normalize_key(&text) {
+                        Ok(text) => self.artwork_key_draft.push_str(&text),
+                        Err(error) => self.notice(error),
+                    },
+                    Err(_) => self.notice("Cannot read clipboard".into()),
+                }
+            }
+            _ if !modifiers.control_key() && !modifiers.super_key() => {
+                if let Some(text) = &event.text {
+                    self.artwork_key_draft
+                        .extend(text.chars().filter(|c| c.is_ascii() && !c.is_control()));
+                }
+            }
+            _ => {}
+        }
+
+        self.needs_redraw = true;
+    }
+
     pub fn save_settings(&mut self) -> bool {
         if let Err(error) = self.settings.save(&self.settings_path) {
             self.notice(error.to_string());
@@ -611,7 +692,7 @@ impl App {
             self.remapping = false;
 
             if self.save_settings() {
-                self.notice("Binding updated".into());
+                self.status.clear();
                 self.play_sound(Cue::Select);
             }
         }
@@ -1296,21 +1377,9 @@ impl App {
 
         if self.animation.phase == Phase::Launching {
             if self.animation.launch_ready() {
-                let title_height = 26.0 * text_scale * 1.3;
-
                 ui.text(
                     24.0,
                     height * 0.4,
-                    width - 48.0,
-                    26.0,
-                    "Loading cartridge",
-                    [244, 243, 236, 255],
-                )
-                .align = TextAlign::Center;
-
-                ui.text(
-                    24.0,
-                    height * 0.4 + title_height + 12.0,
                     width - 48.0,
                     15.0,
                     "Back / Escape to cancel",
@@ -1342,26 +1411,16 @@ impl App {
 
         if self.session.is_some() {
             if self.status_visible(Instant::now()) {
-                let message_height = 18.2 * text_scale + 18.0;
-
-                ui.rect(
+                let message_height = notice_height(text_scale);
+                notice_ui(
+                    &mut ui,
                     [
                         16.0,
                         height - message_height - 16.0,
                         width - 32.0,
                         message_height,
                     ],
-                    [24, 27, 24, 225],
-                    8.0,
-                );
-
-                ui.text(
-                    25.0,
-                    height - message_height - 7.0,
-                    width - 50.0,
-                    14.0,
                     &self.status,
-                    [243, 244, 235, 255],
                 );
             }
 
@@ -1375,7 +1434,7 @@ impl App {
 
         capsule_ui(&mut ui, layout.margin, layout.margin, console, theme);
 
-        if self.entries.is_empty() {
+        if self.entries.is_empty() && self.discovery.finished() {
             let title_y = (height * if compact { 0.23 } else { 0.34 }).max(24.0);
             let title_size = if compact { 20.0 } else { 30.0 };
             let title_height = title_size * text_scale * if compact { 2.6 } else { 1.3 };
@@ -1385,11 +1444,7 @@ impl App {
                 title_y,
                 width - 48.0,
                 title_size,
-                if self.discovery.finished() {
-                    "Your library starts here"
-                } else {
-                    "Reading your library"
-                },
+                "Your library starts here",
                 ink,
             );
 
@@ -1407,12 +1462,16 @@ impl App {
 
             instruction.align = TextAlign::Center;
             instruction.max_height = 16.0 * text_scale * 2.6;
-        } else {
+        } else if !self.entries.is_empty() {
             let entry = &self.entries[self.selected];
             self.alphabet_ui(&mut ui);
-            let centered_ribbon = !compact && self.settings.layout == ViewMode::Ribbon;
+            let notice_visible = self.status_visible(Instant::now());
+            let centered_ribbon =
+                !compact && self.settings.layout == ViewMode::Ribbon && !notice_visible;
 
-            let card_bottom = if centered_ribbon {
+            let card_bottom = if notice_visible {
+                layout.footer_top - notice_height(text_scale) - 20.0
+            } else if centered_ribbon {
                 layout.footer_controls_top
             } else {
                 layout.footer_top - 8.0
@@ -1537,14 +1596,17 @@ impl App {
 
         ui.text_scale = scale;
 
-        if self.status_visible(Instant::now()) && ui.logical_size[1] >= 500.0 {
-            ui.text(
-                layout.margin,
-                layout.footer_top - 22.0 * scale,
-                width - layout.margin * 2.0,
-                12.0,
+        if self.status_visible(Instant::now()) {
+            let message_height = notice_height(scale);
+            notice_ui(
+                ui,
+                [
+                    layout.margin,
+                    layout.footer_top - message_height - 12.0,
+                    width - layout.margin * 2.0,
+                    message_height,
+                ],
                 &self.status,
-                UI_MUTED,
             );
         }
     }
@@ -1711,7 +1773,7 @@ impl App {
             logical_size,
             self.settings.text_scale,
             true,
-            !self.status.is_empty(),
+            self.status_visible(Instant::now()),
         )
         .with_cartridge_preview(logical_size, self.settings.text_scale)
         .preview
@@ -1729,7 +1791,13 @@ impl App {
             .as_deref()
             .filter(|_| menu == Menu::Controls);
 
-        let status = error.unwrap_or(&self.status);
+        let status = error.unwrap_or_else(|| {
+            if self.status_visible(Instant::now()) {
+                &self.status
+            } else {
+                ""
+            }
+        });
 
         let mut layout = MenuLayout::new(
             ui.logical_size,
@@ -2005,15 +2073,16 @@ impl App {
         }
 
         if !status.is_empty() {
-            ui.text(
-                layout.left,
-                layout.footer_top + layout.prompt_height + 4.0,
-                layout.width,
-                11.0,
+            notice_ui(
+                ui,
+                [
+                    layout.left,
+                    layout.footer_top + layout.prompt_height + 12.0,
+                    layout.width,
+                    layout.status_height,
+                ],
                 status,
-                ink,
-            )
-            .max_height = layout.status_height;
+            );
         }
     }
 
@@ -2119,6 +2188,12 @@ impl App {
         let entry = self.entries.get(self.selected);
 
         match row {
+            SettingsRow::ArtworkKey if self.editing_artwork_key => {
+                format!("{}_", self.artwork_key_draft)
+            }
+            SettingsRow::ArtworkKey if self.artwork_key_draft.is_empty() => "Anonymous".into(),
+            SettingsRow::ArtworkKey => "*".repeat(self.artwork_key_draft.len().min(32)),
+            SettingsRow::ArtworkAccount => String::new(),
             SettingsRow::View => format!("{:?}", self.settings.layout),
             SettingsRow::Quality => format!("{:?}", self.settings.quality),
             SettingsRow::ReduceMotion => on_off(self.settings.reduced_motion),
@@ -2180,6 +2255,16 @@ impl App {
     }
 
     fn menu_action(&mut self, action: Action) -> bool {
+        if self.editing_artwork_key {
+            match action {
+                Action::Launch => self.finish_artwork_key_edit(true),
+                Action::Back => self.finish_artwork_key_edit(false),
+                _ => {}
+            }
+
+            self.needs_redraw = true;
+            return true;
+        }
         if self.menu.is_none() {
             return false;
         }
@@ -2237,6 +2322,15 @@ impl App {
                     }
                 }
                 Some(Menu::Settings) => match self.settings_row() {
+                    Some(SettingsRow::ArtworkKey) => {
+                        self.clear_inputs();
+                        self.editing_artwork_key = true;
+                    }
+                    Some(SettingsRow::ArtworkAccount) => {
+                        if let Err(error) = open::that(settings::ACCOUNT_URL) {
+                            self.notice(error.to_string());
+                        }
+                    }
                     Some(SettingsRow::AddFolder) => {
                         let path = DirectoryBrowser::default_start(
                             self.settings.rom_directories.first().map(|path| {
@@ -2302,7 +2396,7 @@ impl App {
                         self.input.configure(&self.settings);
 
                         if self.save_settings() {
-                            self.notice("Controls restored to defaults".into());
+                            self.status.clear();
                         }
                     }
                 }
@@ -2490,7 +2584,7 @@ impl App {
             let result = session.quick_save();
 
             self.notice(match result {
-                Ok(()) => "Quick state saved".into(),
+                Ok(()) => String::new(),
                 Err(error) => format!("Save failed: {error}"),
             });
         }
@@ -2502,7 +2596,7 @@ impl App {
             self.frame_sequence = None;
 
             self.notice(match result {
-                Ok(true) => "Quick state loaded".into(),
+                Ok(true) => String::new(),
                 Ok(false) => "No quick state saved yet".into(),
                 Err(error) => format!("Load failed: {error}"),
             });
@@ -2853,6 +2947,25 @@ impl LibraryLayout {
     }
 }
 
+fn notice_height(text_scale: f32) -> f32 {
+    14.0 * 1.3 * text_scale * 3.0 + 24.0
+}
+
+fn notice_ui(ui: &mut UiFrame, [x, y, width, height]: [f32; 4], message: &str) {
+    ui.rect([x, y, width, height], [250, 237, 218, 255], 10.0);
+    ui.rect([x, y + 10.0, 4.0, height - 20.0], [170, 83, 33, 255], 2.0);
+    let text = ui.text(
+        x + 16.0,
+        y + 12.0,
+        width - 32.0,
+        14.0,
+        message,
+        [100, 45, 22, 255],
+    );
+    text.max_height = height - 24.0;
+    text.vertically_centered = true;
+}
+
 struct MenuLayout {
     left: f32,
     top: f32,
@@ -2973,9 +3086,13 @@ impl MenuLayout {
         };
 
         let prompt_height = 11.0 * 1.3 * text_scale * 2.0;
-        let status_height = if status { 11.0 * 1.3 * text_scale } else { 0.0 };
+        let status_height = if status {
+            notice_height(text_scale)
+        } else {
+            0.0
+        };
         let footer_top =
-            height - top - prompt_height - status_height - if status { 4.0 } else { 0.0 };
+            height - top - prompt_height - status_height - if status { 12.0 } else { 0.0 };
         let body_bottom = footer_top - 12.0;
         let mut body_top = top + heading_size * 1.3 * text_scale + 16.0;
         let desired_subtitle_height = 13.0 * 1.3 * text_scale;

@@ -206,9 +206,9 @@ pub fn capture(mut settings: Settings, directory: PathBuf, size: [u32; 2]) -> Re
         renderer.capture(&directory.join("gameplay.png"))?;
         app.action(Action::Pause);
         app.action(Action::QuickSave);
-        anyhow::ensure!(app.status == "Quick state saved", "{}", app.status);
+        anyhow::ensure!(app.status.is_empty(), "{}", app.status);
         app.action(Action::QuickLoad);
-        anyhow::ensure!(app.status == "Quick state loaded", "{}", app.status);
+        anyhow::ensure!(app.status.is_empty(), "{}", app.status);
         render(&mut app, &mut renderer)?;
         renderer.capture(&directory.join("paused.png"))?;
         app.action(Action::Back);

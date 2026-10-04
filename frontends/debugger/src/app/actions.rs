@@ -332,6 +332,7 @@ impl Debugger {
         for pane in &mut self.panes {
             pane.disasm.toggle_follow(self.target.as_ref());
         }
+        self.save_preferences(cx);
         cx.notify();
     }
 
@@ -339,10 +340,18 @@ impl Debugger {
         for pane in &mut self.panes {
             pane.disasm.toggle_bytes();
         }
+        self.save_preferences(cx);
         cx.notify();
     }
 
     pub(super) fn open_settings(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        match settings::api_key() {
+            Ok(key) => self
+                .artwork_key_input
+                .update(cx, |input, cx| input.set_content(&key, cx)),
+            Err(error) => tracing::error!("{error}"),
+        }
+
         self.settings = Some(position);
         cx.notify();
     }
@@ -360,16 +369,19 @@ impl Debugger {
 
     pub(super) fn log_toggle_dedup(&mut self, cx: &mut Context<Self>) {
         self.logs.toggle_dedup();
+        self.save_preferences(cx);
         cx.notify();
     }
 
     pub(super) fn toggle_show_log(&mut self, cx: &mut Context<Self>) {
         self.show_log = !self.show_log;
+        self.save_preferences(cx);
         cx.notify();
     }
 
     pub(super) fn toggle_live_refresh(&mut self, cx: &mut Context<Self>) {
         self.live_refresh = !self.live_refresh;
+        self.save_preferences(cx);
         cx.notify();
     }
 

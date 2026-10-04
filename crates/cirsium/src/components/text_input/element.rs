@@ -61,7 +61,11 @@ impl Element for TextElement {
     ) -> Self::PrepaintState {
         let theme = Theme::global(cx);
         let input = self.input.read(cx);
-        let content = input.content.clone();
+        let content = if input.masked {
+            "*".repeat(input.content.len()).into()
+        } else {
+            input.content.clone()
+        };
         let selected_range = input.selected_range.clone();
         let cursor = input.cursor_offset();
         let style = window.text_style();

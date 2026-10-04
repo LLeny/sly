@@ -25,6 +25,7 @@ members = [
     "crates/scripting",
     "crates/storage",
     "crates/testrunner",
+    "crates/settings",
 ]
 
 [workspace.dependencies]

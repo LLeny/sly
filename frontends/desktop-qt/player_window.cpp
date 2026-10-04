@@ -3,6 +3,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMediaDevices>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -123,10 +125,20 @@ PlayerWindow::PlayerWindow(
     QMenuBar* menu_bar = new QMenuBar(this);
     setMenuBar(menu_bar);
 
-    constexpr int INITIAL_SCALE = 2;
+    bool initial_fullscreen = false;
+    try {
+        const auto preferences =
+            QJsonDocument::fromJson(QByteArray::fromStdString(sly::settings_frontend("classic")))
+                .object();
+
+        scale_ = std::clamp(preferences.value("scale").toInt(2), 1, 4);
+        initial_fullscreen = preferences.value("fullscreen").toBool(false);
+    } catch (const std::exception& error) {
+        QMessageBox::warning(this, tr("Settings error"), QString::fromUtf8(error.what()));
+    }
 
     const auto frame = core_.frame();
-    resize_video(frame, INITIAL_SCALE);
+    resize_video(frame, scale_);
     video_widget_->set_frame(frame);
 
     initialize_audio();
@@ -192,14 +204,22 @@ PlayerWindow::PlayerWindow(
         } else {
             showFullScreen();
         }
+
+        save_preferences();
     });
     fullscreen_action->setShortcut(Qt::Key_F11);
     fullscreen_action->setCheckable(true);
-    fullscreen_action->setChecked(isFullScreen());
+    fullscreen_action->setChecked(initial_fullscreen);
+
+    if (initial_fullscreen) {
+        showFullScreen();
+    }
 
     for (int scale = 1; scale <= 4; ++scale) {
         scale_menu->addAction(tr("Scale %1").arg(scale), this, [this, scale] {
+            scale_ = scale;
             resize_video(core_.frame(), scale);
+            save_preferences();
         });
     }
 
@@ -217,6 +237,7 @@ void PlayerWindow::keyPressEvent(QKeyEvent* event) {
 
     if (event->key() == Qt::Key_Escape && isFullScreen()) {
         showNormal();
+        save_preferences();
         event->accept();
         return;
     }
@@ -310,6 +331,21 @@ void PlayerWindow::reset_core() {
     release_input();
     core_.reset();
     video_widget_->set_frame(core_.frame());
+}
+
+void PlayerWindow::save_preferences() {
+    const QJsonObject preferences{
+        {"scale", scale_},
+        {"fullscreen", isFullScreen()},
+    };
+
+    try {
+        sly::settings_save_frontend(
+            "classic", QJsonDocument(preferences).toJson(QJsonDocument::Compact).toStdString()
+        );
+    } catch (const std::exception& error) {
+        QMessageBox::warning(this, tr("Settings error"), QString::fromUtf8(error.what()));
+    }
 }
 
 void PlayerWindow::resize_video(const sly::FrameView frame, const int scale) {

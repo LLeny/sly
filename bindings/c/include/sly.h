@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define SLY_ABI_VERSION 2
+#define SLY_ABI_VERSION 3
 
 // Anything but `Ok` leaves a description in `sly_last_error()`.
 typedef enum SlyStatus {
@@ -94,7 +94,6 @@ typedef struct SlyBuffer {
 typedef struct SlyArtworkQuery {
   struct SlyBuffer sha1;
   struct SlyBuffer metadata_url;
-  struct SlyBuffer authorization;
   enum SlyRegion region;
 } SlyArtworkQuery;
 

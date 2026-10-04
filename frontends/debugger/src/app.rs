@@ -6,8 +6,8 @@ use std::time::Duration;
 use cirsium::assets::icon;
 use cirsium::components::{
     CheckboxSize, MenuItem, PanelChrome, Segmented, StatusView, TextInput, TextInputEvent,
-    checkbox, combobox_menu, context_menu, field_button, icon_button, popover, status_bar,
-    title_bar,
+    checkbox, combobox_menu, context_menu, field_button, field_text_button, icon_button, popover,
+    status_bar, title_bar,
 };
 use cirsium::widgets::{
     AudioScopeView, AudioScopeWidget, AudioScopesView, BitmapView, BitmapWidget, BreakpointKind,
@@ -48,6 +48,7 @@ use crate::script::Script;
 mod actions;
 mod input;
 mod panels;
+mod preferences;
 mod refresh;
 mod render;
 mod runtime;
@@ -225,6 +226,8 @@ pub(crate) struct Debugger {
     builtin_filter: SharedString,
     collapsed: HashSet<SharedString>,
     settings: Option<Point<Pixels>>,
+    artwork_key_input: Entity<TextInput>,
+    art_query: Option<crate::cover::ArtQuery>,
     live_refresh: bool,
     workspace: SharedString,
     execution: ExecutionState,
@@ -420,6 +423,8 @@ impl Debugger {
             panes,
             collapsed: HashSet::from([SharedString::from(LogWidget::ID)]),
             settings: None,
+            artwork_key_input: cx.new(|cx| TextInput::new(cx, "Anonymous").secret()),
+            art_query: None,
             live_refresh: true,
             workspace,
             execution: ExecutionState::Paused,
@@ -436,6 +441,7 @@ impl Debugger {
             web_tick_armed: false,
         };
 
+        debugger.load_preferences(cx);
         debugger.refresh_panes(CpuRefresh::Baseline, false, cx);
         debugger
     }
@@ -448,5 +454,21 @@ impl Debugger {
         self.target.set_cover_art(cover);
         self.cartridge = Arc::new(self.target.cartridge().clone().into());
         cx.notify();
+    }
+
+    pub(crate) fn resolve_cover_art(
+        &mut self,
+        art: crate::cover::ArtQuery,
+        cx: &mut Context<Self>,
+    ) {
+        self.art_query = Some(art.clone());
+        let client = cx.http_client();
+
+        cx.spawn(async move |this, cx| {
+            if let Some(cover) = crate::cover::resolve(client, &art).await {
+                let _ = this.update(cx, |this, cx| this.set_cover_art(cover, cx));
+            }
+        })
+        .detach();
     }
 }

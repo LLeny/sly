@@ -17,7 +17,11 @@ pub const ACCENT_PRESETS: [u32; 8] = [
 ];
 
 // Special people :)
-pub const GUEST_COLORS: &[(&str, u32)] = &[("Blody", 0xD7B4F3), ("Chicho", 0x93C572)];
+pub const GUEST_COLORS: &[(&str, u32)] = &[
+    ("Nadine", 0x78866B),
+    ("Blody", 0xD7B4F3),
+    ("Chicho", 0x93C572),
+];
 
 pub fn accent_at(index: usize) -> u32 {
     let presets = ACCENT_PRESETS.len();

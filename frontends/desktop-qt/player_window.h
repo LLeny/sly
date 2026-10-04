@@ -28,6 +28,7 @@ protected:
     bool event(QEvent* event) override;
 
 private:
+    void save_preferences();
     void resize_video(sly::FrameView frame, int scale);
     QString state_path(std::uint8_t slot) const;
     void save_state(std::uint8_t slot);
@@ -45,6 +46,7 @@ private:
 
     sly::Core core_;
     QString save_ram_path_;
+    int scale_ = 2;
 
     VideoWidget* video_widget_ = nullptr;
     QChronoTimer* frame_timer_ = nullptr;

@@ -25,6 +25,8 @@ use debugger_model::{
 
 const LEAD_BYTES: u32 = 48;
 const COUNT: usize = 200;
+// Rows kept visible above the PC when following it.
+const CONTEXT_ROWS: usize = 2;
 
 pub struct Menu {
     pub position: Point<Pixels>,
@@ -292,7 +294,8 @@ impl Disasm {
             && self.view_mode == ViewMode::Linear
             && let Some(ix) = self.current_ix
         {
-            self.scroll.scroll_to_item_strict(ix, ScrollStrategy::Top);
+            self.scroll
+                .scroll_to_item_strict(ix.saturating_sub(CONTEXT_ROWS), ScrollStrategy::Top);
         }
     }
 

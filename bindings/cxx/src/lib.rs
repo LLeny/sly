@@ -1,4 +1,5 @@
 use core_model::System as CoreSystem;
+use settings::{api_key, frontend_json, save_frontend_json, set_api_key};
 use sly::runtime::{
     Runtime, button_from_index, inspect_cartridge as inspect_runtime_cartridge, system_from_index,
 };
@@ -67,6 +68,11 @@ mod ffi {
 
     extern "Rust" {
         type SlyCore;
+
+        fn api_key() -> Result<String>;
+        fn set_api_key(key: &str) -> Result<()>;
+        fn frontend_json(name: &str) -> Result<String>;
+        fn save_frontend_json(name: &str, json: &str) -> Result<()>;
 
         fn system_count() -> usize;
         fn system_at(index: usize) -> Result<System>;

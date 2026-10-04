@@ -8,6 +8,7 @@ name = "sly_cxx"
 crate-type = ["lib", "staticlib"]
 
 [dependencies]
+settings = { path = "../../crates/settings" }
 artwork = { path = "../../crates/artwork", features = ["fetch"] }
 core-model = { path = "../../crates/models/core" }
 core-loader = { path = "../../crates/core-loader" }

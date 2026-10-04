@@ -5,6 +5,7 @@ use futures::future::BoxFuture;
 use gpui::http_client::http::HeaderValue;
 use gpui::http_client::{AsyncBody, HttpClient, Request, Response, Result, Url, http};
 
+#[derive(Clone)]
 pub(crate) struct ArtQuery {
     pub game: core_model::GameId,
     pub region: Option<core_model::Region>,
@@ -48,10 +49,17 @@ impl HttpClient for ArtAuthClient {
     }
 
     fn send(&self, mut req: Request<AsyncBody>) -> BoxFuture<'static, Result<Response<AsyncBody>>> {
-        if artwork::layle::is_art_url(&req.uri().to_string())
-            && let Ok(value) = HeaderValue::from_str(&artwork::layle::authorization())
-        {
-            req.headers_mut().insert(http::header::AUTHORIZATION, value);
+        if artwork::layle::is_art_url(&req.uri().to_string()) {
+            req.extensions_mut()
+                .insert(gpui::http_client::RedirectPolicy::NoFollow);
+            req.headers_mut().remove(http::header::AUTHORIZATION);
+
+            if let Some(auth) = settings::authorization()
+                && let Ok(mut value) = HeaderValue::from_str(&auth)
+            {
+                value.set_sensitive(true);
+                req.headers_mut().insert(http::header::AUTHORIZATION, value);
+            }
         }
 
         self.0.send(req)

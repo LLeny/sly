@@ -58,22 +58,26 @@ public actor ArtworkService {
     public func cover(
         system: System,
         romURL: URL,
-        preferredRegion: ArtworkRegion = .automatic
+        preferredRegion: ArtworkRegion = .automatic,
+        apiKey: String = ""
     ) async throws -> ArtworkCover? {
         try await cover(
             query: try query(system: system, romURL: romURL),
-            preferredRegion: preferredRegion
+            preferredRegion: preferredRegion,
+            apiKey: apiKey
         )
     }
 
     public func cover(
         system: System,
         rom: Data,
-        preferredRegion: ArtworkRegion = .automatic
+        preferredRegion: ArtworkRegion = .automatic,
+        apiKey: String = ""
     ) async throws -> ArtworkCover? {
         try await cover(
             query: try NativeArtwork.query(system: system, rom: rom),
-            preferredRegion: preferredRegion
+            preferredRegion: preferredRegion,
+            apiKey: apiKey
         )
     }
 
@@ -99,7 +103,8 @@ public actor ArtworkService {
 
     private func cover(
         query: NativeArtworkQuery,
-        preferredRegion: ArtworkRegion
+        preferredRegion: ArtworkRegion,
+        apiKey: String
     ) async throws -> ArtworkCover? {
         let region = preferredRegion.native(romRegion: query.region)
         let cacheKey = "\(query.system.slug)-\(query.sha1)-\(preferredRegion.rawValue)"
@@ -120,10 +125,7 @@ public actor ArtworkService {
 
         let metadata: Data
         do {
-            metadata = try await data(
-                from: query.metadataURL,
-                authorization: query.authorization
-            )
+            metadata = try await data(from: query.metadataURL, apiKey: apiKey)
         } catch ArtworkError.httpStatus(404) {
             unavailableCovers.insert(cacheKey)
             return nil
@@ -138,10 +140,7 @@ public actor ArtworkService {
             return nil
         }
 
-        let image = try await data(
-            from: frontURL,
-            authorization: query.authorization
-        )
+        let image = try await data(from: frontURL, apiKey: apiKey)
         let cover = ArtworkCover(title: manifest.title, data: image)
         diskCache.store(cover, forKey: cacheKey)
         covers.setObject(
@@ -152,15 +151,26 @@ public actor ArtworkService {
         return cover
     }
 
-    private func data(from url: URL, authorization: String) async throws -> Data {
+    private func data(from url: URL, apiKey: String) async throws -> Data {
         var request = URLRequest(
             url: url,
             cachePolicy: .returnCacheDataElseLoad,
             timeoutInterval: 15
         )
-        request.setValue(authorization, forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await session.data(for: request)
+        let isArtworkOrigin =
+            url.scheme == "https"
+            && url.host == "art.layle.dev"
+            && (url.port == nil || url.port == 443)
+
+        if isArtworkOrigin, !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await session.data(
+            for: request,
+            delegate: ArtworkRedirectPolicy.shared
+        )
         guard let response = response as? HTTPURLResponse else {
             throw ArtworkError.invalidResponse
         }
@@ -237,7 +247,6 @@ private struct NativeArtworkQuery {
     let system: System
     let sha1: String
     let metadataURL: URL
-    let authorization: String
     let region: SlyRegion
 }
 
@@ -259,7 +268,6 @@ private enum NativeArtwork {
         var native = SlyArtworkQuery(
             sha1: emptyBuffer,
             metadata_url: emptyBuffer,
-            authorization: emptyBuffer,
             region: SLY_REGION_OTHER
         )
         let status = rom.withUnsafeBytes { bytes in
@@ -281,7 +289,6 @@ private enum NativeArtwork {
             system: system,
             sha1: string(native.sha1),
             metadataURL: metadataURL,
-            authorization: string(native.authorization),
             region: native.region
         )
     }
@@ -337,5 +344,19 @@ private enum NativeArtwork {
     private static func url(_ buffer: SlyBuffer) -> URL? {
         let value = string(buffer)
         return value.isEmpty ? nil : URL(string: value)
+    }
+}
+
+private final class ArtworkRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    static let shared = ArtworkRedirectPolicy()
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }

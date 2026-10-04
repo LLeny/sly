@@ -13,6 +13,11 @@
 #include <vector>
 
 namespace sly {
+std::string settings_api_key();
+void settings_set_api_key(const std::string& key);
+std::string settings_frontend(const std::string& name);
+void settings_save_frontend(const std::string& name, const std::string& json);
+
 class Error final : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;

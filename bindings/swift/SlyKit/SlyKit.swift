@@ -152,7 +152,7 @@ private func decodeBackupKind(_ value: SlyBackupKind) -> BackupKind? {
 /// Owns one native emulator instance. Use it from one execution context at a
 /// time; the underlying core is intentionally not thread-safe.
 public final class EmulatorCore {
-    public static let expectedABIVersion: UInt32 = 2
+    public static let expectedABIVersion: UInt32 = 3
 
     private let handle: OpaquePointer
 

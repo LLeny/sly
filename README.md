@@ -59,27 +59,40 @@ Color means playable or work-in-progress. Click on a logo to see the respective 
 
 **Sly Launcher**
 * 3D boxes and cartridges
-* Three shelf layouts
+* Row, column and ribbon shelf layouts
 * Flippable box art
 * Automatic artwork downloads
-* Regional packaging and models
-* Library search
+* Regional packaging and models, with per-game release overrides
+* Per-game cartridge finishes
 * Gamepad navigation
 * Remappable controls
 * Save states
+* Quality presets, text size, reduced motion and integer scaling
+* Fullscreen
 
-**Debugger**
+**Sly Classic**
+* Sortable game list with banners
+* Quick save slot plus ten save state slots
+* 1x to 4x scaling and fullscreen
+* Gamepad support
+* Automatic artwork downloads
+
+**Sly Debugger**
 * Instruction and event stepping
 * Linear and graph disassembly
 * CPU registers and call stacks
 * CPU and memory breakpoints
 * Memory viewer
 * MMIO register inspection
-* Tile and background viewers
+* DMA inspection
+* Tile, tilemap and background viewers
 * Sprite and palette viewers
+* Various coprocessor workspaces (for example SA-1 and Super FX)
 * Audio visualization
 * Built-in Lua editor and scripting
 * Save states
+* Cartridge info with cover art
+* Light and dark themes with various accent colors
 
 ## Usage
 
@@ -101,6 +114,17 @@ From the command line:
 sly-launcher path/to/roms/
 sly-debugger path/to/game.sfc
 ```
+
+## Artwork
+
+Box art and covers come from [art.layle.dev](https://art.layle.dev). This works without an account, but anonymous access has lower rate limits. For higher limits, log in at [art.layle.dev/account](https://art.layle.dev/account), generate an API key and paste it into the settings of any frontend:
+
+* **Sly Launcher**: Settings -> Artwork key
+* **Sly Classic**: File -> Settings
+* **Sly Debugger**: the settings popover, under Artwork
+* **iOS**: Settings -> Artwork
+
+The key is stored in `settings.toml` in Sly's data folder (for example `%APPDATA%\sly` on Windows), which all desktop frontends share.
 
 ## Default Controls
 
@@ -148,6 +172,8 @@ git submodule update --init --recursive
 cargo run --locked -p modern-launcher -- roms/
 cargo run --locked -p debugger -- path/to/game.sfc
 ```
+
+This should work for most of the Rust crates.
 
 **Sly Classic** also needs:
 

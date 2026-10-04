@@ -6,15 +6,24 @@
 #include "sly/sly.hpp"
 
 #include <QActionGroup>
+#include <QCheckBox>
+#include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
+#include <QFormLayout>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
+#include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QStyle>
 #include <QStyledItemDelegate>
 #include <QTableView>
+#include <QUrl>
 
 #include <exception>
 #include <print>
@@ -81,7 +90,7 @@ void configure_table(QTableView& table) {
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    setWindowTitle(tr("Sly Desktop"));
+    setWindowTitle(tr("Sly Classic"));
     setMinimumSize(900, 500);
     resize(1180, 720);
 
@@ -121,6 +130,57 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     }
 
     auto* model = new RomListModel(this);
+    file_menu->addAction(tr("&Settings..."), this, [this, model] {
+        QDialog dialog(this);
+        dialog.setWindowTitle(tr("Settings"));
+        auto* layout = new QFormLayout(&dialog);
+
+        auto* key = new QLineEdit(&dialog);
+        key->setEchoMode(QLineEdit::Password);
+        key->setPlaceholderText(tr("Anonymous"));
+
+        try {
+            key->setText(QString::fromStdString(sly::settings_api_key()));
+        } catch (const std::exception& error) {
+            QMessageBox::warning(this, tr("Settings error"), QString::fromUtf8(error.what()));
+        }
+
+        auto* show = new QCheckBox(tr("Show"), &dialog);
+        connect(show, &QCheckBox::toggled, key, [key](bool checked) {
+            key->setEchoMode(checked ? QLineEdit::Normal : QLineEdit::Password);
+        });
+
+        auto* key_row = new QHBoxLayout;
+        key_row->addWidget(key);
+        key_row->addWidget(show);
+        layout->addRow(tr("Artwork key"), key_row);
+
+        auto* buttons =
+            new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+        auto* clear = buttons->addButton(tr("Clear"), QDialogButtonBox::ResetRole);
+        auto* get_key = buttons->addButton(tr("Get key"), QDialogButtonBox::HelpRole);
+        layout->addRow(buttons);
+
+        connect(clear, &QPushButton::clicked, key, &QLineEdit::clear);
+        connect(get_key, &QPushButton::clicked, &dialog, [] {
+            QDesktopServices::openUrl(QUrl(QStringLiteral("https://art.layle.dev/account")));
+        });
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, [&dialog, key, model] {
+            try {
+                sly::settings_set_api_key(key->text().toStdString());
+                model->load_banners();
+                dialog.accept();
+            } catch (const std::exception& error) {
+                QMessageBox::warning(
+                    &dialog, QObject::tr("Settings error"), QString::fromUtf8(error.what())
+                );
+            }
+        });
+
+        dialog.exec();
+    });
+
     auto* proxy = new QSortFilterProxyModel(this);
     proxy->setSourceModel(model);
     proxy->setSortCaseSensitivity(Qt::CaseInsensitive);

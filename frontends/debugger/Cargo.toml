@@ -8,6 +8,8 @@ name = "sly-debugger"
 path = "src/main.rs"
 
 [dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+settings = { path = "../../crates/settings" }
 game-database = { path = "../../crates/game-database" }
 core-loader = { path = "../../crates/core-loader", features = ["debug"] }
 gpui = { workspace = true }

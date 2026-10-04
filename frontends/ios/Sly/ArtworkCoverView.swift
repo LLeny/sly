@@ -11,6 +11,9 @@ struct ArtworkCoverView: View {
     @AppStorage(AppSettings.artworkRegionKey)
     private var artworkRegion = AppSettings.defaultArtworkRegion
 
+    @AppStorage(AppSettings.artworkAPIKeyKey)
+    private var artworkAPIKey = ""
+
     var body: some View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
@@ -29,14 +32,15 @@ struct ArtworkCoverView: View {
             }
             .clipped()
             .accessibilityHidden(true)
-            .task(id: artworkRegion) {
+            .task(id: "\(artworkRegion.rawValue)-\(artworkAPIKey)") {
                 cover = nil
                 isLoading = true
                 do {
                     let loaded = try await ArtworkService.shared.cover(
                         system: system,
                         romURL: rom,
-                        preferredRegion: artworkRegion
+                        preferredRegion: artworkRegion,
+                        apiKey: artworkAPIKey
                     )
                     try Task.checkCancellation()
                     cover = loaded

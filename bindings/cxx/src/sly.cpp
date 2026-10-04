@@ -354,4 +354,21 @@ void Core::inhibit_save_ram_persistence() const noexcept {
 CartridgeInfo Core::cartridge_info() const {
     return to_cartridge_info(impl_->core->cartridge_info());
 }
+
+std::string settings_api_key() {
+    return to_string(ffi::api_key());
+}
+
+void settings_set_api_key(const std::string& key) {
+    ffi::set_api_key(key);
+}
+
+std::string settings_frontend(const std::string& name) {
+    return to_string(ffi::frontend_json(name));
+}
+
+void settings_save_frontend(const std::string& name, const std::string& json) {
+    ffi::save_frontend_json(name, json);
+}
+
 } // namespace sly

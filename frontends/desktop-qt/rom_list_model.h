@@ -43,8 +43,8 @@ public:
 
     static QVector<RomEntry> entries_from_directory(const QString& root_path);
 
-private:
     void load_banners();
 
+private:
     QVector<RomEntry> entries_;
 };

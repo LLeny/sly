@@ -4,7 +4,6 @@ use gpui::prelude::*;
 use gpui::{Context, Entity, SharedString, Window, div};
 
 use crate::app::Debugger;
-use crate::cover::ArtQuery;
 use crate::logging::LogBuffer;
 
 pub(crate) struct Root {
@@ -22,7 +21,7 @@ impl Root {
         let debugger = initial.map(|(target, art, game)| {
             let debugger = cx.new(|cx| Debugger::new(target, game, logs.clone(), cx));
             Self::load_saves(debugger.clone(), cx);
-            Self::resolve_cover_art(debugger.clone(), art, cx);
+            debugger.update(cx, |debugger, cx| debugger.resolve_cover_art(art, cx));
             debugger
         });
         Self {
@@ -80,7 +79,7 @@ impl Root {
                 let logs = self.logs.clone();
                 let debugger = cx.new(|cx| Debugger::new(target, game, logs, cx));
                 Self::load_saves(debugger.clone(), cx);
-                Self::resolve_cover_art(debugger.clone(), art, cx);
+                debugger.update(cx, |debugger, cx| debugger.resolve_cover_art(art, cx));
                 self.debugger = Some(debugger);
                 self.error = None;
             }
@@ -99,17 +98,6 @@ impl Root {
                 tracing::error!("loading stored saves: {err}");
             }
             debugger.update(cx, |debugger, cx| debugger.saves_loaded(cx));
-        })
-        .detach();
-    }
-
-    fn resolve_cover_art(debugger: Entity<Debugger>, art: ArtQuery, cx: &mut Context<Self>) {
-        let client = cx.http_client();
-        cx.spawn(async move |_this, cx| {
-            let Some(cover) = crate::cover::resolve(client, &art).await else {
-                return;
-            };
-            debugger.update(cx, |debugger, cx| debugger.set_cover_art(cover, cx));
         })
         .detach();
     }

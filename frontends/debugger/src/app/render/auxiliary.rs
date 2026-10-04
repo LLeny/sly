@@ -15,6 +15,9 @@ impl Debugger {
                 .flex_col()
                 .gap_2()
                 .min_w(px(150.))
+                .max_h(px(650.))
+                .id("settings-content")
+                .overflow_y_scroll()
                 .child(
                     div()
                         .text_xs()
@@ -78,10 +81,10 @@ impl Debugger {
                         .child("SPECIAL GUEST COLORS"),
                 )
                 .child(GUEST_COLORS.iter().enumerate().fold(
-                    div().flex().flex_col().gap(px(3.)),
-                    |col, (gi, &(name, _color))| {
+                    div().flex().items_center().gap_3(),
+                    |row, (gi, &(name, _color))| {
                         let index = ACCENT_PRESETS.len() + gi;
-                        col.child(
+                        row.child(
                             div()
                                 .flex()
                                 .items_center()
@@ -95,7 +98,51 @@ impl Debugger {
                                 ),
                         )
                     },
-                ));
+                ))
+                .child(div().text_xs().text_color(t.text_muted).child("ARTWORK"))
+                .child(self.artwork_key_input.clone())
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(field_text_button(
+                            t,
+                            "artwork-key-save",
+                            icon::SAVE,
+                            "Save",
+                            cx.listener(|this, _, _, cx| this.save_artwork_key(cx)),
+                        ))
+                        .child(field_text_button(
+                            t,
+                            "artwork-key-clear",
+                            icon::TRASH,
+                            "Clear",
+                            cx.listener(|this, _, _, cx| {
+                                this.artwork_key_input
+                                    .update(cx, |input, cx| input.set_content("", cx));
+                            }),
+                        ))
+                        .child(field_text_button(
+                            t,
+                            "artwork-key-get",
+                            icon::LINK,
+                            "Get key",
+                            |_, _, cx| cx.open_url(settings::ACCOUNT_URL),
+                        ))
+                        .child(checkbox(
+                            t,
+                            "artwork-key-show",
+                            !self.artwork_key_input.read(cx).masked(),
+                            "Show",
+                            CheckboxSize::Small,
+                            cx.listener(|this, _, _, cx| {
+                                this.artwork_key_input.update(cx, |input, cx| {
+                                    input.set_masked(!input.masked(), cx);
+                                });
+                            }),
+                        )),
+                );
             popover(
                 t,
                 pos,

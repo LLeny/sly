@@ -35,7 +35,6 @@ pub enum SlyRegion {
 pub struct SlyArtworkQuery {
     pub sha1: SlyBuffer,
     pub metadata_url: SlyBuffer,
-    pub authorization: SlyBuffer,
     pub region: SlyRegion,
 }
 
@@ -82,7 +81,6 @@ pub unsafe extern "C" fn sly_artwork_query(
     let game = meta.game_id();
     let query = SlyArtworkQuery {
         metadata_url: buffer_from_string(::artwork::layle::metadata_url(&game)),
-        authorization: buffer_from_string(::artwork::layle::authorization()),
         sha1: buffer_from_string(game.sha1),
         region: meta.region.map(Into::into).unwrap_or(SlyRegion::Other),
     };
@@ -161,7 +159,6 @@ pub unsafe extern "C" fn sly_artwork_query_free(query: *mut SlyArtworkQuery) {
     unsafe {
         crate::capi::sly_buffer_free(&mut query.sha1);
         crate::capi::sly_buffer_free(&mut query.metadata_url);
-        crate::capi::sly_buffer_free(&mut query.authorization);
     }
 }
 

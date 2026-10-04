@@ -1,17 +1,16 @@
 use core_model::{GameId, Region};
 use serde::Deserialize;
 
-// Not security relevant, only used for metrics
-const API_KEY: &str = "rad_layle_lIztEZYqfy_FCjjH6I6b99WaZ9i8-jWG1Sq-zlHHKME";
-
 pub const BASE_URL: &str = "https://art.layle.dev";
 
-pub fn authorization() -> String {
-    format!("Bearer {API_KEY}")
-}
-
 pub fn is_art_url(url: &str) -> bool {
-    url.starts_with(BASE_URL)
+    url::Url::parse(url).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str() == Some("art.layle.dev")
+            && url.port_or_known_default() == Some(443)
+            && url.username().is_empty()
+            && url.password().is_none()
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,6 +162,7 @@ mod fetch {
 
     static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
         ureq::Agent::config_builder()
+            .max_redirects(0)
             .timeout_connect(Some(Duration::from_secs(5)))
             .timeout_global(Some(Duration::from_secs(15)))
             .build()
@@ -236,10 +236,7 @@ mod fetch {
                     write_atomic(&path, &bytes);
                     Ok(Some(bytes))
                 }
-                Err(error) => {
-                    eprintln!("artwork {selected}: {error}");
-                    Ok(None)
-                }
+                Err(error) => Err(format!("artwork {selected}: {error}")),
             }
         };
 
@@ -278,7 +275,10 @@ mod fetch {
             return Ok(None);
         };
 
-        let wheel = get_bounded(&super::art_url(game, &selected), MAX_IMAGE_BYTES).ok();
+        let wheel = Some(get_bounded(
+            &super::art_url(game, &selected),
+            MAX_IMAGE_BYTES,
+        )?);
 
         if let Some(bytes) = &wheel {
             write_atomic(&path, bytes);
@@ -352,11 +352,25 @@ mod fetch {
     }
 
     fn get_bounded(url: &str, limit: u64) -> Result<Vec<u8>, String> {
-        AGENT
-            .get(url)
-            .header("Authorization", super::authorization())
+        let mut request = AGENT.get(url);
+
+        if super::is_art_url(url)
+            && let Some(value) = settings::authorization()
+        {
+            request = request.header("Authorization", value);
+        }
+
+        request
             .call()
-            .map_err(|error| error.to_string())?
+            .map_err(|error| match error {
+                ureq::Error::StatusCode(401 | 403) => {
+                    "Artwork API key rejected; update it in Settings".to_string()
+                }
+                ureq::Error::StatusCode(429) => {
+                    "Artwork rate limit reached; try later or set a key in Settings".to_string()
+                }
+                error => error.to_string(),
+            })?
             .body_mut()
             .with_config()
             .limit(limit)

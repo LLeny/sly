@@ -69,14 +69,15 @@ fn main() -> Result<()> {
         "Window size must be between 320x240 and 7680x4320"
     );
 
-    let path = cli.settings.clone().unwrap_or_else(Settings::default_path);
+    let path = cli
+        .settings
+        .clone()
+        .unwrap_or_else(::settings::default_path);
 
     let mut settings = if cli.capture.is_some() && cli.settings.is_none() {
         Ok(Settings::default())
-    } else if cli.settings.is_some() {
-        Settings::load(&path)
     } else {
-        Settings::load_default(&path)
+        Settings::load(&path)
     }
     .context("Cannot read launcher settings")?;
 
@@ -91,6 +92,8 @@ fn main() -> Result<()> {
     if let Some(output) = cli.capture {
         // Keep QA away from the user's saves and settings.
         std::fs::create_dir_all(&output)?;
+        ::settings::initialize(Some(&output.join("qa-settings.toml")))
+            .map_err(anyhow::Error::msg)?;
         settings.data_directory = Some(output.join("session-data"));
         settings.volume = 0.0;
         return validation::capture(settings, output, [cli.width, cli.height]);
@@ -376,6 +379,14 @@ impl ApplicationHandler for Runtime {
                 is_synthetic,
                 ..
             } if self.focused && !is_synthetic => {
+                if self.app.editing_artwork_key {
+                    self.app
+                        .artwork_key_input(&event, self.text_input.modifiers);
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    return;
+                }
                 let context = self.app.context();
                 let opening_key = self.text_input.opening_key == Some(event.physical_key);
 
