@@ -102,7 +102,10 @@ sly_target_wgsl_shaders(desktop_qt
         FILES ${DESKTOP_QT_WGSL_SHADERS}
 )
 
-set_target_properties(desktop_qt PROPERTIES CXX_SCAN_FOR_MODULES OFF)
+set_target_properties(desktop_qt PROPERTIES
+        OUTPUT_NAME sly-classic
+        CXX_SCAN_FOR_MODULES OFF
+)
 target_link_libraries(desktop_qt
         PRIVATE
         Qt::Concurrent

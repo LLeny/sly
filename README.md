@@ -21,6 +21,15 @@ Supported platforms:
 * Web browsers via WebGPU (debugger only so far)
 * iOS, with Android planned
 
+## Download
+
+Get the [latest release](https://github.com/ioncodes/sly/releases/latest):
+
+* **Windows, macOS and Linux**: each frontend comes as its own archive: `sly-launcher`, `sly-classic` and `sly-debugger`.
+* **iOS**: `sly-ios-arm64-unsigned.ipa`. It's unsigned, so you need to sideload it (for example with AltStore or SideStore).
+
+For the newest changes, try the [nightly build](https://github.com/ioncodes/sly/releases/tag/nightly). It's rebuilt from the `dev` branch once a day and may be unstable.
+
 ## Compatibility
 
 Color means playable or work-in-progress. Click on a logo to see the respective compatibility database.
@@ -60,11 +69,11 @@ Color means playable or work-in-progress. Click on a logo to see the respective 
 * Save states
 
 **Debugger**
-* Instruction stepping
+* Instruction and event stepping
 * Linear and graph disassembly
 * CPU registers and call stacks
 * CPU and memory breakpoints
-* Memory inspection
+* Memory viewer
 * MMIO register inspection
 * Tile and background viewers
 * Sprite and palette viewers
@@ -74,29 +83,49 @@ Color means playable or work-in-progress. Click on a logo to see the respective 
 
 ## Usage
 
-Supported file types:
-* SNES: `.sfc`, `.smc`
-* GBA: `.gba`
+| System | File types     |
+| ------ | -------------- |
+| SNES   | `.sfc`, `.smc` |
+| GBA    | `.gba`         |
 
-In **Sly Launcher** add your ROM folders in settings (or pass a folder on the command line). **Sly Classic** scans `roms/` in its working directory.
+How you load games depends on the frontend:
 
-On **iOS**, add games to Sly's `roms/{system}/` folders through the Files app.
+* **Sly Launcher**: add your ROM folders in settings, or pass a folder on the command line.
+* **Sly Classic**: put your ROMs in `roms/{system}/` in the working directory.
+* **iOS**: copy games into Sly's `roms/{system}/` folders using the Files app.
+* **Sly Debugger**: pass the ROM path on the command line, or drag it into the window.
 
-Open a game directly in the debugger:
+From the command line:
 
 ```sh
-debugger.exe path/to/game.sfc
+sly-launcher path/to/roms/
+sly-debugger path/to/game.sfc
 ```
-
-On macOS and Linux, use `./debugger` instead of `debugger.exe`. The [web debugger](https://sly.layle.dev/app) lets you load a local ROM in a WebGPU-capable browser.
 
 ## Default Controls
 
-In the launcher, use arrows to browse, **Enter** to play, **/** to search, **F** to flip a box, **Tab** to change views, and **F2** for settings. During a game, **P** pauses and **Esc** returns to the library. Gamepads are supported; game bindings can be changed in settings.
+These are Sly Launcher's defaults. All of them can be remapped in settings (gamepads are supported too).
 
-The launcher's default game bindings are:
+Keys are matched by position, so the labels below are for a US QWERTY keyboard. On other layouts, press the key in the same place (for example, **Z** is **Y** on a German keyboard).
 
-| In-game control   | Keyboard          |
+**Library**
+
+| Action                  | Key               |
+| ----------------------- | ----------------- |
+| Browse                  | Arrow keys / WASD |
+| Play                    | Enter / Space     |
+| Flip box                | F                 |
+| Change view             | Tab               |
+| Search                  | /                 |
+| Previous / next letter  | Q / E             |
+| Console list            | C                 |
+| Previous / next console | Page Up / Down    |
+| Settings                | F2                |
+| Fullscreen              | F11               |
+
+**In game**
+
+| Control           | Key               |
 | ----------------- | ----------------- |
 | D-pad             | Arrow keys        |
 | B / A             | Z / X             |
@@ -104,12 +133,15 @@ The launcher's default game bindings are:
 | L / R             | Q / W             |
 | Start / Select    | Enter / Backspace |
 | Save / load state | F5 / F8           |
+| Pause             | P                 |
+| Back to library   | Esc               |
+| Fullscreen        | F11               |
 
 ## Development Setup
 
-See the [build workflow](.github/workflows/binaries.yml) for platform dependencies, including Linux audio and windowing libraries.
+See the [build workflow](.github/workflows/binaries.yml) for platform dependencies, including Linux audio and windowing libraries. Run everything from the repository root.
 
-From the repository root:
+**Sly Launcher and Sly Debugger**
 
 ```sh
 git submodule update --init --recursive
@@ -123,7 +155,16 @@ cargo run --locked -p debugger -- path/to/game.sfc
 * CMake 4.3 or newer
 * Ninja
 * A C++23 compiler
-* SDL3 3.2 or newer for gamepads
+* naga-cli 29.0.4 (`cargo install naga-cli --version 29.0.4 --locked`)
+* SDL3 3.2 or newer for gamepads (or configure with `-DSLY_ENABLE_GAMEPAD=OFF`)
+
+```sh
+qt-cmake -S frontends/desktop-qt -B build/desktop-qt -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DSLY_CARGO_PROFILE=release
+cmake --build build/desktop-qt
+```
+
+**iOS** needs a Mac with Xcode 26. Open `frontends/ios/Sly.xcodeproj`, choose your signing team and run the `Sly` scheme.
 
 ## License
 

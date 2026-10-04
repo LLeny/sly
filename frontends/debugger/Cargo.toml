@@ -3,6 +3,10 @@ name = "debugger"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "sly-debugger"
+path = "src/main.rs"
+
 [dependencies]
 game-database = { path = "../../crates/game-database" }
 core-loader = { path = "../../crates/core-loader", features = ["debug"] }

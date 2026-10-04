@@ -55,7 +55,7 @@ jobs:
       - name: Build web bundle
         run: |
           cargo build --locked --profile web-release --target wasm32-unknown-unknown -p debugger
-          wasm-bindgen target/wasm32-unknown-unknown/web-release/debugger.wasm \
+          wasm-bindgen target/wasm32-unknown-unknown/web-release/sly-debugger.wasm \
             --target web --no-typescript --out-dir _site --out-name debugger
           wasm-opt -O3 \
             --enable-reference-types --enable-bulk-memory --enable-mutable-globals \

@@ -5,10 +5,16 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
-  group: native-binaries-${{ github.ref }}
-  cancel-in-progress: true
+  group: native-binaries-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_INCREMENTAL: "0"
@@ -17,12 +23,68 @@ env:
   QT_VERSION: "6.11.1"
 
 jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      channel: ${{ steps.plan.outputs.channel }}
+      ref: ${{ steps.plan.outputs.ref }}
+      sha: ${{ steps.plan.outputs.sha }}
+      tag: ${{ steps.plan.outputs.tag }}
+
+    steps:
+      - name: Decide what to build
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          build=true
+          ref=
+          tag=
+
+          case "$GITHUB_EVENT_NAME" in
+            push)
+              channel=release
+              sha="$GITHUB_SHA"
+              tag="v$(date -u +%Y.%m.%d)-${sha::7}"
+              ;;
+            schedule | workflow_dispatch)
+              channel=nightly
+              sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/dev" --jq .sha)
+              ref="$sha"
+              tag=nightly
+              built=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/nightly" --jq .object.sha 2>/dev/null) || built=
+              # Manual runs always rebuild; scheduled runs skip an unchanged dev.
+              if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$sha" = "$built" ]; then
+                build=false
+              fi
+              ;;
+            *)
+              channel=none
+              sha="$GITHUB_SHA"
+              ;;
+          esac
+
+          {
+            echo "build=$build"
+            echo "channel=$channel"
+            echo "ref=$ref"
+            echo "sha=$sha"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "channel=$channel build=$build sha=$sha tag=$tag"
+
   checks:
     name: Source checks
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
 
       - name: Initialize build submodules
         run: git submodule update --init --depth 1 submodules/chipi-spec submodules/libretro-database
@@ -52,29 +114,24 @@ jobs:
 
   desktop:
     name: Desktop (${{ matrix.platform }})
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux-x86_64
             runner: ubuntu-24.04
-            debugger_archive: sly-debugger-linux-x86_64.tar.gz
-            launcher_archive: modern-launcher-linux-x86_64.tar.gz
-            qt_archive: sly-desktop-qt-linux-x86_64.tar.gz
           - platform: macos-aarch64
             runner: macos-15
-            debugger_archive: sly-debugger-macos-aarch64.tar.gz
-            launcher_archive: modern-launcher-macos-aarch64.tar.gz
-            qt_archive: sly-desktop-qt-macos-aarch64.tar.gz
           - platform: windows-x86_64
             runner: windows-2022
-            debugger_archive: sly-debugger-windows-x86_64.zip
-            launcher_archive: modern-launcher-windows-x86_64.zip
-            qt_archive: sly-desktop-qt-windows-x86_64.zip
     runs-on: ${{ matrix.runner }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
 
       - name: Initialize build submodules
         shell: bash
@@ -194,7 +251,7 @@ jobs:
         run: |
           qt-cmake -S frontends/desktop-qt -B build/desktop-qt -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/stage/desktop-qt" \
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/stage/sly-classic" \
             -DSDL3_ROOT="${{ steps.sdl.outputs.prefix }}" \
             -DSLY_CARGO_PROFILE=release
 
@@ -208,7 +265,7 @@ jobs:
             -G Ninja `
             -DCMAKE_CXX_COMPILER=cl.exe `
             -DCMAKE_BUILD_TYPE=Release `
-            "-DCMAKE_INSTALL_PREFIX=$env:GITHUB_WORKSPACE/stage/desktop-qt" `
+            "-DCMAKE_INSTALL_PREFIX=$env:GITHUB_WORKSPACE/stage/sly-classic" `
             "-DSDL3_ROOT=${{ steps.sdl.outputs.prefix }}" `
             -DSLY_CARGO_PROFILE=release
 
@@ -218,55 +275,53 @@ jobs:
           cmake --install build/desktop-qt --config Release
 
       - name: Package Unix applications
-        if: github.event_name == 'push' && runner.os != 'Windows'
+        if: needs.plan.outputs.channel != 'none' && runner.os != 'Windows'
         shell: bash
         run: |
-          mkdir -p stage/debugger stage/modern-launcher dist
-          install -m 755 target/release/debugger stage/debugger/sly-debugger
-          install -m 755 target/release/modern-launcher stage/modern-launcher/modern-launcher
-          for application in debugger modern-launcher desktop-qt; do
+          mkdir -p stage/sly-debugger stage/sly-launcher dist
+          install -m 755 target/release/sly-debugger stage/sly-debugger/sly-debugger
+          install -m 755 target/release/sly-launcher stage/sly-launcher/sly-launcher
+          for application in sly-debugger sly-launcher sly-classic; do
             install -m 644 LICENSE "stage/$application/LICENSE"
             cp -R licenses "stage/$application/"
+            tar -czf "dist/$application-${{ matrix.platform }}.tar.gz" -C "stage/$application" .
           done
-          tar -czf "dist/${{ matrix.debugger_archive }}" -C stage/debugger .
-          tar -czf "dist/${{ matrix.launcher_archive }}" -C stage/modern-launcher .
-          tar -czf "dist/${{ matrix.qt_archive }}" -C stage/desktop-qt .
 
       - name: Package Windows applications
-        if: github.event_name == 'push' && runner.os == 'Windows'
+        if: needs.plan.outputs.channel != 'none' && runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path stage/debugger, stage/modern-launcher, dist | Out-Null
-          Copy-Item target/release/debugger.exe stage/debugger/sly-debugger.exe
-          Copy-Item target/release/modern-launcher.exe stage/modern-launcher/modern-launcher.exe
-          foreach ($application in @("debugger", "modern-launcher", "desktop-qt")) {
+          New-Item -ItemType Directory -Force -Path stage/sly-debugger, stage/sly-launcher, dist | Out-Null
+          Copy-Item target/release/sly-debugger.exe stage/sly-debugger/
+          Copy-Item target/release/sly-launcher.exe stage/sly-launcher/
+          foreach ($application in @("sly-debugger", "sly-launcher", "sly-classic")) {
             Copy-Item LICENSE "stage/$application/LICENSE"
             Copy-Item licenses "stage/$application/" -Recurse -Force
+            Compress-Archive -Path "stage/$application/*" -DestinationPath "dist/$application-${{ matrix.platform }}.zip"
           }
-          Compress-Archive -Path stage/debugger/* -DestinationPath "dist/${{ matrix.debugger_archive }}"
-          Compress-Archive -Path stage/modern-launcher/* -DestinationPath "dist/${{ matrix.launcher_archive }}"
-          Compress-Archive -Path stage/desktop-qt/* -DestinationPath "dist/${{ matrix.qt_archive }}"
 
       - name: Upload desktop archives
-        if: github.event_name == 'push'
+        if: needs.plan.outputs.channel != 'none'
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.platform }}
-          path: |
-            dist/sly-*
-            dist/modern-launcher-*
+          path: dist/sly-*
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 7
 
   ios:
     name: iOS (arm64, unsigned)
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     runs-on: macos-15
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
 
       - name: Initialize build submodule
         run: git submodule update --init --depth 1 submodules/chipi-spec
@@ -295,7 +350,7 @@ jobs:
             build
 
       - name: Package unsigned IPA
-        if: github.event_name == 'push'
+        if: needs.plan.outputs.channel != 'none'
         run: |
           mkdir -p dist/Payload
           cp -R build/ios/Build/Products/Release-iphoneos/Sly.app dist/Payload/
@@ -305,11 +360,49 @@ jobs:
           zip -qry sly-ios-arm64-unsigned.ipa Payload LICENSE licenses
 
       - name: Upload iOS archive
-        if: github.event_name == 'push'
+        if: needs.plan.outputs.channel != 'none'
         uses: actions/upload-artifact@v4
         with:
           name: ios-arm64-unsigned
           path: dist/sly-ios-arm64-unsigned.ipa
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 7
+
+  publish:
+    name: Publish ${{ needs.plan.outputs.channel }}
+    needs: [plan, checks, desktop, ios]
+    if: needs.plan.outputs.channel != 'none' && needs.plan.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SHA: ${{ needs.plan.outputs.sha }}
+      TAG: ${{ needs.plan.outputs.tag }}
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        if: needs.plan.outputs.channel == 'release'
+        run: |
+          gh release create "$TAG" dist/* \
+            --target "$SHA" \
+            --title "Sly $TAG" \
+            --generate-notes \
+            --latest
+
+      - name: Publish nightly
+        if: needs.plan.outputs.channel == 'nightly'
+        run: |
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly dist/* \
+            --target "$SHA" \
+            --title "Nightly $(date -u +%Y-%m-%d) (${SHA::7})" \
+            --notes "Automated build of \`dev\` at $SHA. Replaced daily when \`dev\` changes; expect bugs." \
+            --prerelease
