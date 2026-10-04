@@ -37,7 +37,7 @@ Color means playable or work-in-progress. Click on a logo to see the respective 
 <table>
   <tr>
     <td><a href="https://emu.layle.dev/sly-snes"><img src="assets/systems/snes.svg" width="240" alt="Super Nintendo" title="Super Nintendo screenshot database"></a></td>
-    <td><img src="assets/systems/gba.svg" width="240" alt="Game Boy Advance"></td>
+    <td><a href="https://emu.layle.dev/sly-gba"><img src="assets/systems/gba.svg" width="240" alt="Game Boy Advance" title="Game Boy Advance screenshot database"></a></td>
     <td><img src="assets/systems/gb.svg" width="240" alt="Game Boy and Game Boy Color"></td>
     <td><img src="assets/systems/gg.svg" width="240" alt="Game Gear"></td>
   </tr>
