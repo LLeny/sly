@@ -26,21 +26,6 @@ pub(crate) const VBLANK_START_CYCLES: u64 = VBLANK_START_SCANLINE as u64 * SCANL
 pub(crate) const VBLANK_END_CYCLES: u64 = VBLANK_END_SCANLINE as u64 * SCANLINE_CYCLES;
 pub(crate) const FRAME_CYCLES: u64 = SCANLINES_PER_FRAME as u64 * SCANLINE_CYCLES;
 
-#[cfg(feature = "debug")]
-#[derive(Clone, Copy)]
-pub(crate) struct Revisions {
-    pub(crate) palette: u64,
-    pub(crate) vram: u64,
-}
-
-#[cfg(feature = "debug")]
-impl Revisions {
-    pub(crate) fn bump(&mut self) {
-        self.palette += 1;
-        self.vram += 1;
-    }
-}
-
 pub struct Ppu {
     #[cfg(feature = "debug")]
     pub(crate) revisions: Revisions,
@@ -54,6 +39,44 @@ pub struct Ppu {
     pub(crate) oam: Vec<u8>,
 
     pub(crate) frame: Vec<[u8; 4]>,
+}
+
+/// Bitmap width, height, bytes per pixel and VRAM page offset.
+pub(crate) fn bitmap_layout(control: DisplayControl) -> Option<(usize, usize, usize, usize)> {
+    let page = control.frame_select().vram_offset();
+    match control.mode() {
+        BackgroundMode::Mode3 => Some((SCREEN_WIDTH as usize, SCREEN_HEIGHT as usize, 2, 0)),
+        BackgroundMode::Mode4 => Some((SCREEN_WIDTH as usize, SCREEN_HEIGHT as usize, 1, page)),
+        BackgroundMode::Mode5 => Some((160, 128, 2, page)),
+        _ => None,
+    }
+}
+
+pub(crate) fn render_bg_scanline(
+    control: DisplayControl,
+    vram: &[u8],
+    palette: &[u8],
+    line: usize,
+    output: &mut [[u8; 4]],
+) {
+    let (width, height, bytes_per_pixel, base) =
+        bitmap_layout(control).expect("render_bg_scanline requires a bitmap background mode");
+    output.fill(rgba(palette_color(palette, 0)));
+    if line >= height {
+        return;
+    }
+    assert!(output.len() >= width);
+
+    let pitch = width * bytes_per_pixel;
+    let start = base + line * pitch;
+    let src = &vram[start..start + pitch];
+    for (dst, bytes) in output.iter_mut().zip(src.chunks_exact(bytes_per_pixel)) {
+        let color = match control.mode() {
+            BackgroundMode::Mode4 => palette_color(palette, bytes[0].into()),
+            _ => u16::from_le_bytes([bytes[0], bytes[1]]),
+        };
+        *dst = rgba(color);
+    }
 }
 
 impl Default for Ppu {
@@ -93,23 +116,33 @@ impl Ppu {
     }
 
     pub(crate) fn render_scanline(&mut self) {
-        let frame = self.dispctrl.frame_select();
-        let line = self.vcount.scanline() as usize;
-        let start = line * SCREEN_WIDTH as usize;
-        let end = start + SCREEN_WIDTH as usize;
-
-        let base = frame.vram_offset();
-        let page = &self.vram[base + start..base + end];
-
-        for (x, &index) in page.iter().enumerate() {
-            let pixel = self.palette_color(index.into());
-            self.frame[start + x] = rgba(pixel);
+        let bg2 = self.dispctrl.enable_bg2();
+        if bg2
+            && matches!(
+                self.dispctrl.mode(),
+                BackgroundMode::Mode3 | BackgroundMode::Mode4 | BackgroundMode::Mode5
+            )
+        {
+            self.render_bitmap_mode();
         }
     }
 
+    pub(crate) fn render_bitmap_mode(&mut self) {
+        let line = self.vcount.scanline() as usize;
+        let start = line * SCREEN_WIDTH as usize;
+        let end = start + SCREEN_WIDTH as usize;
+        render_bg_scanline(
+            self.dispctrl,
+            &self.vram,
+            &self.palette,
+            line,
+            &mut self.frame[start..end],
+        );
+    }
+
+    #[cfg(feature = "debug")]
     pub(crate) fn palette_color(&self, index: usize) -> u16 {
-        let offset = (index * 2) & (PALETTE_SIZE as usize - 1);
-        u16::from_le_bytes([self.palette[offset], self.palette[offset + 1]])
+        palette_color(&self.palette, index)
     }
 
     pub(crate) fn start_hblank(&mut self) {
@@ -232,6 +265,11 @@ fn write_memory(
     }
 }
 
+fn palette_color(palette: &[u8], index: usize) -> u16 {
+    let offset = (index * 2) & (PALETTE_SIZE as usize - 1);
+    u16::from_le_bytes([palette[offset], palette[offset + 1]])
+}
+
 pub(crate) fn rgba(color: u16) -> [u8; 4] {
     let expand = |shift: u32| {
         let channel = ((color >> shift) & 0x1F) as u8;
@@ -248,5 +286,20 @@ pub(crate) fn vram_offset(address: u32) -> usize {
         offset - 0x8000
     } else {
         offset
+    }
+}
+
+#[cfg(feature = "debug")]
+#[derive(Clone, Copy)]
+pub(crate) struct Revisions {
+    pub(crate) palette: u64,
+    pub(crate) vram: u64,
+}
+
+#[cfg(feature = "debug")]
+impl Revisions {
+    pub(crate) fn bump(&mut self) {
+        self.palette += 1;
+        self.vram += 1;
     }
 }

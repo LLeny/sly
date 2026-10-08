@@ -33,6 +33,7 @@ impl DisplayStatus {
 }
 
 #[chapa::bitenum]
+#[derive(Debug, PartialEq, Eq)]
 pub enum BackgroundMode {
     Mode0 = 0,
     Mode1 = 1,

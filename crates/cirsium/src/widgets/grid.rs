@@ -431,8 +431,23 @@ pub(super) fn picker(
     let segmented = |id: SharedString, key: usize| {
         let mut segmented = Segmented::new(id).selected(key.to_string());
         if let Some(handler) = handler.clone() {
+            let enabled_members: Vec<_> = layers
+                .iter()
+                .enumerate()
+                .map(|(index, layer)| {
+                    if layer.enabled {
+                        Some(index)
+                    } else {
+                        layers
+                            .iter()
+                            .position(|candidate| candidate.name == layer.name && candidate.enabled)
+                    }
+                })
+                .collect();
             segmented = segmented.on_select(move |key, window, cx| {
-                if let Ok(index) = key.parse() {
+                if let Ok(index) = key.parse::<usize>()
+                    && let Some(&Some(index)) = enabled_members.get(index)
+                {
                     handler(index, window, cx);
                 }
             });

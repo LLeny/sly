@@ -185,9 +185,25 @@ impl Element for Segmented {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let theme = Theme::global(cx);
         let options = std::mem::take(&mut self.options);
+        let current = options.iter().position(|o| o.key == self.selected);
         let active = options
             .iter()
-            .position(|o| o.enabled && o.key == self.selected);
+            .enumerate()
+            .cycle()
+            .skip(current.unwrap_or(0))
+            .take(options.len())
+            .find(|(_, option)| option.enabled)
+            .map(|(index, _)| index);
+
+        if let Some(index) = active
+            && self.selected != options[index].key
+        {
+            self.selected = options[index].key.clone();
+            if let Some(handler) = self.on_select.clone() {
+                let key = self.selected.clone();
+                window.defer(cx, move |window, cx| handler(key.as_ref(), window, cx));
+            }
+        }
 
         let mut children: Vec<AnyElement> = Vec::with_capacity(options.len());
         let mut child_ids: Vec<LayoutId> = Vec::with_capacity(options.len());

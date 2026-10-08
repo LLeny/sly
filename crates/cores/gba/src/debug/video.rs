@@ -1,3 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use debugger_model::{
     BitmapImage, BitmapSource, Field, FlagView, MemoryAddress, PaletteColor, PaletteView, Row,
     Section, StructuredView, VideoDebug, VideoResource, VideoResourceId, VideoResourceKind,
@@ -9,125 +12,62 @@ use workspace_model::{
 };
 
 use super::GbaDebug;
-use crate::ppu::regs::DisplayFrame;
-use crate::ppu::rgba;
-use crate::{Gba, SCREEN_HEIGHT, SCREEN_WIDTH};
+use crate::Gba;
+use crate::ppu::regs::BackgroundMode;
+use crate::ppu::{bitmap_layout, render_bg_scanline, rgba};
 
 const PALETTE: &str = "gba.palette";
 
-#[derive(Clone, Copy)]
-enum BgLayer {
-    Stub,
-    Mode4(DisplayFrame),
-}
-
-const BG_LAYERS: [(&str, &str, Option<&str>, BgLayer); 3] = [
-    (
-        "gba.bg.mode4.frame0",
-        "Mode 4",
-        Some("Frame 0"),
-        BgLayer::Mode4(DisplayFrame::Frame0),
-    ),
-    (
-        "gba.bg.mode4.frame1",
-        "Mode 4",
-        Some("Frame 1"),
-        BgLayer::Mode4(DisplayFrame::Frame1),
-    ),
-    ("gba.bg.mode5", "Mode 5 (stub)", None, BgLayer::Stub),
+const BG_LAYERS: [(&str, &str); 4] = [
+    ("gba.bg0", "BG0"),
+    ("gba.bg1", "BG1"),
+    ("gba.bg2", "BG2"),
+    ("gba.bg3", "BG3"),
 ];
 
-fn bg_layer(id: &str) -> Option<BgLayer> {
-    BG_LAYERS
-        .iter()
-        .find(|&&(candidate, ..)| candidate == id)
-        .map(|&(.., layer)| layer)
+fn bg_layer(id: &str) -> Option<usize> {
+    BG_LAYERS.iter().position(|&(candidate, _)| candidate == id)
 }
 
-impl VideoDebug for GbaDebug {
-    fn resources(&self) -> Vec<VideoResource> {
-        let palette = VideoResource::new(PALETTE, "Palette", VideoResourceKind::Palette);
-        let layers = BG_LAYERS.iter().map(|&(id, name, variant, _)| {
-            let resource = VideoResource::new(id, name, VideoResourceKind::Bitmap);
-            match variant {
-                Some(variant) => resource.variant(variant),
-                None => resource,
-            }
-        });
-
-        std::iter::once(palette).chain(layers).collect()
+fn bitmap_bg2(core: &Gba) -> Option<BitmapImage> {
+    let control = core.ppu.dispctrl;
+    let mode = control.mode();
+    let (width, height, bytes_per_pixel, base) = bitmap_layout(control)?;
+    let mut pixels = vec![[0; 4]; width * height];
+    for (line, output) in pixels.chunks_exact_mut(width).enumerate() {
+        render_bg_scanline(control, &core.ppu.vram, &core.ppu.palette, line, output);
     }
 
-    fn revision(&self, resource: &VideoResourceId) -> Option<VideoRevision> {
-        let revisions = self.core.ppu.revisions;
-        let pixels = match resource.as_str() {
-            PALETTE => revisions.palette,
-            id => match bg_layer(id)? {
-                BgLayer::Stub => 0,
-                BgLayer::Mode4(_) => revisions.vram + revisions.palette,
-            },
-        };
-
-        Some(VideoRevision {
-            pixels,
-            metadata: 0,
-            overlay: 0,
-        })
-    }
-
-    fn palette(&self, resource: &VideoResourceId) -> Option<PaletteView> {
-        if resource.as_str() != PALETTE {
-            return None;
-        }
-
-        Some(PaletteView {
-            palettes: (0..16)
-                .map(|bank| {
-                    (0..16)
-                        .map(|color| {
-                            let raw = self.core.ppu.palette_color(bank * 16 + color);
-                            let [r, g, b, _] = rgba(raw);
-                            PaletteColor {
-                                raw: raw.into(),
-                                rgb: (r, g, b),
-                            }
-                        })
-                        .collect()
-                })
-                .collect(),
-            ..Default::default()
-        })
-    }
-
-    fn bitmap(&self, resource: &VideoResourceId) -> Option<BitmapImage> {
-        match bg_layer(resource.as_str())? {
-            BgLayer::Stub => None,
-            BgLayer::Mode4(frame) => Some(mode4(&self.core, frame)),
-        }
-    }
-}
-
-fn mode4(core: &Gba, frame: DisplayFrame) -> BitmapImage {
-    let base = frame.vram_offset();
-    let bitmap = &core.ppu.vram[base..base + core.ppu.frame.len()];
-
-    BitmapImage {
-        width: SCREEN_WIDTH,
-        height: SCREEN_HEIGHT,
-        pixels: bitmap
-            .iter()
-            .map(|&index| rgba(core.ppu.palette_color(index.into())))
-            .collect(),
+    Some(BitmapImage {
+        width: width as u32,
+        height: height as u32,
+        pixels: pixels.into(),
+        details: vec![
+            Field::new("Mode", mode.to_string()),
+            Field::new("Enabled", control.enable_bg2().to_string()),
+            Field::new(
+                "Frame",
+                if mode == BackgroundMode::Mode3 {
+                    "Frame 0".to_string()
+                } else {
+                    control.frame_select().to_string()
+                },
+            ),
+        ],
         source: Some(BitmapSource {
             address: MemoryAddress {
                 region: "gba.vram".into(),
                 addr: 0x0600_0000 + base as u32,
             },
-            bytes_per_pixel: 1,
+            bytes_per_pixel: bytes_per_pixel as u32,
         }),
-        indices: Some(bitmap.iter().map(|&index| u16::from(index)).collect()),
-        ..Default::default()
-    }
+        indices: (mode == BackgroundMode::Mode4).then(|| {
+            core.ppu.vram[base..base + width * height]
+                .iter()
+                .map(|&index| u16::from(index))
+                .collect()
+        }),
+    })
 }
 
 pub(super) fn ppu_view(core: &Gba) -> StructuredView {
@@ -205,5 +145,67 @@ pub(super) fn extend_manifest(manifest: &mut ComponentManifest) {
         manifest.panels.push(
             PanelDescriptor::new(id, title, kind, location, RefreshPolicy::OnPause).tag(workspace),
         );
+    }
+}
+
+impl VideoDebug for GbaDebug {
+    fn resources(&self) -> Vec<VideoResource> {
+        let palette = VideoResource::new(PALETTE, "Palette", VideoResourceKind::Palette);
+        let layers = BG_LAYERS
+            .iter()
+            .map(|&(id, name)| VideoResource::new(id, name, VideoResourceKind::Bitmap));
+
+        std::iter::once(palette).chain(layers).collect()
+    }
+
+    fn palette(&self, resource: &VideoResourceId) -> Option<PaletteView> {
+        if resource.as_str() != PALETTE {
+            return None;
+        }
+
+        Some(PaletteView {
+            palettes: (0..16)
+                .map(|bank| {
+                    (0..16)
+                        .map(|color| {
+                            let raw = self.core.ppu.palette_color(bank * 16 + color);
+                            let [r, g, b, _] = rgba(raw);
+                            PaletteColor {
+                                raw: raw.into(),
+                                rgb: (r, g, b),
+                            }
+                        })
+                        .collect()
+                })
+                .collect(),
+            ..Default::default()
+        })
+    }
+
+    fn bitmap(&self, resource: &VideoResourceId) -> Option<BitmapImage> {
+        (bg_layer(resource.as_str())? == 2)
+            .then(|| bitmap_bg2(&self.core))
+            .flatten()
+    }
+
+    fn revision(&self, resource: &VideoResourceId) -> Option<VideoRevision> {
+        let revisions = self.core.ppu.revisions;
+        let pixels = match resource.as_str() {
+            PALETTE => revisions.palette,
+            id => {
+                bg_layer(id)?;
+                let mut hash = DefaultHasher::new();
+                revisions.vram.hash(&mut hash);
+                revisions.palette.hash(&mut hash);
+                self.core.ppu.dispctrl.raw().hash(&mut hash);
+                hash.finish()
+            }
+        };
+
+        Some(VideoRevision {
+            pixels,
+            metadata: 0,
+            overlay: 0,
+        })
     }
 }

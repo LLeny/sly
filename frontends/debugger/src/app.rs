@@ -76,16 +76,19 @@ struct GridState {
 
 impl GridState {
     fn sync(&mut self, resources: &[VideoResource], kind: VideoResourceKind) {
-        if !resources
+        let current = resources
             .iter()
-            .any(|r| r.kind == kind && Some(&r.id) == self.resource.as_ref())
-        {
-            self.resource = resources
-                .iter()
-                .find(|r| r.kind == kind && r.enabled)
-                .or_else(|| resources.iter().find(|r| r.kind == kind))
-                .map(|r| r.id.clone());
+            .position(|r| r.kind == kind && Some(&r.id) == self.resource.as_ref());
+        let next = resources
+            .iter()
+            .cycle()
+            .skip(current.unwrap_or(0))
+            .take(resources.len())
+            .find(|r| r.kind == kind && r.enabled)
+            .map(|r| r.id.clone());
 
+        if next != self.resource {
+            self.resource = next;
             self.hovered = None;
         }
     }
