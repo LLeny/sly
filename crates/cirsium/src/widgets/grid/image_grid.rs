@@ -1,5 +1,10 @@
 use super::*;
 
+/// Side length the hover preview aims for.
+const PREVIEW_PX: f32 = 192.;
+/// Pixels shown around the cursor when every cell is a single pixel (bitmaps).
+const LOUPE_SPAN: u32 = 16;
+
 fn cell_size(viewport: Size<f32>, cols: usize, rows: usize, tile_px: u32) -> f32 {
     if viewport.width < 1. || viewport.height < 1. {
         return (tile_px * 2) as f32;
@@ -159,7 +164,7 @@ fn render(
         .w(px(cell * cols as f32))
         .h(px(cell * rows as f32))
         .child(
-            img(image)
+            img(image.clone())
                 .size_full()
                 .image_filtering(ImageFiltering::Nearest),
         )
@@ -278,6 +283,35 @@ fn render(
     if let Some(index) = hovered.filter(|&i| i < count && selected != Some(i)) {
         grid = grid.child(ring(index, theme.accent_hover));
     }
+    if let Some(index) = hovered.filter(|&i| i < count) {
+        let cell_bounds = Bounds {
+            origin: point(
+                px((index % cols) as f32 * cell),
+                px((index / cols) as f32 * cell),
+            ),
+            size: size(px(cell), px(cell)),
+        };
+        let left_half = (index % cols) * 2 < cols;
+        if let Some(preview) = self::preview(theme, &image, index, cols, rows, tile_px, cell) {
+            // Open on the side with more room so the hovered cell stays visible.
+            let (anchor, x) = if left_half {
+                (Anchor::TopLeft, cell_bounds.right() + px(8.))
+            } else {
+                (Anchor::TopRight, cell_bounds.left() - px(8.))
+            };
+            grid = grid.child(
+                deferred(
+                    anchored()
+                        .position_mode(AnchoredPositionMode::Local)
+                        .anchor(anchor)
+                        .position(point(x, cell_bounds.top()))
+                        .snap_to_window_with_margin(px(6.))
+                        .child(preview),
+                )
+                .priority(2),
+            );
+        }
+    }
     if let Some(index) = selected.filter(|&i| i < count) {
         grid = grid.child(ring(index, theme.accent));
     }
@@ -308,6 +342,65 @@ fn render(
     }
 
     grid
+}
+
+/// Enlarged copy of the hovered cell, or a loupe around the hovered pixel for bitmaps.
+fn preview(
+    theme: &Theme,
+    image: &Arc<RenderImage>,
+    index: usize,
+    cols: usize,
+    rows: usize,
+    tile_px: u32,
+    cell: f32,
+) -> Option<Div> {
+    let (map_w, map_h) = (cols as u32 * tile_px, rows as u32 * tile_px);
+    let (col, row) = ((index % cols) as u32, (index / cols) as u32);
+    let (x, y, span) = if tile_px == 1 {
+        let span = LOUPE_SPAN.min(map_w).min(map_h);
+        let clamp = |center: u32, max: u32| center.saturating_sub(span / 2).min(max - span);
+        (clamp(col, map_w), clamp(row, map_h), span)
+    } else {
+        (col * tile_px, row * tile_px, tile_px)
+    };
+
+    let zoom = (PREVIEW_PX / span as f32).floor().max(1.);
+    let side = span as f32 * zoom;
+    if side <= cell {
+        return None;
+    }
+
+    let mut view = div().relative().size(px(side)).overflow_hidden().child(
+        img(image.clone())
+            .absolute()
+            .left(px(-(x as f32 * zoom)))
+            .top(px(-(y as f32 * zoom)))
+            .w(px(map_w as f32 * zoom))
+            .h(px(map_h as f32 * zoom))
+            .image_filtering(ImageFiltering::Nearest),
+    );
+    if tile_px == 1 {
+        view = view.child(
+            div()
+                .absolute()
+                .left(px((col - x) as f32 * zoom))
+                .top(px((row - y) as f32 * zoom))
+                .size(px(zoom))
+                .border_1()
+                .border_color(theme.accent),
+        );
+    }
+
+    Some(
+        div()
+            .p_1()
+            .bg(theme.bg_panel)
+            .border_1()
+            .border_color(theme.border_strong)
+            .rounded_md()
+            .shadow_lg()
+            .child(view),
+    )
 }
 
 #[expect(clippy::too_many_arguments)]

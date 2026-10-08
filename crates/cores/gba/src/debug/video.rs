@@ -3,8 +3,8 @@ use std::hash::{Hash, Hasher};
 
 use debugger_model::{
     BitmapImage, BitmapSource, Field, FlagView, MemoryAddress, PaletteColor, PaletteView, Row,
-    Section, StructuredView, VideoDebug, VideoResource, VideoResourceId, VideoResourceKind,
-    VideoRevision, panel,
+    Section, SpriteEntry, Sprites, StructuredView, VideoDebug, VideoResource, VideoResourceId,
+    VideoResourceKind, VideoRevision, panel,
 };
 use workspace_model::{
     ComponentManifest, DockLocation, PanelDescriptor, PanelKind, RefreshPolicy,
@@ -12,11 +12,14 @@ use workspace_model::{
 };
 
 use super::GbaDebug;
-use crate::Gba;
 use crate::ppu::regs::BackgroundMode;
-use crate::ppu::{bitmap_layout, render_bg_scanline, rgba};
+use crate::ppu::sprite::{self, ObjMode};
+use crate::ppu::tile::ColorDepth;
+use crate::ppu::{BitmapLayout, VRAM_BASE, bitmap_layout, render_bg_scanline, rgba, sprite_row};
+use crate::{Gba, SCREEN_HEIGHT};
 
 const PALETTE: &str = "gba.palette";
+const SPRITES: &str = "gba.objects";
 
 const BG_LAYERS: [(&str, &str); 4] = [
     ("gba.bg0", "BG0"),
@@ -32,10 +35,16 @@ fn bg_layer(id: &str) -> Option<usize> {
 fn bitmap_bg2(core: &Gba) -> Option<BitmapImage> {
     let control = core.ppu.dispctrl;
     let mode = control.mode();
-    let (width, height, bytes_per_pixel, base) = bitmap_layout(control)?;
+    let layout = bitmap_layout(control)?;
+    let BitmapLayout {
+        width,
+        height,
+        bytes_per_pixel,
+        base,
+    } = layout;
     let mut pixels = vec![[0; 4]; width * height];
     for (line, output) in pixels.chunks_exact_mut(width).enumerate() {
-        render_bg_scanline(control, &core.ppu.vram, &core.ppu.palette, line, output);
+        render_bg_scanline(layout, &core.ppu.vram, &core.ppu.palette, line, output);
     }
 
     Some(BitmapImage {
@@ -68,6 +77,77 @@ fn bitmap_bg2(core: &Gba) -> Option<BitmapImage> {
                 .collect()
         }),
     })
+}
+
+fn sprites(core: &Gba) -> Sprites {
+    let ppu = &core.ppu;
+    let mapping = ppu.dispctrl.sprite_mapping();
+    let entries = sprite::attributes(&ppu.oam)
+        .map(|attr| {
+            let (width, height) = attr.dimensions();
+            let mut pixels = vec![[0; 4]; width * height];
+            for (row, line) in pixels.chunks_exact_mut(width).enumerate() {
+                for (col, color) in sprite_row(attr, mapping, &ppu.vram, &ppu.palette, row) {
+                    line[col] = color;
+                }
+            }
+
+            let x = attr.x_coordinate() as i32;
+            let y = attr.y_coordinate() as i32;
+            let hidden = !attr.affine() && attr.disable_obj();
+            let transform = if attr.affine() {
+                format!(
+                    "Affine #{}, double size {}",
+                    attr.rotation_scaling_parameter(),
+                    attr.double_size()
+                )
+            } else {
+                format!(
+                    "Flip H={} V={}",
+                    attr.horizontal_flip(),
+                    attr.vertical_flip()
+                )
+            };
+            let mode = match attr.mode() {
+                ObjMode::Normal => "Normal",
+                ObjMode::SemiTransparent => "Semi-transparent",
+                ObjMode::ObjWindow => "OBJ window",
+                ObjMode::Prohibited => "Prohibited",
+            };
+            let depth = match attr.color_depth() {
+                ColorDepth::Bpp4 => "4bpp",
+                _ => "8bpp",
+            };
+
+            SpriteEntry {
+                x: if x >= 256 { x - 512 } else { x },
+                y: if y >= SCREEN_HEIGHT as i32 {
+                    y - 256
+                } else {
+                    y
+                },
+                width: width as u32,
+                height: height as u32,
+                details: vec![
+                    Field::new("Tile", format!("{:03X}", attr.tile_number())),
+                    Field::new(
+                        "VRAM",
+                        format!("{:08X}", VRAM_BASE as usize + attr.tile_addr(mapping, 0, 0)),
+                    ),
+                    Field::new("Colors", depth.to_string()),
+                    Field::new("Palette", attr.palette_number().to_string()),
+                    Field::new("Priority", attr.priority().to_string()),
+                    Field::new("Mode", mode.to_string()),
+                    Field::new("Transform", transform),
+                    Field::new("Mosaic", attr.mosaic().to_string()),
+                    Field::new("Hidden", hidden.to_string()),
+                ],
+                pixels,
+            }
+        })
+        .collect();
+
+    Sprites { entries }
 }
 
 pub(super) fn ppu_view(core: &Gba) -> StructuredView {
@@ -141,6 +221,12 @@ pub(super) fn extend_manifest(manifest: &mut ComponentManifest) {
             PanelKind::Bitmap,
             DockLocation::Center,
         ),
+        (
+            panel::SPRITES,
+            "Sprites",
+            PanelKind::Sprites,
+            DockLocation::Center,
+        ),
     ] {
         manifest.panels.push(
             PanelDescriptor::new(id, title, kind, location, RefreshPolicy::OnPause).tag(workspace),
@@ -151,11 +237,12 @@ pub(super) fn extend_manifest(manifest: &mut ComponentManifest) {
 impl VideoDebug for GbaDebug {
     fn resources(&self) -> Vec<VideoResource> {
         let palette = VideoResource::new(PALETTE, "Palette", VideoResourceKind::Palette);
+        let sprites = VideoResource::new(SPRITES, "Objects", VideoResourceKind::Sprites);
         let layers = BG_LAYERS
             .iter()
             .map(|&(id, name)| VideoResource::new(id, name, VideoResourceKind::Bitmap));
 
-        std::iter::once(palette).chain(layers).collect()
+        [palette, sprites].into_iter().chain(layers).collect()
     }
 
     fn palette(&self, resource: &VideoResourceId) -> Option<PaletteView> {
@@ -182,6 +269,10 @@ impl VideoDebug for GbaDebug {
         })
     }
 
+    fn sprites(&self, resource: &VideoResourceId) -> Option<Sprites> {
+        (resource.as_str() == SPRITES).then(|| sprites(&self.core))
+    }
+
     fn bitmap(&self, resource: &VideoResourceId) -> Option<BitmapImage> {
         (bg_layer(resource.as_str())? == 2)
             .then(|| bitmap_bg2(&self.core))
@@ -192,6 +283,14 @@ impl VideoDebug for GbaDebug {
         let revisions = self.core.ppu.revisions;
         let pixels = match resource.as_str() {
             PALETTE => revisions.palette,
+            SPRITES => {
+                let mut hash = DefaultHasher::new();
+                revisions.vram.hash(&mut hash);
+                revisions.palette.hash(&mut hash);
+                revisions.oam.hash(&mut hash);
+                self.core.ppu.dispctrl.raw().hash(&mut hash);
+                hash.finish()
+            }
             id => {
                 bg_layer(id)?;
                 let mut hash = DefaultHasher::new();

@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, ClickEvent, Div, Hsla, ImageFiltering, MouseMoveEvent, Pixels, Point, RenderImage,
-    SharedString, Size, Window, canvas, div, fill, img, point, px, size,
+    Anchor, AnchoredPositionMode, App, Bounds, ClickEvent, Div, Hsla, ImageFiltering,
+    MouseMoveEvent, Pixels, Point, RenderImage, SharedString, Size, Window, anchored, canvas,
+    deferred, div, fill, img, point, px, size,
 };
 
 use crate::components::{
@@ -336,7 +337,8 @@ impl RenderOnce for GridPanel {
         let mut body = div().flex().flex_col().flex_1().min_h(px(0.)).gap_2();
 
         let mut selectors = div().flex().items_center().gap_2();
-        if !self.layers.is_empty() {
+        // A lone resource has nothing to switch to.
+        if self.layers.len() > 1 {
             selectors = selectors.child(self::picker(
                 format!("{}-layer", self.id),
                 &self.layers,

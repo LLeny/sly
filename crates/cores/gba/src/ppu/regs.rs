@@ -89,8 +89,8 @@ impl std::fmt::Display for DisplayFrame {
 #[chapa::bitenum]
 pub enum SpriteMapping {
     #[fallback]
-    OneDimensional = 0,
-    TwoDimensional = 1,
+    TwoDimensional = 0,
+    OneDimensional = 1,
 }
 
 #[chapa::bitfield(u16, order = lsb0)]
