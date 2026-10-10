@@ -408,46 +408,76 @@ pub(super) fn extend_manifest(manifest: &mut ComponentManifest) {
         .workspaces
         .push(WorkspaceDescriptor::new(workspace, "PPU", WorkspaceIcon::Video).mmio_group("PPU"));
 
-    for (id, title, kind, location) in [
-        (
-            panel::PPU,
-            "PPU",
-            PanelKind::Structured,
-            DockLocation::Right,
-        ),
-        (
-            panel::PALETTE,
-            "Palettes",
-            PanelKind::Palette,
-            DockLocation::Left,
-        ),
-        (
-            panel::TILEMAP,
-            "Background Layers",
-            PanelKind::Tilemap,
-            DockLocation::Center,
-        ),
-        (
+    let descriptor = |id, title, kind, location| {
+        PanelDescriptor::new(id, title, kind, location, RefreshPolicy::OnPause).tag(workspace)
+    };
+
+    manifest
+        .insert_after(
+            panel::BREAKPOINTS,
+            descriptor(
+                panel::PALETTE,
+                "Palettes",
+                PanelKind::Palette,
+                DockLocation::Left,
+            ),
+        )
+        .expect("shipped panel id");
+    manifest
+        .insert_before(
+            panel::MMIO,
+            descriptor(
+                panel::PPU,
+                "PPU",
+                PanelKind::Structured,
+                DockLocation::Right,
+            ),
+        )
+        .expect("shipped panel id");
+    manifest
+        .insert_before(
+            panel::MEMORY,
+            descriptor(
+                panel::TILESET,
+                "Tileset",
+                PanelKind::Tileset,
+                DockLocation::Center,
+            ),
+        )
+        .expect("shipped panel id");
+    manifest
+        .insert_after(
             panel::TILESET,
-            "Tilesets",
-            PanelKind::Tileset,
-            DockLocation::Center,
-        ),
-        (
-            panel::SPRITES,
-            "Sprites",
-            PanelKind::Sprites,
-            DockLocation::Center,
-        ),
-    ] {
-        manifest.panels.push(
-            PanelDescriptor::new(id, title, kind, location, RefreshPolicy::OnPause).tag(workspace),
-        );
-    }
+            descriptor(
+                panel::TILEMAP,
+                "Tilemap",
+                PanelKind::Tilemap,
+                DockLocation::Center,
+            ),
+        )
+        .expect("shipped panel id");
+    manifest
+        .insert_after(
+            panel::TILEMAP,
+            descriptor(
+                panel::SPRITES,
+                "Sprites",
+                PanelKind::Sprites,
+                DockLocation::Center,
+            ),
+        )
+        .expect("shipped panel id");
+
     manifest.compose_in(
         workspace,
         panel::TILESET,
+        panel::TILEMAP,
+        PanelGroupLayout::EqualColumns,
+    );
+    manifest.compose_in(
+        workspace,
         panel::SPRITES,
+        panel::FRAMEBUFFER,
         PanelGroupLayout::EqualColumns,
     );
 }

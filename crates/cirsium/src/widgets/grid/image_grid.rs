@@ -11,13 +11,30 @@ const PREVIEW_EXTENT: f32 = PREVIEW_PX + (2. * (PREVIEW_PADDING + PREVIEW_BORDER
 const PREVIEW_MARGIN: f32 = 6.;
 /// Pixels shown around the cursor when every cell is a single pixel (bitmaps).
 const LOUPE_SPAN: u32 = 16;
+/// Horizontal padding around the grid (`px_1` on both sides).
+const GRID_PADDING_X: f32 = 8.;
+/// Width of the details listed under the preview.
+const POPUP_DETAILS_WIDTH: f32 = 224.;
 
-fn cell_size(viewport: Size<f32>, cols: usize, rows: usize, tile_px: u32) -> f32 {
+/// Pointer state and popup content for a grid.
+pub(super) struct Interaction<'a> {
+    pub selected: Option<usize>,
+    pub hovered: Option<GridHover>,
+    pub pinned: Option<GridHover>,
+    /// Details shown in the popup, when enabled.
+    pub detail: Option<&'a DetailFn>,
+}
+
+fn cell_size(viewport: Size<f32>, cols: usize, rows: usize, tile_px: u32, fill_width: bool) -> f32 {
     if viewport.width < 1. || viewport.height < 1. {
         return (tile_px * 2) as f32;
     }
 
-    let fit = (viewport.width / cols as f32).min(viewport.height / rows as f32);
+    let fit = if fill_width {
+        (viewport.width - GRID_PADDING_X) / cols as f32
+    } else {
+        (viewport.width / cols as f32).min(viewport.height / rows as f32)
+    };
     if tile_px == 1 {
         fit.max(0.1)
     } else {
@@ -30,13 +47,13 @@ pub(super) fn cell_grid(
     theme: &Theme,
     id: &'static str,
     content: &GridContent,
-    selected: Option<usize>,
-    hovered: Option<GridHover>,
+    interaction: Interaction,
     viewport: Size<f32>,
     window_size: Size<Pixels>,
     on_select: Option<SelectCallback>,
     on_hover: Option<HoverCallback>,
     show_window_overlays: bool,
+    fill_width: bool,
 ) -> Div {
     let container = div()
         .relative()
@@ -47,15 +64,21 @@ pub(super) fn cell_grid(
         .min_h(px(0.))
         .px_1()
         .items_center()
-        .justify_center()
+        .when(!fill_width, |container| container.justify_center())
         .overflow_hidden();
 
     let Some(image) = content.image.clone() else {
         return container.child(empty_state(theme, content.empty_message));
     };
 
-    let cell = self::cell_size(viewport, content.cols, content.rows, content.tile_px);
-    container.child(render(
+    let cell = self::cell_size(
+        viewport,
+        content.cols,
+        content.rows,
+        content.tile_px,
+        fill_width,
+    );
+    let grid = render(
         theme,
         GridSpec {
             id: format!("{id}-grid").into(),
@@ -74,11 +97,27 @@ pub(super) fn cell_grid(
                 Vec::new()
             },
         },
-        selected,
-        hovered,
+        interaction,
         on_select,
         on_hover,
-    ))
+    );
+
+    if fill_width {
+        container.child(
+            div()
+                .id(SharedString::from(format!("{id}-scroll")))
+                .flex()
+                .flex_col()
+                .items_center()
+                .flex_1()
+                .w_full()
+                .min_h(px(0.))
+                .overflow_y_scroll()
+                .child(grid),
+        )
+    } else {
+        container.child(grid)
+    }
 }
 
 struct GridSpec {
@@ -98,8 +137,7 @@ struct GridSpec {
 fn render(
     theme: &Theme,
     spec: GridSpec,
-    selected: Option<usize>,
-    hovered: Option<GridHover>,
+    interaction: Interaction,
     on_select: Option<SelectCallback>,
     on_hover: Option<HoverCallback>,
 ) -> impl IntoElement {
@@ -116,6 +154,14 @@ fn render(
         footprint,
         window_overlays,
     } = spec;
+    let Interaction {
+        selected,
+        hovered,
+        pinned,
+        detail,
+    } = interaction;
+    // A pin only lasts as long as the selection it was made with.
+    let pinned = pinned.filter(|pin| pin.index < count && selected == Some(pin.index));
 
     let bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
     let hit = {
@@ -293,22 +339,36 @@ fn render(
     if let Some(hover) = hovered.filter(|h| h.index < count && selected != Some(h.index)) {
         grid = grid.child(ring(hover.index, theme.accent_hover));
     }
-    if let Some(hover) = hovered.filter(|h| h.index < count) {
-        if let Some(preview) = self::preview(theme, &image, hover.index, cols, rows, tile_px, cell)
-        {
-            let (anchor, position) = preview_position(hover.position, window_size);
-            grid = grid.child(
-                deferred(
-                    anchored()
-                        .position_mode(AnchoredPositionMode::Window)
-                        .anchor(anchor)
-                        .position(position)
-                        .snap_to_window_with_margin(px(PREVIEW_MARGIN))
-                        .child(preview),
-                )
-                .priority(2),
-            );
-        }
+    let popup = |index: usize| {
+        self::popup(
+            theme,
+            self::preview(theme, &image, index, cols, rows, tile_px, cell),
+            detail.map(|detail| detail(theme, index).w(px(POPUP_DETAILS_WIDTH))),
+        )
+    };
+    let place = |popup: Div, cursor: Point<Pixels>, priority: usize| {
+        let (anchor, position) = preview_position(cursor, window_size);
+        deferred(
+            anchored()
+                .position_mode(AnchoredPositionMode::Window)
+                .anchor(anchor)
+                .position(position)
+                .snap_to_window_with_margin(px(PREVIEW_MARGIN))
+                .child(popup),
+        )
+        .priority(priority)
+    };
+    if let Some(hover) = hovered.filter(|h| h.index < count)
+        && pinned.is_none_or(|pin| pin.index != hover.index)
+        && let Some(popup) = popup(hover.index)
+    {
+        grid = grid.child(place(popup, hover.position, 2));
+    }
+    if let Some(pin) = pinned
+        && let Some(popup) = popup(pin.index)
+    {
+        // Occlude so the pointer can rest on the pinned popup without hovering cells beneath it.
+        grid = grid.child(place(popup.occlude(), pin.position, 3));
     }
     if let Some(index) = selected.filter(|&i| i < count) {
         grid = grid.child(ring(index, theme.accent));
@@ -366,6 +426,28 @@ fn preview_position(cursor: Point<Pixels>, window: Size<Pixels>) -> (Anchor, Poi
     (anchor, position)
 }
 
+fn popup(theme: &Theme, preview: Option<Div>, details: Option<Div>) -> Option<Div> {
+    if preview.is_none() && details.is_none() {
+        return None;
+    }
+
+    Some(
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_1()
+            .p(px(PREVIEW_PADDING))
+            .bg(theme.bg_panel)
+            .border_1()
+            .border_color(theme.border_strong)
+            .rounded_md()
+            .shadow_lg()
+            .children(preview)
+            .children(details),
+    )
+}
+
 /// Enlarged copy of the hovered cell, or a loupe around the hovered pixel for bitmaps.
 fn preview(
     theme: &Theme,
@@ -413,16 +495,7 @@ fn preview(
         );
     }
 
-    Some(
-        div()
-            .p(px(PREVIEW_PADDING))
-            .bg(theme.bg_panel)
-            .border_1()
-            .border_color(theme.border_strong)
-            .rounded_md()
-            .shadow_lg()
-            .child(view),
-    )
+    Some(view)
 }
 
 #[expect(clippy::too_many_arguments)]

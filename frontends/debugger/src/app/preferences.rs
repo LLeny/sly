@@ -7,6 +7,10 @@ struct Preferences {
     follow_pc: bool,
     show_bytes: bool,
     live_refresh: bool,
+    grid_inline_details: bool,
+    grid_hover_details: bool,
+    grid_pin_popup: bool,
+    grid_fill_width: Vec<String>,
     show_log: bool,
     deduplicate_logs: bool,
     accent: usize,
@@ -19,6 +23,10 @@ impl Default for Preferences {
             follow_pc: true,
             show_bytes: false,
             live_refresh: true,
+            grid_inline_details: true,
+            grid_hover_details: false,
+            grid_pin_popup: false,
+            grid_fill_width: Vec::new(),
             show_log: false,
             deduplicate_logs: false,
             accent: 0,
@@ -52,6 +60,10 @@ impl Debugger {
         }
 
         self.live_refresh = p.live_refresh;
+        self.grid_inline_details = p.grid_inline_details;
+        self.grid_hover_details = p.grid_hover_details;
+        self.grid_pin_popup = p.grid_pin_popup;
+        self.grid_fill_width = p.grid_fill_width.into_iter().collect();
         self.show_log = p.show_log;
         self.accent = p.accent.min(ACCENT_PRESETS.len() + GUEST_COLORS.len() - 1);
 
@@ -69,6 +81,10 @@ impl Debugger {
             follow_pc: self.panes.first().is_none_or(|p| p.disasm.follow_pc()),
             show_bytes: self.panes.first().is_some_and(|p| p.disasm.show_bytes()),
             live_refresh: self.live_refresh,
+            grid_inline_details: self.grid_inline_details,
+            grid_hover_details: self.grid_hover_details,
+            grid_pin_popup: self.grid_pin_popup,
+            grid_fill_width: self.grid_fill_width.iter().cloned().collect(),
             show_log: self.show_log,
             deduplicate_logs: self.logs.dedup(),
             accent: self.accent,

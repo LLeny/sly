@@ -70,6 +70,7 @@ struct GridState {
     resource: Option<VideoResourceId>,
     selected: HashMap<VideoResourceId, usize>,
     hovered: Option<GridHover>,
+    pinned: Option<GridHover>,
     viewport: Size<f32>,
     show_window_overlays: bool,
 }
@@ -90,6 +91,7 @@ impl GridState {
         if next != self.resource {
             self.resource = next;
             self.hovered = None;
+            self.pinned = None;
         }
     }
 
@@ -107,15 +109,18 @@ impl GridState {
             .copied()
     }
 
-    fn toggle_selected(&mut self, index: usize) {
+    fn toggle_selected(&mut self, index: usize, pin: bool) {
         let Some(resource) = self.resource.clone() else {
             return;
         };
 
         if self.selected.get(&resource) == Some(&index) {
             self.selected.remove(&resource);
+            self.pinned = None;
         } else {
             self.selected.insert(resource, index);
+            // Selecting a cell can keep its hover popup open where it was clicked.
+            self.pinned = self.hovered.filter(|hover| pin && hover.index == index);
         }
     }
 
@@ -133,6 +138,8 @@ impl GridState {
 
         if changed {
             self.viewport = viewport;
+            // The pin is anchored in window space, so it would drift away from its cell.
+            self.pinned = None;
         }
 
         changed
@@ -232,6 +239,10 @@ pub(crate) struct Debugger {
     artwork_key_input: Entity<TextInput>,
     art_query: Option<crate::cover::ArtQuery>,
     live_refresh: bool,
+    grid_inline_details: bool,
+    grid_hover_details: bool,
+    grid_pin_popup: bool,
+    grid_fill_width: HashSet<String>,
     workspace: SharedString,
     execution: ExecutionState,
     game_focus: FocusHandle,
@@ -385,7 +396,10 @@ impl Debugger {
             bitmap_key: None,
             tileset_ui: GridState::default(),
             tilemap: None,
-            tilemap_ui: GridState::default(),
+            tilemap_ui: GridState {
+                show_window_overlays: true,
+                ..GridState::default()
+            },
             sprites: None,
             sprites_ui: GridState::default(),
             framebuffer: target.software_frame().map(Into::into),
@@ -429,6 +443,10 @@ impl Debugger {
             artwork_key_input: cx.new(|cx| TextInput::new(cx, "Anonymous").secret()),
             art_query: None,
             live_refresh: true,
+            grid_inline_details: true,
+            grid_hover_details: false,
+            grid_pin_popup: false,
+            grid_fill_width: HashSet::new(),
             workspace,
             execution: ExecutionState::Paused,
             game_focus: cx.focus_handle(),

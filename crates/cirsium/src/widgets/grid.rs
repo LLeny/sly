@@ -10,7 +10,8 @@ use gpui::{
 };
 
 use crate::components::{
-    ClickHandler, FOOTER_ROW_H, Panel, Segmented, empty_state, footer_placeholder,
+    CheckboxSize, ClickHandler, FOOTER_ROW_H, Panel, Segmented, checkbox, empty_state,
+    footer_placeholder,
 };
 use crate::theme::{Theme, with_alpha};
 
@@ -19,7 +20,7 @@ mod image_grid;
 pub(super) type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
 pub(super) type HoverCallback = Rc<dyn Fn(Option<GridHover>, &mut Window, &mut App) + 'static>;
 pub(super) type ViewportCallback = Rc<dyn Fn(Size<f32>, &mut Window, &mut App) + 'static>;
-type OverlayToggleCallback = Rc<dyn Fn(&mut Window, &mut App) + 'static>;
+type ToggleCallback = Rc<dyn Fn(&mut Window, &mut App) + 'static>;
 
 type DetailFn = Box<dyn Fn(&Theme, usize) -> Div + 'static>;
 
@@ -184,6 +185,9 @@ pub struct GridPanel {
     layer: usize,
     selected: Option<usize>,
     hovered: Option<GridHover>,
+    pinned: Option<GridHover>,
+    inline_details: bool,
+    hover_details: bool,
     viewport: Size<f32>,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
@@ -193,7 +197,9 @@ pub struct GridPanel {
     on_viewport: Option<ViewportCallback>,
     window_overlay_toggle: bool,
     show_window_overlays: bool,
-    on_toggle_window_overlays: Option<OverlayToggleCallback>,
+    on_toggle_window_overlays: Option<ToggleCallback>,
+    fill_width: bool,
+    on_toggle_fill_width: Option<ToggleCallback>,
 }
 
 impl GridPanel {
@@ -217,6 +223,9 @@ impl GridPanel {
             layer: 0,
             selected: None,
             hovered: None,
+            pinned: None,
+            inline_details: true,
+            hover_details: false,
             viewport: size(0., 0.),
             collapsed: false,
             on_toggle: None,
@@ -227,6 +236,8 @@ impl GridPanel {
             window_overlay_toggle: false,
             show_window_overlays: true,
             on_toggle_window_overlays: None,
+            fill_width: false,
+            on_toggle_fill_width: None,
         }
     }
 
@@ -277,6 +288,24 @@ impl GridPanel {
 
     pub fn hovered(mut self, hovered: Option<GridHover>) -> Self {
         self.hovered = hovered;
+        self
+    }
+
+    /// Keeps the hover popup open at `pinned.position` while `pinned.index` stays selected.
+    pub fn pinned(mut self, pinned: Option<GridHover>) -> Self {
+        self.pinned = pinned;
+        self
+    }
+
+    /// Shows the selected cell's details beside or below the grid.
+    pub fn inline_details(mut self, enabled: bool) -> Self {
+        self.inline_details = enabled;
+        self
+    }
+
+    /// Shows the hovered cell's details in its popup.
+    pub fn hover_details(mut self, enabled: bool) -> Self {
+        self.hover_details = enabled;
         self
     }
 
@@ -332,6 +361,20 @@ impl GridPanel {
         self
     }
 
+    /// Sizes cells to the full width and scrolls vertically instead of fitting the whole grid.
+    pub fn fill_width(mut self, enabled: bool) -> Self {
+        self.fill_width = enabled;
+        self
+    }
+
+    pub fn on_toggle_fill_width(
+        mut self,
+        handler: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_toggle_fill_width = Some(Rc::new(handler));
+        self
+    }
+
     pub fn window_overlay_toggle(mut self, enabled: bool) -> Self {
         self.window_overlay_toggle = enabled;
         self
@@ -352,8 +395,8 @@ impl RenderOnce for GridPanel {
         let t = &*theme;
 
         // Measure the whole body so moving the inspector cannot change the breakpoint.
-        let side_details =
-            self.side_details_width.is_some() || self.viewport.width >= DETAILS_BREAKPOINT;
+        let side_details = self.inline_details
+            && (self.side_details_width.is_some() || self.viewport.width >= DETAILS_BREAKPOINT);
         let detail_width = self.side_details_width.unwrap_or(DETAILS_WIDTH);
         let mut body = div()
             .relative()
@@ -376,18 +419,40 @@ impl RenderOnce for GridPanel {
             ));
         }
 
-        if self.window_overlay_toggle {
-            let mut toggle = Segmented::new(format!("{}-windows", self.id))
-                .option_label("windows", "Overlays")
-                .selected(if self.show_window_overlays {
-                    "windows"
-                } else {
-                    ""
-                });
-            if let Some(handler) = self.on_toggle_window_overlays.clone() {
-                toggle = toggle.on_select(move |_, window, cx| handler(window, cx));
-            }
-            selectors = selectors.child(toggle);
+        // Header clicks collapse the panel, so the toggles must stop propagation.
+        let toggle =
+            |id: &'static str, checked: bool, label: &'static str, handler: ToggleCallback| {
+                checkbox(
+                    t,
+                    id,
+                    checked,
+                    label,
+                    CheckboxSize::Small,
+                    move |_, window, cx| {
+                        cx.stop_propagation();
+                        handler(window, cx);
+                    },
+                )
+            };
+        if self.window_overlay_toggle
+            && let Some(handler) = self.on_toggle_window_overlays.clone()
+        {
+            selectors = selectors.child(toggle(
+                "grid-window-overlays",
+                self.show_window_overlays,
+                "Overlays",
+                handler,
+            ));
+        }
+        if let Some(handler) = self.on_toggle_fill_width.clone()
+            && self.content.is_some()
+        {
+            selectors = selectors.child(toggle(
+                "grid-fill-width",
+                self.fill_width,
+                "Fill width",
+                handler,
+            ));
         }
 
         match &self.content {
@@ -408,7 +473,9 @@ impl RenderOnce for GridPanel {
                 } else {
                     detail_height
                 };
-                let grid_viewport = if side_details {
+                let grid_viewport = if !self.inline_details {
+                    self.viewport
+                } else if side_details {
                     size(
                         (self.viewport.width - detail_width - DETAILS_GAP).max(0.),
                         self.viewport.height,
@@ -423,36 +490,43 @@ impl RenderOnce for GridPanel {
                     t,
                     self.id,
                     content,
-                    self.selected,
-                    self.hovered,
+                    image_grid::Interaction {
+                        selected: self.selected,
+                        hovered: self.hovered,
+                        pinned: self.pinned,
+                        detail: self.detail.as_ref().filter(|_| self.hover_details),
+                    },
                     grid_viewport,
                     window.viewport_size(),
                     self.on_select,
                     self.on_hover,
                     self.show_window_overlays,
+                    self.fill_width,
                 ));
 
-                let selected = self.selected.filter(|&index| index < content.count);
-                let slot = div()
-                    .id(format!("{}-details", self.id))
-                    .flex_none()
-                    .flex()
-                    .flex_col()
-                    .min_w(px(0.))
-                    .min_h(px(0.))
-                    .when(side_details, |slot| {
-                        slot.w(px(detail_width))
-                            .h_full()
-                            .border_l_1()
-                            .border_color(t.border_subtle)
-                            .pl_2()
-                    })
-                    .when(!side_details, |slot| slot.h(px(detail_height)))
-                    .overflow_y_scroll();
-                body = body.child(match (selected, &self.detail) {
-                    (Some(index), Some(detail)) => slot.child(detail(t, index).flex_none()),
-                    _ => slot.child(footer_placeholder(t, self.placeholder).flex_none()),
-                });
+                if self.inline_details {
+                    let selected = self.selected.filter(|&index| index < content.count);
+                    let slot = div()
+                        .id(format!("{}-details", self.id))
+                        .flex_none()
+                        .flex()
+                        .flex_col()
+                        .min_w(px(0.))
+                        .min_h(px(0.))
+                        .when(side_details, |slot| {
+                            slot.w(px(detail_width))
+                                .h_full()
+                                .border_l_1()
+                                .border_color(t.border_subtle)
+                                .pl_2()
+                        })
+                        .when(!side_details, |slot| slot.h(px(detail_height)))
+                        .overflow_y_scroll();
+                    body = body.child(match (selected, &self.detail) {
+                        (Some(index), Some(detail)) => slot.child(detail(t, index).flex_none()),
+                        _ => slot.child(footer_placeholder(t, self.placeholder).flex_none()),
+                    });
+                }
             }
         }
 
