@@ -108,7 +108,7 @@ impl Attribute {
 
     pub fn tile_addr(&self, mapping: SpriteMapping, tx: usize, ty: usize) -> usize {
         let (width, _) = self.dimensions();
-        let tile_bytes = self.color_depth().tile_bytes();
+        let tile_bytes = self.color_depth().tile_size();
         let row_tiles = match mapping {
             SpriteMapping::OneDimensional => width / 8,
             SpriteMapping::TwoDimensional => 1024 / tile_bytes,
@@ -120,9 +120,9 @@ impl Attribute {
     }
 
     pub fn palette_base(&self) -> usize {
-        match self.color_depth() {
-            ColorDepth::Bpp4 => OBJ_PALETTE_BASE + (self.palette_number() as usize * 16),
-            _ => OBJ_PALETTE_BASE,
-        }
+        OBJ_PALETTE_BASE
+            + self
+                .color_depth()
+                .palette_base(self.palette_number() as usize)
     }
 }

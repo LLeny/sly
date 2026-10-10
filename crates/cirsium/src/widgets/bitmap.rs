@@ -27,6 +27,10 @@ impl BitmapWidget {
     pub const ID: &'static str = debugger_model::panel::BITMAP;
 
     pub fn panel(view: Option<BitmapView>) -> GridPanel {
+        Self::panel_with_id(Self::ID, view)
+    }
+
+    pub(super) fn panel_with_id(id: &'static str, view: Option<BitmapView>) -> GridPanel {
         let content = view
             .as_ref()
             .filter(|v| v.image.is_some())
@@ -42,7 +46,7 @@ impl BitmapWidget {
                 window_overlays: vec![],
             });
 
-        let mut panel = GridPanel::new(Self::ID, "Bitmap", icon::MONITOR, content)
+        let mut panel = GridPanel::new(id, "Bitmap", icon::MONITOR, content)
             .placeholder("Select a pixel to inspect");
 
         if let Some(view) = view {

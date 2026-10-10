@@ -17,11 +17,21 @@ use crate::theme::{Theme, with_alpha};
 mod image_grid;
 
 pub(super) type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
-pub(super) type HoverCallback = Rc<dyn Fn(Option<usize>, &mut Window, &mut App) + 'static>;
+pub(super) type HoverCallback = Rc<dyn Fn(Option<GridHover>, &mut Window, &mut App) + 'static>;
 pub(super) type ViewportCallback = Rc<dyn Fn(Size<f32>, &mut Window, &mut App) + 'static>;
 type OverlayToggleCallback = Rc<dyn Fn(&mut Window, &mut App) + 'static>;
 
 type DetailFn = Box<dyn Fn(&Theme, usize) -> Div + 'static>;
+
+const DETAILS_WIDTH: f32 = 256.;
+const DETAILS_BREAKPOINT: f32 = 640.;
+const DETAILS_GAP: f32 = 12.;
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct GridHover {
+    pub index: usize,
+    pub position: Point<Pixels>,
+}
 
 pub use debugger_model::VideoResource;
 
@@ -168,11 +178,12 @@ pub struct GridPanel {
     content: Option<GridContent>,
     detail: Option<DetailFn>,
     detail_rows: usize,
+    side_details_width: Option<f32>,
     placeholder: &'static str,
     layers: Vec<VideoResource>,
     layer: usize,
     selected: Option<usize>,
-    hovered: Option<usize>,
+    hovered: Option<GridHover>,
     viewport: Size<f32>,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
@@ -200,6 +211,7 @@ impl GridPanel {
             content,
             detail: None,
             detail_rows: 1,
+            side_details_width: None,
             placeholder: "",
             layers: Vec::new(),
             layer: 0,
@@ -238,6 +250,11 @@ impl GridPanel {
         self
     }
 
+    pub fn side_details(mut self, width: f32) -> Self {
+        self.side_details_width = Some(width);
+        self
+    }
+
     pub fn placeholder(mut self, placeholder: &'static str) -> Self {
         self.placeholder = placeholder;
         self
@@ -258,7 +275,7 @@ impl GridPanel {
         self
     }
 
-    pub fn hovered(mut self, hovered: Option<usize>) -> Self {
+    pub fn hovered(mut self, hovered: Option<GridHover>) -> Self {
         self.hovered = hovered;
         self
     }
@@ -288,7 +305,7 @@ impl GridPanel {
 
     pub fn on_hover(
         mut self,
-        handler: impl Fn(Option<usize>, &mut Window, &mut App) + 'static,
+        handler: impl Fn(Option<GridHover>, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_hover = Some(Rc::new(handler));
         self
@@ -330,11 +347,23 @@ impl GridPanel {
 }
 
 impl RenderOnce for GridPanel {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
 
-        let mut body = div().flex().flex_col().flex_1().min_h(px(0.)).gap_2();
+        // Measure the whole body so moving the inspector cannot change the breakpoint.
+        let side_details =
+            self.side_details_width.is_some() || self.viewport.width >= DETAILS_BREAKPOINT;
+        let detail_width = self.side_details_width.unwrap_or(DETAILS_WIDTH);
+        let mut body = div()
+            .relative()
+            .flex()
+            .when(!side_details, |body| body.flex_col())
+            .flex_1()
+            .min_w(px(0.))
+            .min_h(px(0.))
+            .gap(px(DETAILS_GAP))
+            .child(self::measure(self.on_viewport));
 
         let mut selectors = div().flex().items_center().gap_2();
         // A lone resource has nothing to switch to.
@@ -373,28 +402,56 @@ impl RenderOnce for GridPanel {
                 );
             }
             Some(content) => {
+                let detail_height = FOOTER_ROW_H * (self.detail_rows as f32);
+                let detail_height = if self.viewport.height > 0. {
+                    detail_height.min(self.viewport.height * 0.45)
+                } else {
+                    detail_height
+                };
+                let grid_viewport = if side_details {
+                    size(
+                        (self.viewport.width - detail_width - DETAILS_GAP).max(0.),
+                        self.viewport.height,
+                    )
+                } else {
+                    size(
+                        self.viewport.width,
+                        (self.viewport.height - detail_height - DETAILS_GAP).max(0.),
+                    )
+                };
                 body = body.child(image_grid::cell_grid(
                     t,
                     self.id,
                     content,
                     self.selected,
                     self.hovered,
-                    self.viewport,
+                    grid_viewport,
+                    window.viewport_size(),
                     self.on_select,
                     self.on_hover,
-                    self.on_viewport,
                     self.show_window_overlays,
                 ));
 
                 let selected = self.selected.filter(|&index| index < content.count);
                 let slot = div()
+                    .id(format!("{}-details", self.id))
                     .flex_none()
                     .flex()
                     .flex_col()
-                    .h(px(FOOTER_ROW_H * self.detail_rows as f32));
+                    .min_w(px(0.))
+                    .min_h(px(0.))
+                    .when(side_details, |slot| {
+                        slot.w(px(detail_width))
+                            .h_full()
+                            .border_l_1()
+                            .border_color(t.border_subtle)
+                            .pl_2()
+                    })
+                    .when(!side_details, |slot| slot.h(px(detail_height)))
+                    .overflow_y_scroll();
                 body = body.child(match (selected, &self.detail) {
-                    (Some(index), Some(detail)) => slot.child(detail(t, index)),
-                    _ => slot.child(footer_placeholder(t, self.placeholder)),
+                    (Some(index), Some(detail)) => slot.child(detail(t, index).flex_none()),
+                    _ => slot.child(footer_placeholder(t, self.placeholder).flex_none()),
                 });
             }
         }

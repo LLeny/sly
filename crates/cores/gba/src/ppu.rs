@@ -3,12 +3,17 @@ pub(crate) mod regs;
 pub(crate) mod sprite;
 pub(crate) mod tile;
 
+use std::cmp::Reverse;
+
 use crate::bus::Width;
-use crate::ppu::regs::BackgroundMode;
+use crate::ppu::regs::{BackgroundKind, BackgroundMode};
 use crate::ppu::sprite::{Attribute, OBJ_TILE_OFFSET};
 use crate::ppu::tile::Tile;
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
-use regs::{BackgroundControl, DisplayControl, DisplayStatus, SpriteMapping, VerticalCount};
+use regs::{
+    BackgroundControl, BackgroundOffset, DisplayControl, DisplayStatus, SpriteMapping,
+    VerticalCount,
+};
 
 const SCANLINES_PER_FRAME: u8 = 228;
 const VBLANK_START_SCANLINE: u8 = 160;
@@ -47,14 +52,12 @@ pub(crate) fn bitmap_layout(control: DisplayControl) -> Option<BitmapLayout> {
     })
 }
 
-pub(crate) fn render_bg_scanline(
+pub(crate) fn render_bitmap_scanline(
     layout: BitmapLayout,
-    vram: &[u8],
-    palette: &[u8],
+    memory: VideoMemoryView<'_>,
     line: usize,
     output: &mut [[u8; 4]],
 ) {
-    output.fill(rgba(palette_color(palette, 0)));
     if line >= layout.height {
         return;
     }
@@ -62,29 +65,82 @@ pub(crate) fn render_bg_scanline(
 
     let pitch = layout.width * layout.bytes_per_pixel;
     let start = layout.base + (line * pitch);
-    let src = &vram[start..start + pitch];
+    let src = &memory.vram[start..start + pitch];
     for (dst, bytes) in output
         .iter_mut()
         .zip(src.chunks_exact(layout.bytes_per_pixel))
     {
         let color = match bytes {
-            &[index] => palette_color(palette, index.into()),
+            &[index] => palette_color(memory.palette, index.into()),
             _ => u16::from_le_bytes([bytes[0], bytes[1]]),
         };
         *dst = rgba(color);
     }
 }
 
+pub(crate) fn render_bgmap_scanline(
+    control: DisplayControl,
+    backgrounds: BackgroundView<'_>,
+    memory: VideoMemoryView<'_>,
+    line: usize,
+    output: &mut [[u8; 4]],
+) {
+    let mut order = [0, 1, 2, 3];
+    order.sort_by_key(|&index| Reverse((backgrounds.bgcnt[index].priority(), index)));
+
+    for index in order {
+        let bg = backgrounds.bgcnt[index];
+        let kind = control.mode().background_kind(index);
+        if !control.bg_enabled(index) || kind != BackgroundKind::Text {
+            continue;
+        }
+        let Some((width, height)) = bg.dimensions(kind) else {
+            continue;
+        };
+
+        let depth = bg.effective_color_depth(kind);
+        let hofs = backgrounds.bghofs[index].offset() as usize;
+        let vofs = backgrounds.bgvofs[index].offset() as usize;
+        let bg_y = (line + vofs) & (height - 1);
+        let tile_y = bg_y / 8;
+        let pixel_y = bg_y % 8;
+
+        let mut x = 0;
+        while x < output.len() {
+            let bg_x = (x + hofs) & (width - 1);
+            let Some((_, entry)) = bg.map_entry(kind, memory.vram, bg_x / 8, tile_y, width) else {
+                break;
+            };
+
+            let addr = bg.tile_offset(entry.tile_number() as usize, depth);
+            let tile = Tile {
+                data: &memory.vram[addr..(addr + depth.tile_size())],
+                depth,
+            };
+            let palette_base = entry.palette_base(depth);
+
+            let first = bg_x % 8;
+            let span = (8 - first).min(output.len() - x);
+            for (pixel_x, dst) in (first..).zip(&mut output[x..(x + span)]) {
+                let color_index = entry.pixel(&tile, pixel_x, pixel_y) as usize;
+                if color_index != 0 {
+                    *dst = rgba(palette_color(memory.palette, palette_base + color_index));
+                }
+            }
+
+            x += span;
+        }
+    }
+}
+
 pub(crate) fn render_sprite_scanline(
     control: DisplayControl,
-    vram: &[u8],
-    oam: &[u8],
-    palette: &[u8],
+    memory: VideoMemoryView<'_>,
     line: usize,
     output: &mut [[u8; 4]],
 ) {
     // Lower OAM entries win, so draw them last.
-    for attr in sprite::attributes(oam).rev() {
+    for attr in sprite::attributes(memory.oam).rev() {
         if attr.affine() {
             // TODO: skipping affine shit for now
             continue;
@@ -101,7 +157,7 @@ pub(crate) fn render_sprite_scanline(
         }
 
         let x_start = attr.x_coordinate() as usize;
-        for (col, color) in sprite_row(attr, control.sprite_mapping(), vram, palette, row) {
+        for (col, color) in sprite_row(attr, control.sprite_mapping(), memory, row) {
             let x = (x_start + col) & 0x1FF;
             if x < SCREEN_WIDTH as usize {
                 output[x] = color;
@@ -113,8 +169,7 @@ pub(crate) fn render_sprite_scanline(
 pub(crate) fn sprite_row<'a>(
     attr: Attribute,
     mapping: SpriteMapping,
-    vram: &'a [u8],
-    palette: &'a [u8],
+    memory: VideoMemoryView<'a>,
     row: usize,
 ) -> impl Iterator<Item = (usize, [u8; 4])> + 'a {
     let (width, height) = attr.dimensions();
@@ -127,21 +182,21 @@ pub(crate) fn sprite_row<'a>(
     };
 
     let depth = attr.color_depth();
-    let tile_bytes = depth.tile_bytes();
+    let tile_bytes = depth.tile_size();
     let row_addr = attr.tile_addr(mapping, 0, row / 8);
     let palette_base = attr.palette_base();
 
     (0..width).filter_map(move |x| {
         let col = if hflip { width - 1 - x } else { x };
         let tile_addr = row_addr + ((col / 8) * tile_bytes);
-        let data = vram.get(tile_addr..tile_addr + tile_bytes)?;
+        let data = memory.vram.get(tile_addr..tile_addr + tile_bytes)?;
         let tile = Tile { data, depth };
         let index = tile.pixel(col % 8, row % 8) as usize;
         if index == 0 {
             return None; // transparent
         }
 
-        let color = palette_color(palette, palette_base + index);
+        let color = palette_color(memory.palette, palette_base + index);
         Some((x, rgba(color)))
     })
 }
@@ -154,6 +209,8 @@ pub struct Ppu {
     pub(crate) dispctrl: DisplayControl,
     pub(crate) vcount: VerticalCount,
     pub(crate) bgcnt: [BackgroundControl; 4],
+    pub(crate) bghofs: [BackgroundOffset; 4],
+    pub(crate) bgvofs: [BackgroundOffset; 4],
 
     pub(crate) vram: Vec<u8>,
     pub(crate) palette: Vec<u8>,
@@ -175,6 +232,8 @@ impl Ppu {
             dispctrl: DisplayControl::zeroed(),
             vcount: VerticalCount::zeroed(),
             bgcnt: [BackgroundControl::zeroed(); 4],
+            bghofs: [BackgroundOffset::zeroed(); 4],
+            bgvofs: [BackgroundOffset::zeroed(); 4],
             vram: vec![0; VRAM_SIZE as usize],
             palette: vec![0; PALETTE_SIZE as usize],
             oam: vec![0; OAM_SIZE as usize],
@@ -198,23 +257,40 @@ impl Ppu {
         let line = self.vcount.scanline() as usize;
         let start = line * SCREEN_WIDTH as usize;
         let output = &mut self.frame[start..start + SCREEN_WIDTH as usize];
+        let memory = VideoMemoryView {
+            vram: &self.vram,
+            palette: &self.palette,
+            oam: &self.oam,
+        };
 
-        let bitmap = bitmap_layout(self.dispctrl).filter(|_| self.dispctrl.enable_bg2());
-        if let Some(layout) = bitmap {
-            render_bg_scanline(layout, &self.vram, &self.palette, line, output);
-        } else {
-            output.fill(rgba(palette_color(&self.palette, 0)));
+        output.fill(rgba(palette_color(memory.palette, 0)));
+
+        match bitmap_layout(self.dispctrl) {
+            Some(layout) if self.dispctrl.bg2_enabled() => {
+                render_bitmap_scanline(layout, memory, line, output);
+            }
+            None => {
+                let backgrounds = BackgroundView {
+                    bgcnt: &self.bgcnt,
+                    bghofs: &self.bghofs,
+                    bgvofs: &self.bgvofs,
+                };
+                render_bgmap_scanline(self.dispctrl, backgrounds, memory, line, output);
+            }
+            _ => {}
         }
 
         if self.dispctrl.enable_obj() {
-            render_sprite_scanline(
-                self.dispctrl,
-                &self.vram,
-                &self.oam,
-                &self.palette,
-                line,
-                output,
-            );
+            render_sprite_scanline(self.dispctrl, memory, line, output);
+        }
+    }
+
+    #[cfg(feature = "debug")]
+    pub(crate) fn memory(&self) -> VideoMemoryView<'_> {
+        VideoMemoryView {
+            vram: &self.vram,
+            palette: &self.palette,
+            oam: &self.oam,
         }
     }
 
@@ -386,6 +462,20 @@ impl BitmapLayout {
     pub(crate) fn address(self) -> u32 {
         VRAM_BASE + self.base as u32
     }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct BackgroundView<'a> {
+    pub(crate) bgcnt: &'a [BackgroundControl; 4],
+    pub(crate) bghofs: &'a [BackgroundOffset; 4],
+    pub(crate) bgvofs: &'a [BackgroundOffset; 4],
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct VideoMemoryView<'a> {
+    pub(crate) vram: &'a [u8],
+    pub(crate) palette: &'a [u8],
+    pub(crate) oam: &'a [u8],
 }
 
 #[cfg(feature = "debug")]

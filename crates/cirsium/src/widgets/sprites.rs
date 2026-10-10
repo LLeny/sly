@@ -71,6 +71,7 @@ impl SpritesWidget {
         });
 
         let mut panel = GridPanel::new(Self::ID, "Sprites", icon::GHOST, content)
+            .side_details(224.)
             .placeholder("Select a sprite to inspect");
         if let Some(view) = view {
             panel = panel

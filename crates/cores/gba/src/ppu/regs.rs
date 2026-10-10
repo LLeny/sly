@@ -1,4 +1,4 @@
-use crate::ppu::tile::{ColorDepth, Size};
+use crate::ppu::tile::{ColorDepth, Size, TextMapEntry};
 
 #[chapa::bitfield(u16, order = lsb0)]
 pub struct DisplayStatus {
@@ -63,6 +63,17 @@ impl std::fmt::Display for BackgroundKind {
             Self::Bitmap => "Bitmap",
             Self::Unavailable => "Unavailable",
         })
+    }
+}
+
+impl BackgroundKind {
+    /// Tiles a map entry can address: 10-bit text entries, 8-bit affine entries.
+    pub fn tile_count(self) -> Option<usize> {
+        match self {
+            Self::Text => Some(1024),
+            Self::Affine => Some(256),
+            Self::Bitmap | Self::Unavailable => None,
+        }
     }
 }
 
@@ -146,16 +157,16 @@ pub struct DisplayControl {
     pub forced_blank: bool,
 
     #[bits(8)]
-    pub enable_bg0: bool,
+    pub bg0_enabled: bool,
 
     #[bits(9)]
-    pub enable_bg1: bool,
+    pub bg1_enabled: bool,
 
     #[bits(10)]
-    pub enable_bg2: bool,
+    pub bg2_enabled: bool,
 
     #[bits(11)]
-    pub enable_bg3: bool,
+    pub bg3_enabled: bool,
 
     #[bits(12)]
     pub enable_obj: bool,
@@ -204,12 +215,12 @@ pub struct BackgroundControl {
 }
 
 impl DisplayControl {
-    pub fn enable_bg(self, index: usize) -> bool {
+    pub fn bg_enabled(self, index: usize) -> bool {
         match index {
-            0 => self.enable_bg0(),
-            1 => self.enable_bg1(),
-            2 => self.enable_bg2(),
-            3 => self.enable_bg3(),
+            0 => self.bg0_enabled(),
+            1 => self.bg1_enabled(),
+            2 => self.bg2_enabled(),
+            3 => self.bg3_enabled(),
             _ => false,
         }
     }
@@ -225,11 +236,52 @@ impl BackgroundControl {
         | Self::SCREEN_SIZE_MASK;
 
     pub fn tileset_address(self) -> u32 {
-        super::VRAM_BASE + u32::from(self.tileset_base()) * 0x4000
+        super::VRAM_BASE + self.tileset_offset() as u32
+    }
+
+    pub fn tileset_offset(self) -> usize {
+        usize::from(self.tileset_base()) * 0x4000
     }
 
     pub fn tilemap_address(self) -> u32 {
-        super::VRAM_BASE + u32::from(self.tilemap_base()) * 0x800
+        super::VRAM_BASE + self.tilemap_offset() as u32
+    }
+
+    pub fn tilemap_offset(self) -> usize {
+        usize::from(self.tilemap_base()) * 0x800
+    }
+
+    pub fn text_entry_offset(self, tile_x: usize, tile_y: usize, width: usize) -> usize {
+        let block = ((tile_y / 32) * (width / 256)) + (tile_x / 32);
+        let index = ((tile_y % 32) * 32) + (tile_x % 32);
+        self.tilemap_offset() + (block * 0x800) + (index * 2)
+    }
+
+    pub fn map_entry(
+        self,
+        kind: BackgroundKind,
+        vram: &[u8],
+        tile_x: usize,
+        tile_y: usize,
+        width: usize,
+    ) -> Option<(usize, TextMapEntry)> {
+        match kind {
+            BackgroundKind::Text => {
+                let addr = self.text_entry_offset(tile_x, tile_y, width);
+                let entry = TextMapEntry::from_le_bytes([vram[addr], vram[addr + 1]]);
+                Some((addr, entry))
+            }
+            BackgroundKind::Affine => {
+                let addr = self.tilemap_offset() + (tile_y * (width / 8)) + tile_x;
+                let entry = TextMapEntry::zeroed().with_tile_number(u16::from(vram[addr]));
+                Some((addr, entry))
+            }
+            BackgroundKind::Bitmap | BackgroundKind::Unavailable => None,
+        }
+    }
+
+    pub fn tile_offset(self, tile_number: usize, depth: ColorDepth) -> usize {
+        self.tileset_offset() + (tile_number * depth.tile_size())
     }
 
     pub fn dimensions(self, kind: BackgroundKind) -> Option<(usize, usize)> {
@@ -246,4 +298,10 @@ impl BackgroundControl {
             _ => self.color_depth(),
         }
     }
+}
+
+#[chapa::bitfield(u16, order = lsb0)]
+pub struct BackgroundOffset {
+    #[bits(0..=8)]
+    pub offset: u16,
 }

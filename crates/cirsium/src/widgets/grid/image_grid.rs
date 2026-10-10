@@ -2,6 +2,13 @@ use super::*;
 
 /// Side length the hover preview aims for.
 const PREVIEW_PX: f32 = 192.;
+const PREVIEW_PADDING: f32 = 4.;
+const PREVIEW_BORDER: f32 = 1.;
+const PREVIEW_GAP: f32 = 12.;
+/// Outer size of the preview box, including its padding and border.
+const PREVIEW_EXTENT: f32 = PREVIEW_PX + (2. * (PREVIEW_PADDING + PREVIEW_BORDER));
+/// Distance the preview keeps from window edges.
+const PREVIEW_MARGIN: f32 = 6.;
 /// Pixels shown around the cursor when every cell is a single pixel (bitmaps).
 const LOUPE_SPAN: u32 = 16;
 
@@ -24,11 +31,11 @@ pub(super) fn cell_grid(
     id: &'static str,
     content: &GridContent,
     selected: Option<usize>,
-    hovered: Option<usize>,
+    hovered: Option<GridHover>,
     viewport: Size<f32>,
+    window_size: Size<Pixels>,
     on_select: Option<SelectCallback>,
     on_hover: Option<HoverCallback>,
-    on_viewport: Option<ViewportCallback>,
     show_window_overlays: bool,
 ) -> Div {
     let container = div()
@@ -36,12 +43,12 @@ pub(super) fn cell_grid(
         .flex()
         .flex_col()
         .flex_1()
+        .min_w(px(0.))
         .min_h(px(0.))
         .px_1()
         .items_center()
         .justify_center()
-        .overflow_hidden()
-        .child(self::measure(on_viewport));
+        .overflow_hidden();
 
     let Some(image) = content.image.clone() else {
         return container.child(empty_state(theme, content.empty_message));
@@ -58,6 +65,7 @@ pub(super) fn cell_grid(
             tile_px: content.tile_px,
             count: content.count,
             cell,
+            window_size,
             overlay: content.overlay,
             footprint: content.footprint,
             window_overlays: if show_window_overlays {
@@ -81,6 +89,7 @@ struct GridSpec {
     tile_px: u32,
     count: usize,
     cell: f32,
+    window_size: Size<Pixels>,
     overlay: Option<GridOverlay>,
     footprint: Option<debugger_model::TilemapViewport>,
     window_overlays: Vec<GridWindowOverlay>,
@@ -90,7 +99,7 @@ fn render(
     theme: &Theme,
     spec: GridSpec,
     selected: Option<usize>,
-    hovered: Option<usize>,
+    hovered: Option<GridHover>,
     on_select: Option<SelectCallback>,
     on_hover: Option<HoverCallback>,
 ) -> impl IntoElement {
@@ -102,6 +111,7 @@ fn render(
         tile_px,
         count,
         cell,
+        window_size,
         overlay,
         footprint,
         window_overlays,
@@ -280,32 +290,20 @@ fn render(
         }
     }
 
-    if let Some(index) = hovered.filter(|&i| i < count && selected != Some(i)) {
-        grid = grid.child(ring(index, theme.accent_hover));
+    if let Some(hover) = hovered.filter(|h| h.index < count && selected != Some(h.index)) {
+        grid = grid.child(ring(hover.index, theme.accent_hover));
     }
-    if let Some(index) = hovered.filter(|&i| i < count) {
-        let cell_bounds = Bounds {
-            origin: point(
-                px((index % cols) as f32 * cell),
-                px((index / cols) as f32 * cell),
-            ),
-            size: size(px(cell), px(cell)),
-        };
-        let left_half = (index % cols) * 2 < cols;
-        if let Some(preview) = self::preview(theme, &image, index, cols, rows, tile_px, cell) {
-            // Open on the side with more room so the hovered cell stays visible.
-            let (anchor, x) = if left_half {
-                (Anchor::TopLeft, cell_bounds.right() + px(8.))
-            } else {
-                (Anchor::TopRight, cell_bounds.left() - px(8.))
-            };
+    if let Some(hover) = hovered.filter(|h| h.index < count) {
+        if let Some(preview) = self::preview(theme, &image, hover.index, cols, rows, tile_px, cell)
+        {
+            let (anchor, position) = preview_position(hover.position, window_size);
             grid = grid.child(
                 deferred(
                     anchored()
-                        .position_mode(AnchoredPositionMode::Local)
+                        .position_mode(AnchoredPositionMode::Window)
                         .anchor(anchor)
-                        .position(point(x, cell_bounds.top()))
-                        .snap_to_window_with_margin(px(6.))
+                        .position(position)
+                        .snap_to_window_with_margin(px(PREVIEW_MARGIN))
                         .child(preview),
                 )
                 .priority(2),
@@ -332,7 +330,11 @@ fn render(
         let moved = handler.clone();
         grid = grid
             .on_mouse_move(move |event: &MouseMoveEvent, window, cx| {
-                moved(hit(event.position), window, cx);
+                let hover = hit(event.position).map(|index| GridHover {
+                    index,
+                    position: event.position,
+                });
+                moved(hover, window, cx);
             })
             .on_hover(move |hovered, window, cx| {
                 if !hovered {
@@ -342,6 +344,26 @@ fn render(
     }
 
     grid
+}
+
+/// Keep the preview beside the cursor, flipping away from nearby window edges.
+fn preview_position(cursor: Point<Pixels>, window: Size<Pixels>) -> (Anchor, Point<Pixels>) {
+    let extent = px(PREVIEW_EXTENT);
+    let gap = px(PREVIEW_GAP);
+    let margin = px(PREVIEW_MARGIN);
+    let left = (cursor.x + gap + extent) > (window.width - margin);
+    let above = (cursor.y + gap + extent) > (window.height - margin);
+    let anchor = match (left, above) {
+        (false, false) => Anchor::TopLeft,
+        (true, false) => Anchor::TopRight,
+        (false, true) => Anchor::BottomLeft,
+        (true, true) => Anchor::BottomRight,
+    };
+    let position = point(
+        cursor.x + if left { -gap } else { gap },
+        cursor.y + if above { -gap } else { gap },
+    );
+    (anchor, position)
 }
 
 /// Enlarged copy of the hovered cell, or a loupe around the hovered pixel for bitmaps.
@@ -393,7 +415,7 @@ fn preview(
 
     Some(
         div()
-            .p_1()
+            .p(px(PREVIEW_PADDING))
             .bg(theme.bg_panel)
             .border_1()
             .border_color(theme.border_strong)

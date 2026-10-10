@@ -51,6 +51,42 @@ const BG1CNT: Register<BackgroundControl> = bgcnt::<1>(0x0400_000A, "BG1CNT");
 const BG2CNT: Register<BackgroundControl> = bgcnt::<2>(0x0400_000C, "BG2CNT");
 const BG3CNT: Register<BackgroundControl> = bgcnt::<3>(0x0400_000E, "BG3CNT");
 
+const fn bgofs<const I: usize, const VERTICAL: bool>(
+    address: u32,
+    name: &'static str,
+) -> Register<BackgroundOffset> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| {
+            if VERTICAL {
+                bus.ppu.bgvofs[I]
+            } else {
+                bus.ppu.bghofs[I]
+            }
+        },
+        |bus| {
+            if VERTICAL {
+                &mut bus.ppu.bgvofs[I]
+            } else {
+                &mut bus.ppu.bghofs[I]
+            }
+        },
+    )
+    .read_mask(0)
+    .write_mask(BackgroundOffset::OFFSET_MASK)
+}
+
+const BG0HOFS: Register<BackgroundOffset> = bgofs::<0, false>(0x0400_0010, "BG0HOFS");
+const BG0VOFS: Register<BackgroundOffset> = bgofs::<0, true>(0x0400_0012, "BG0VOFS");
+const BG1HOFS: Register<BackgroundOffset> = bgofs::<1, false>(0x0400_0014, "BG1HOFS");
+const BG1VOFS: Register<BackgroundOffset> = bgofs::<1, true>(0x0400_0016, "BG1VOFS");
+const BG2HOFS: Register<BackgroundOffset> = bgofs::<2, false>(0x0400_0018, "BG2HOFS");
+const BG2VOFS: Register<BackgroundOffset> = bgofs::<2, true>(0x0400_001A, "BG2VOFS");
+const BG3HOFS: Register<BackgroundOffset> = bgofs::<3, false>(0x0400_001C, "BG3HOFS");
+const BG3VOFS: Register<BackgroundOffset> = bgofs::<3, true>(0x0400_001E, "BG3VOFS");
+
 const PALETTE: Handler = Handler {
     read: |bus, address, width| bus.ppu.read_palette(address, width),
     write: |bus, address, width, value| bus.ppu.write_palette(address, width, value),
@@ -77,6 +113,14 @@ pub(crate) fn register(map: &mut MmioMap) {
     map.register(&BG1CNT);
     map.register(&BG2CNT);
     map.register(&BG3CNT);
+    map.register(&BG0HOFS);
+    map.register(&BG0VOFS);
+    map.register(&BG1HOFS);
+    map.register(&BG1VOFS);
+    map.register(&BG2HOFS);
+    map.register(&BG2VOFS);
+    map.register(&BG3HOFS);
+    map.register(&BG3VOFS);
     map.map(PALETTE_BASE..=PALETTE_END, PALETTE);
     map.map(VRAM_BASE..=VRAM_END, VRAM);
     map.map(OAM_BASE..=OAM_END, OAM);

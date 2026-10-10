@@ -103,12 +103,11 @@ impl Debugger {
         }
 
         self.tilemap_key = key;
-        Self::drop_grid_image(cx, self.tilemap.take().and_then(|v| v.image));
+        Self::drop_grid_image(cx, self.tilemap.take().and_then(BackgroundLayerView::image));
         self.tilemap = self
             .target
             .video()
-            .and_then(|v| v.tilemap(self.tilemap_ui.resource.as_ref()?))
-            .map(Into::into);
+            .and_then(|v| BackgroundLayerView::load(v, self.tilemap_ui.resource.as_ref()?));
 
         self.tilemap_overlay_key = None;
         self.apply_tilemap_overlay(overlay_key);
@@ -128,7 +127,7 @@ impl Debugger {
             return;
         };
 
-        if let Some(view) = &mut self.tilemap {
+        if let Some(BackgroundLayerView::Tilemap(view)) = &mut self.tilemap {
             let viewport = video.tilemap_viewport(resource);
             view.viewport = viewport.filter(|v| v.transform.is_none()).map(Into::into);
             view.footprint = viewport.filter(|v| v.transform.is_some());

@@ -14,6 +14,35 @@ use gpui::prelude::*;
 use debugger_model::TilemapEntry;
 
 #[derive(Clone)]
+pub enum BackgroundLayerView {
+    Tilemap(TilemapView),
+    Bitmap(super::bitmap::BitmapView),
+}
+
+impl BackgroundLayerView {
+    pub fn load(
+        video: &dyn debugger_model::VideoDebug,
+        resource: &debugger_model::VideoResourceId,
+    ) -> Option<Self> {
+        video
+            .tilemap(resource)
+            .map(|map| Self::Tilemap(map.into()))
+            .or_else(|| {
+                video
+                    .bitmap(resource)
+                    .map(|bitmap| Self::Bitmap(bitmap.into()))
+            })
+    }
+
+    pub fn image(self) -> Option<Arc<RenderImage>> {
+        match self {
+            Self::Tilemap(view) => view.image,
+            Self::Bitmap(view) => view.image,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct TilemapView {
     pub width: usize,
     pub height: usize,
@@ -170,7 +199,15 @@ pub struct TilemapWidget;
 impl TilemapWidget {
     pub const ID: &'static str = debugger_model::panel::TILEMAP;
 
-    pub fn panel(view: Option<TilemapView>) -> GridPanel {
+    pub fn panel(view: Option<BackgroundLayerView>) -> GridPanel {
+        let view = match view {
+            Some(BackgroundLayerView::Bitmap(view)) => {
+                return super::bitmap::BitmapWidget::panel_with_id(Self::ID, Some(view));
+            }
+            Some(BackgroundLayerView::Tilemap(view)) => Some(view),
+            None => None,
+        };
+        let has_window_overlays = view.as_ref().is_some_and(|view| !view.overlays.is_empty());
         let content = view.as_ref().map(|view| GridContent {
             image: view.image.clone(),
             cols: view.width,
@@ -184,7 +221,7 @@ impl TilemapWidget {
         });
 
         let mut panel = GridPanel::new(Self::ID, "Tilemap", icon::MAP, content)
-            .window_overlay_toggle(true)
+            .window_overlay_toggle(has_window_overlays)
             .placeholder("Select an entry to inspect");
         if let Some(view) = view {
             panel = panel
@@ -206,10 +243,7 @@ fn detail_row(theme: &Theme, view: &TilemapView, index: usize) -> Div {
         .child(footer_row(
             theme,
             format!("({x}, {y})"),
-            crate::components::mono_text(
-                theme,
-                format!("{} {}", entry.address.region, hex(entry.address.addr, 16)),
-            ),
+            crate::components::mono_text(theme, hex(entry.address.addr, 16)),
         ))
         .child(super::tileset::details(theme, &entry.details))
 }

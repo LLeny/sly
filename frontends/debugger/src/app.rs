@@ -10,14 +10,14 @@ use cirsium::components::{
     status_bar, title_bar,
 };
 use cirsium::widgets::{
-    AudioScopeView, AudioScopeWidget, AudioScopesView, BitmapView, BitmapWidget, BreakpointKind,
-    BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView, CartridgeWidget,
-    ChannelScopesWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget,
-    FramebufferView, FramebufferWidget, GridPanel, LogWidget, MemoryWidget, MmioView, MmioWidget,
-    PaletteView, PaletteWidget, RowProvider, SavestatesWidget, ScriptBuiltinsWidget,
-    ScriptConsoleWidget, ScriptEditorWidget, SpritesView, SpritesWidget, StructuredPanel,
-    StructuredView, TablePanel, TableView, TilemapView, TilemapWidget, TilesetView, TilesetWidget,
-    ViewMode,
+    AudioScopeView, AudioScopeWidget, AudioScopesView, BackgroundLayerView, BitmapView,
+    BitmapWidget, BreakpointKind, BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView,
+    CartridgeWidget, ChannelScopesWidget, ControlsView, ControlsWidget, CpuWidget,
+    DisassemblyWidget, FramebufferView, FramebufferWidget, GridHover, GridPanel, LogWidget,
+    MemoryWidget, MmioView, MmioWidget, PaletteView, PaletteWidget, RowProvider, SavestatesWidget,
+    ScriptBuiltinsWidget, ScriptConsoleWidget, ScriptEditorWidget, SpritesView, SpritesWidget,
+    StructuredPanel, StructuredView, TablePanel, TableView, TilemapWidget, TilesetView,
+    TilesetWidget, ViewMode,
 };
 
 use cirsium::{
@@ -69,7 +69,7 @@ struct ProcessorPane {
 struct GridState {
     resource: Option<VideoResourceId>,
     selected: HashMap<VideoResourceId, usize>,
-    hovered: Option<usize>,
+    hovered: Option<GridHover>,
     viewport: Size<f32>,
     show_window_overlays: bool,
 }
@@ -119,7 +119,7 @@ impl GridState {
         }
     }
 
-    fn set_hovered(&mut self, hovered: Option<usize>) -> bool {
+    fn set_hovered(&mut self, hovered: Option<GridHover>) -> bool {
         let changed = self.hovered != hovered;
         if changed {
             self.hovered = hovered;
@@ -192,7 +192,7 @@ pub(crate) struct Debugger {
     bitmap_ui: GridState,
     bitmap_key: Option<VideoCacheKey>,
     tileset_ui: GridState,
-    tilemap: Option<TilemapView>,
+    tilemap: Option<BackgroundLayerView>,
     tilemap_ui: GridState,
     sprites: Option<SpritesView>,
     sprites_ui: GridState,
