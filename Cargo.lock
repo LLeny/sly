@@ -1189,18 +1189,18 @@ dependencies = [
 
 [[package]]
 name = "chapa"
-version = "0.9.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6424414d05bb8c4af293c63e33215e229b835a51fd9e17194a422d28077b9dc"
+checksum = "d51c7b2001480e11ac51a275bea3bf73f81b2f6d43b92943160bfee91b1fd0b5"
 dependencies = [
  "chapa-macros",
 ]
 
 [[package]]
 name = "chapa-macros"
-version = "0.9.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "825a76f18376236cbf67b6f8141f0025f80cd1f6debf785acc4f4fef9492e9e5"
+checksum = "4a806f1491228a579393091fcbf29dfa04ea62be5ff5f31c963cc5a5f42a9ac6"
 dependencies = [
  "proc-macro2",
  "quote",

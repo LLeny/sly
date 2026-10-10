@@ -7,6 +7,50 @@ pub enum ColorDepth {
     Prohibited = 2,
 }
 
+#[chapa::bitenum]
+pub enum Size {
+    Size0 = 0,
+    Size1 = 1,
+    Size2 = 2,
+    Size3 = 3,
+
+    #[fallback]
+    Prohibited = 4,
+}
+
+impl Size {
+    pub fn text_dimensions(self) -> Option<(usize, usize)> {
+        match self {
+            Self::Size0 => Some((256, 256)),
+            Self::Size1 => Some((512, 256)),
+            Self::Size2 => Some((256, 512)),
+            Self::Size3 => Some((512, 512)),
+            Self::Prohibited => None,
+        }
+    }
+
+    pub fn affine_dimensions(self) -> Option<(usize, usize)> {
+        let side = match self {
+            Self::Size0 => 128,
+            Self::Size1 => 256,
+            Self::Size2 => 512,
+            Self::Size3 => 1024,
+            Self::Prohibited => return None,
+        };
+        Some((side, side))
+    }
+}
+
+impl std::fmt::Display for ColorDepth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Bpp4 => "4bpp",
+            Self::Bpp8 => "8bpp",
+            Self::Prohibited => unreachable!(),
+        })
+    }
+}
+
 impl ColorDepth {
     pub const fn tile_bytes(self) -> usize {
         match self {

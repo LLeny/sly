@@ -35,6 +35,22 @@ const VCOUNT: Register<VerticalCount> = Register::new(
 .read_mask(VerticalCount::SCANLINE_MASK)
 .read_only();
 
+const fn bgcnt<const I: usize>(address: u32, name: &'static str) -> Register<BackgroundControl> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| bus.ppu.bgcnt[I],
+        |bus| &mut bus.ppu.bgcnt[I],
+    )
+    .write_mask(BackgroundControl::WRITE_MASK)
+}
+
+const BG0CNT: Register<BackgroundControl> = bgcnt::<0>(0x0400_0008, "BG0CNT");
+const BG1CNT: Register<BackgroundControl> = bgcnt::<1>(0x0400_000A, "BG1CNT");
+const BG2CNT: Register<BackgroundControl> = bgcnt::<2>(0x0400_000C, "BG2CNT");
+const BG3CNT: Register<BackgroundControl> = bgcnt::<3>(0x0400_000E, "BG3CNT");
+
 const PALETTE: Handler = Handler {
     read: |bus, address, width| bus.ppu.read_palette(address, width),
     write: |bus, address, width, value| bus.ppu.write_palette(address, width, value),
@@ -57,6 +73,10 @@ pub(crate) fn register(map: &mut MmioMap) {
     map.register(&DISPCTL);
     map.register(&DISPSTAT);
     map.register(&VCOUNT);
+    map.register(&BG0CNT);
+    map.register(&BG1CNT);
+    map.register(&BG2CNT);
+    map.register(&BG3CNT);
     map.map(PALETTE_BASE..=PALETTE_END, PALETTE);
     map.map(VRAM_BASE..=VRAM_END, VRAM);
     map.map(OAM_BASE..=OAM_END, OAM);

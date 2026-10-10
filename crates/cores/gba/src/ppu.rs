@@ -8,7 +8,7 @@ use crate::ppu::regs::BackgroundMode;
 use crate::ppu::sprite::{Attribute, OBJ_TILE_OFFSET};
 use crate::ppu::tile::Tile;
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
-use regs::{DisplayControl, DisplayStatus, SpriteMapping, VerticalCount};
+use regs::{BackgroundControl, DisplayControl, DisplayStatus, SpriteMapping, VerticalCount};
 
 const SCANLINES_PER_FRAME: u8 = 228;
 const VBLANK_START_SCANLINE: u8 = 160;
@@ -29,29 +29,6 @@ pub(crate) const HBLANK_START_CYCLES: u64 = 1006;
 pub(crate) const VBLANK_START_CYCLES: u64 = VBLANK_START_SCANLINE as u64 * SCANLINE_CYCLES;
 pub(crate) const VBLANK_END_CYCLES: u64 = VBLANK_END_SCANLINE as u64 * SCANLINE_CYCLES;
 pub(crate) const FRAME_CYCLES: u64 = SCANLINES_PER_FRAME as u64 * SCANLINE_CYCLES;
-
-pub struct Ppu {
-    #[cfg(feature = "debug")]
-    pub(crate) revisions: Revisions,
-
-    pub(crate) dispstat: DisplayStatus,
-    pub(crate) dispctrl: DisplayControl,
-    pub(crate) vcount: VerticalCount,
-
-    pub(crate) vram: Vec<u8>,
-    pub(crate) palette: Vec<u8>,
-    pub(crate) oam: Vec<u8>,
-
-    pub(crate) frame: Vec<[u8; 4]>,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct BitmapLayout {
-    pub(crate) width: usize,
-    pub(crate) height: usize,
-    pub(crate) bytes_per_pixel: usize,
-    pub(crate) base: usize,
-}
 
 pub(crate) fn bitmap_layout(control: DisplayControl) -> Option<BitmapLayout> {
     let page = control.frame_select().vram_offset();
@@ -169,10 +146,20 @@ pub(crate) fn sprite_row<'a>(
     })
 }
 
-impl Default for Ppu {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct Ppu {
+    #[cfg(feature = "debug")]
+    pub(crate) revisions: Revisions,
+
+    pub(crate) dispstat: DisplayStatus,
+    pub(crate) dispctrl: DisplayControl,
+    pub(crate) vcount: VerticalCount,
+    pub(crate) bgcnt: [BackgroundControl; 4],
+
+    pub(crate) vram: Vec<u8>,
+    pub(crate) palette: Vec<u8>,
+    pub(crate) oam: Vec<u8>,
+
+    pub(crate) frame: Vec<[u8; 4]>,
 }
 
 impl Ppu {
@@ -187,6 +174,7 @@ impl Ppu {
             dispstat: DisplayStatus::zeroed().with_vcounter(true),
             dispctrl: DisplayControl::zeroed(),
             vcount: VerticalCount::zeroed(),
+            bgcnt: [BackgroundControl::zeroed(); 4],
             vram: vec![0; VRAM_SIZE as usize],
             palette: vec![0; PALETTE_SIZE as usize],
             oam: vec![0; OAM_SIZE as usize],
@@ -383,6 +371,20 @@ pub(crate) fn vram_offset(address: u32) -> usize {
         offset - 0x8000
     } else {
         offset
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct BitmapLayout {
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+    pub(crate) bytes_per_pixel: usize,
+    pub(crate) base: usize,
+}
+
+impl BitmapLayout {
+    pub(crate) fn address(self) -> u32 {
+        VRAM_BASE + self.base as u32
     }
 }
 

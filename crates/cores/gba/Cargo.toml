@@ -9,7 +9,7 @@ disasm = []
 debug = ["dep:debugger-model", "dep:workspace-model"]
 
 [dependencies]
-chapa = { version = "0.9.0", features = ["reflection"] }
+chapa = { version = "0.11.0", features = ["reflection"] }
 chipi-macros = "1.0.1"
 core-model = { path = "../../models/core" }
 workspace-model = { path = "../../models/workspace", optional = true }

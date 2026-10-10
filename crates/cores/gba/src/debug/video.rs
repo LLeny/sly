@@ -11,8 +11,8 @@ use workspace_model::{
     WorkspaceDescriptor, WorkspaceIcon,
 };
 
-use super::GbaDebug;
-use crate::ppu::regs::BackgroundMode;
+use super::{GbaDebug, field};
+use crate::ppu::regs::{BackgroundKind, BackgroundMode};
 use crate::ppu::sprite::{self, ObjMode};
 use crate::ppu::tile::ColorDepth;
 use crate::ppu::{BitmapLayout, VRAM_BASE, bitmap_layout, render_bg_scanline, rgba, sprite_row};
@@ -20,6 +20,63 @@ use crate::{Gba, SCREEN_HEIGHT};
 
 const PALETTE: &str = "gba.palette";
 const SPRITES: &str = "gba.objects";
+
+fn background_row(core: &Gba, index: usize) -> Row {
+    let display = core.ppu.dispctrl;
+    let control = core.ppu.bgcnt[index];
+    let kind = display.mode().background_kind(index);
+    let enabled = display.enable_bg(index);
+    let priority = control.priority();
+    let layout = bitmap_layout(display).filter(|_| kind == BackgroundKind::Bitmap);
+    let (size, colors, addresses) = match layout {
+        Some(layout) => (
+            Some((layout.width, layout.height)),
+            if layout.bytes_per_pixel == 1 {
+                ColorDepth::Bpp8.to_string()
+            } else {
+                "15-bit direct color".to_string()
+            },
+            vec![field("Framebuffer", format!("{:08X}", layout.address()))],
+        ),
+        None => (
+            control.dimensions(kind),
+            control.effective_color_depth(kind).to_string(),
+            vec![
+                field("Tileset base", format!("{:08X}", control.tileset_address())),
+                field("Tilemap base", format!("{:08X}", control.tilemap_address())),
+            ],
+        ),
+    };
+    let dimensions = size.map_or_else(
+        || "N/A".to_string(),
+        |(width, height)| format!("{width} × {height}"),
+    );
+    let summary = format!("{kind} · {dimensions} · priority {priority}");
+
+    let mut flags = vec![
+        FlagView::new("Enabled", enabled),
+        FlagView::new("Mosaic", control.mosaic()),
+    ];
+    if kind == BackgroundKind::Affine {
+        flags.push(FlagView::new("Wraparound", control.wraparound()));
+    }
+    let mut rows = vec![
+        field("Type", kind.to_string()),
+        field("Priority", priority.to_string()),
+        field("Dimensions", dimensions),
+        field("Colors", colors),
+    ];
+    rows.extend(addresses);
+    rows.push(Row::Flags { flags, note: None });
+
+    Row::Group {
+        id: format!("bg{index}").into(),
+        title: format!("BG{index}").into(),
+        summary: summary.into(),
+        active: enabled,
+        rows,
+    }
+}
 
 const BG_LAYERS: [(&str, &str); 4] = [
     ("gba.bg0", "BG0"),
@@ -66,7 +123,7 @@ fn bitmap_bg2(core: &Gba) -> Option<BitmapImage> {
         source: Some(BitmapSource {
             address: MemoryAddress {
                 region: "gba.vram".into(),
-                addr: 0x0600_0000 + base as u32,
+                addr: layout.address(),
             },
             bytes_per_pixel: bytes_per_pixel as u32,
         }),
@@ -114,10 +171,6 @@ fn sprites(core: &Gba) -> Sprites {
                 ObjMode::ObjWindow => "OBJ window",
                 ObjMode::Prohibited => "Prohibited",
             };
-            let depth = match attr.color_depth() {
-                ColorDepth::Bpp4 => "4bpp",
-                _ => "8bpp",
-            };
 
             SpriteEntry {
                 x: if x >= 256 { x - 512 } else { x },
@@ -134,7 +187,7 @@ fn sprites(core: &Gba) -> Sprites {
                         "VRAM",
                         format!("{:08X}", VRAM_BASE as usize + attr.tile_addr(mapping, 0, 0)),
                     ),
-                    Field::new("Colors", depth.to_string()),
+                    Field::new("Colors", attr.color_depth().to_string()),
                     Field::new("Palette", attr.palette_number().to_string()),
                     Field::new("Priority", attr.priority().to_string()),
                     Field::new("Mode", mode.to_string()),
@@ -154,8 +207,6 @@ pub(super) fn ppu_view(core: &Gba) -> StructuredView {
     let control = core.ppu.dispctrl;
     let status = core.ppu.dispstat;
     let vcount = core.ppu.vcount;
-    let field = |label: &str, value: String| Row::Field(Field::new(label, value));
-
     StructuredView {
         sections: vec![
             Section {
@@ -189,6 +240,11 @@ pub(super) fn ppu_view(core: &Gba) -> StructuredView {
                     field("VCOUNT Compare", status.vcount_compare().to_string()),
                     field("VCOUNT IRQ", status.vcounter_irq().to_string()),
                 ],
+                ..Default::default()
+            },
+            Section {
+                title: Some("Backgrounds".into()),
+                rows: (0..4).map(|index| background_row(core, index)).collect(),
                 ..Default::default()
             },
         ],

@@ -1,5 +1,5 @@
 use crate::ppu::regs::SpriteMapping;
-use crate::ppu::tile::ColorDepth;
+use crate::ppu::tile::{ColorDepth, Size};
 
 pub const OAM_ATTR_SIZE: usize = 8; // 3 attributes plus 1 affine parameter halfword
 pub const OBJ_TILE_OFFSET: usize = 0x10000;
@@ -32,17 +32,6 @@ pub enum Shape {
 
     #[fallback]
     Prohibited = 3,
-}
-
-#[chapa::bitenum]
-pub enum ObjSize {
-    Size0 = 0,
-    Size1 = 1,
-    Size2 = 2,
-    Size3 = 3,
-
-    #[fallback]
-    Prohibited = 4,
 }
 
 #[chapa::bitfield(u64, order = lsb0)]
@@ -83,7 +72,7 @@ pub struct Attribute {
     pub vertical_flip: bool,
 
     #[bits(30..=31)]
-    pub size: ObjSize,
+    pub size: Size,
 
     #[bits(32..=41)]
     pub tile_number: u16,
@@ -97,8 +86,8 @@ pub struct Attribute {
 
 impl Attribute {
     pub fn dimensions(&self) -> (usize, usize) {
-        use ObjSize::*;
         use Shape::*;
+        use Size::*;
 
         match (self.shape(), self.size()) {
             (Square, Size0) => (8, 8),

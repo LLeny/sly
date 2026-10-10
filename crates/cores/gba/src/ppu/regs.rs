@@ -1,3 +1,5 @@
+use crate::ppu::tile::{ColorDepth, Size};
+
 #[chapa::bitfield(u16, order = lsb0)]
 pub struct DisplayStatus {
     #[bits(0)]
@@ -43,6 +45,36 @@ pub enum BackgroundMode {
     Mode5 = 5,
     #[fallback]
     Unknown = 6,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BackgroundKind {
+    Text,
+    Affine,
+    Bitmap,
+    Unavailable,
+}
+
+impl std::fmt::Display for BackgroundKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Text => "Text",
+            Self::Affine => "Affine",
+            Self::Bitmap => "Bitmap",
+            Self::Unavailable => "Unavailable",
+        })
+    }
+}
+
+impl BackgroundMode {
+    pub fn background_kind(self, index: usize) -> BackgroundKind {
+        match (self, index) {
+            (Self::Mode0, 0..=3) | (Self::Mode1, 0 | 1) => BackgroundKind::Text,
+            (Self::Mode1, 2) | (Self::Mode2, 2 | 3) => BackgroundKind::Affine,
+            (Self::Mode3 | Self::Mode4 | Self::Mode5, 2) => BackgroundKind::Bitmap,
+            _ => BackgroundKind::Unavailable,
+        }
+    }
 }
 
 impl std::fmt::Display for BackgroundMode {
@@ -142,4 +174,76 @@ pub struct DisplayControl {
 pub struct VerticalCount {
     #[bits(0..=7)]
     pub scanline: u8,
+}
+
+#[chapa::bitfield(u16, order = lsb0)]
+pub struct BackgroundControl {
+    #[bits(0..=1)]
+    pub priority: u8,
+
+    #[bits(2..=3)]
+    pub tileset_base: u8,
+
+    #[bits(4..=5)]
+    pub reserved: u8,
+
+    #[bits(6)]
+    pub mosaic: bool,
+
+    #[bits(7)]
+    pub color_depth: ColorDepth,
+
+    #[bits(8..=12)]
+    pub tilemap_base: u8,
+
+    #[bits(13)]
+    pub wraparound: bool,
+
+    #[bits(14..=15)]
+    pub screen_size: Size,
+}
+
+impl DisplayControl {
+    pub fn enable_bg(self, index: usize) -> bool {
+        match index {
+            0 => self.enable_bg0(),
+            1 => self.enable_bg1(),
+            2 => self.enable_bg2(),
+            3 => self.enable_bg3(),
+            _ => false,
+        }
+    }
+}
+
+impl BackgroundControl {
+    pub const WRITE_MASK: u16 = Self::PRIORITY_MASK
+        | Self::TILESET_BASE_MASK
+        | Self::MOSAIC_MASK
+        | Self::COLOR_DEPTH_MASK
+        | Self::TILEMAP_BASE_MASK
+        | Self::WRAPAROUND_MASK
+        | Self::SCREEN_SIZE_MASK;
+
+    pub fn tileset_address(self) -> u32 {
+        super::VRAM_BASE + u32::from(self.tileset_base()) * 0x4000
+    }
+
+    pub fn tilemap_address(self) -> u32 {
+        super::VRAM_BASE + u32::from(self.tilemap_base()) * 0x800
+    }
+
+    pub fn dimensions(self, kind: BackgroundKind) -> Option<(usize, usize)> {
+        match kind {
+            BackgroundKind::Text => self.screen_size().text_dimensions(),
+            BackgroundKind::Affine => self.screen_size().affine_dimensions(),
+            BackgroundKind::Bitmap | BackgroundKind::Unavailable => None,
+        }
+    }
+
+    pub fn effective_color_depth(self, kind: BackgroundKind) -> ColorDepth {
+        match kind {
+            BackgroundKind::Affine => ColorDepth::Bpp8,
+            _ => self.color_depth(),
+        }
+    }
 }

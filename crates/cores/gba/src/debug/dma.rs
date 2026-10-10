@@ -1,11 +1,10 @@
-use debugger_model::{Field, FlagView, Row, Section, StructuredView, hex};
+use debugger_model::{FlagView, Row, Section, StructuredView, hex};
 
+use super::field;
 use crate::Gba;
 use crate::dma::regs::StartTiming;
 
 pub(super) fn view(core: &Gba) -> StructuredView {
-    let field = |label: &str, value: String| Row::Field(Field::new(label, value));
-
     let channels = (0..4)
         .map(|channel| {
             let control = core.dma.control[channel];

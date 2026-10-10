@@ -590,3 +590,7 @@ impl debugger_model::DebugCore for GbaDebug {
         self.accesses.latest.map(|addr| (SPACE.into(), addr))
     }
 }
+
+fn field(label: &str, value: String) -> Row {
+    Row::Field(Field::new(label, value))
+}
