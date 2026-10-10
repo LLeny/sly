@@ -14,11 +14,10 @@ use workspace_model::{
 
 use super::{GbaDebug, field};
 use crate::ppu::regs::{BackgroundKind, BackgroundMode};
+use crate::ppu::renderer::{render_bitmap_line, sprite_texel};
 use crate::ppu::sprite::{self, ObjMode};
 use crate::ppu::tile::{ColorDepth, Tile};
-use crate::ppu::{
-    BitmapLayout, VRAM_BASE, bitmap_layout, render_bitmap_scanline, rgba, sprite_row,
-};
+use crate::ppu::{BitmapLayout, VRAM_BASE, rgba};
 use crate::{Gba, SCREEN_HEIGHT, SCREEN_WIDTH};
 
 const PALETTE: &str = "gba.palette";
@@ -30,7 +29,10 @@ fn background_row(core: &Gba, index: usize) -> Row {
     let kind = display.mode().background_kind(index);
     let enabled = display.bg_enabled(index);
     let priority = control.priority();
-    let layout = bitmap_layout(display).filter(|_| kind == BackgroundKind::Bitmap);
+    let layout = core
+        .ppu
+        .bitmap_layout()
+        .filter(|_| kind == BackgroundKind::Bitmap);
     let (size, colors, addresses) = match layout {
         Some(layout) => (
             Some((layout.width, layout.height)),
@@ -234,17 +236,24 @@ fn background_tilemap(core: &Gba, index: usize) -> Option<Tilemap> {
 fn bitmap_bg2(core: &Gba) -> Option<BitmapImage> {
     let control = core.ppu.dispctrl;
     let mode = control.mode();
-    let layout = bitmap_layout(control)?;
+    let layout = core.ppu.bitmap_layout()?;
     let BitmapLayout {
         width,
         height,
         bytes_per_pixel,
         base,
     } = layout;
-    let mut pixels = vec![[0; 4]; width * height];
-    let memory = core.ppu.memory();
-    for (line, output) in pixels.chunks_exact_mut(width).enumerate() {
-        render_bitmap_scanline(layout, memory, line, output);
+    let memory = core.ppu.memory_view();
+    let backdrop = core.ppu.palette_color(0);
+    let mut pixels = Vec::with_capacity(width * height);
+    let mut output = [None; SCREEN_WIDTH as usize];
+    for line in 0..height {
+        render_bitmap_line(layout, memory, line, &mut output);
+        pixels.extend(
+            output[..width]
+                .iter()
+                .map(|color| rgba(color.unwrap_or(backdrop))),
+        );
     }
 
     Some(BitmapImage {
@@ -282,14 +291,27 @@ fn bitmap_bg2(core: &Gba) -> Option<BitmapImage> {
 fn sprites(core: &Gba) -> Sprites {
     let ppu = &core.ppu;
     let mapping = ppu.dispctrl.sprite_mapping();
-    let memory = ppu.memory();
+    let memory = ppu.memory_view();
     let entries = sprite::attributes(memory.oam)
         .map(|attr| {
             let (width, height) = attr.dimensions();
             let mut pixels = vec![[0; 4]; width * height];
+            let flips = !attr.affine();
             for (row, line) in pixels.chunks_exact_mut(width).enumerate() {
-                for (col, color) in sprite_row(attr, mapping, memory, row) {
-                    line[col] = color;
+                for (col, dst) in line.iter_mut().enumerate() {
+                    let x = if flips && attr.horizontal_flip() {
+                        width - 1 - col
+                    } else {
+                        col
+                    };
+                    let y = if flips && attr.vertical_flip() {
+                        height - 1 - row
+                    } else {
+                        row
+                    };
+                    if let Some(color) = sprite_texel(attr, mapping, memory, x, y) {
+                        *dst = rgba(color);
+                    }
                 }
             }
 
