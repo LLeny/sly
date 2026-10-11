@@ -1,5 +1,6 @@
 use crate::SCREEN_WIDTH;
 use crate::ppu::blend::{BlendView, LayerPixel};
+use crate::ppu::mosaic::MosaicSize;
 use crate::ppu::regs::{BACKDROP_LAYER, DisplayControl, OBJ_LAYER, SpriteMapping};
 use crate::ppu::sprite::{self, Attribute, ObjMode};
 use crate::ppu::tile::{TextMapEntry, Tile};
@@ -85,10 +86,10 @@ pub(crate) fn render_background_line(
     };
 
     let depth = bg.ctrl.color_depth();
-    let bg_y = (line + bg.vofs as usize) & (height - 1);
+    let bg_y = (bg.mosaic.y(line) + bg.vofs as usize) & (height - 1);
 
     for (x, dst) in output.iter_mut().enumerate() {
-        let bg_x = (x + bg.hofs as usize) & (width - 1);
+        let bg_x = (bg.mosaic.x(x) + bg.hofs as usize) & (width - 1);
 
         let entry_addr = bg.ctrl.text_entry_offset(bg_x / 8, bg_y / 8, width);
         let entry = TextMapEntry::from_le_bytes(
@@ -113,6 +114,7 @@ pub(crate) fn render_background_line(
 
 pub(crate) fn render_bitmap_line(
     layout: BitmapLayout,
+    mosaic: MosaicSize,
     memory: VideoMemoryView<'_>,
     line: usize,
     output: &mut LayerLine,
@@ -122,12 +124,11 @@ pub(crate) fn render_bitmap_line(
     }
 
     let pitch = layout.width * layout.bytes_per_pixel;
-    let start = layout.base + (line * pitch);
+    let start = layout.base + (mosaic.y(line) * pitch);
     let src = &memory.vram[start..start + pitch];
-    for (dst, bytes) in output
-        .iter_mut()
-        .zip(src.chunks_exact(layout.bytes_per_pixel))
-    {
+    for (x, dst) in output.iter_mut().enumerate().take(layout.width) {
+        let offset = mosaic.x(x) * layout.bytes_per_pixel;
+        let bytes = &src[offset..offset + layout.bytes_per_pixel];
         *dst = match *bytes {
             [0] => None,
             [index] => Some(palette_color(memory.palette, index.into())),
@@ -138,6 +139,7 @@ pub(crate) fn render_bitmap_line(
 
 pub(crate) fn render_sprite_line(
     display: DisplayControl,
+    mosaic: MosaicSize,
     memory: VideoMemoryView<'_>,
     line: usize,
     output: &mut SpriteLine,
@@ -170,6 +172,13 @@ pub(crate) fn render_sprite_line(
             continue;
         }
 
+        let mosaic = if attr.mosaic() {
+            mosaic
+        } else {
+            MosaicSize::NONE
+        };
+        let row = row - (line - mosaic.y(line)).min(row);
+
         let y = if attr.vertical_flip() {
             height - 1 - row
         } else {
@@ -182,6 +191,7 @@ pub(crate) fn render_sprite_line(
                 continue;
             };
 
+            let col = col - (screen_x - mosaic.x(screen_x)).min(col);
             let x = if attr.horizontal_flip() {
                 width - 1 - col
             } else {

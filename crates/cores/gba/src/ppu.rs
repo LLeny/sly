@@ -1,5 +1,6 @@
 pub(crate) mod blend;
 pub(crate) mod io;
+pub(crate) mod mosaic;
 pub(crate) mod regs;
 pub(crate) mod renderer;
 pub(crate) mod sprite;
@@ -13,9 +14,10 @@ use crate::ppu::regs::{BackgroundKind, BackgroundMode};
 use crate::ppu::sprite::OBJ_TILE_OFFSET;
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use blend::BlendView;
+use mosaic::MosaicSize;
 use regs::{
     BackgroundControl, BackgroundOffset, BlendAlpha, BlendBrightness, BlendControl, DisplayControl,
-    DisplayStatus, VerticalCount, WindowControl, WindowXOffset, WindowYOffset,
+    DisplayStatus, Mosaic, VerticalCount, WindowControl, WindowXOffset, WindowYOffset,
 };
 use window::WindowView;
 
@@ -67,6 +69,7 @@ pub struct Ppu {
     pub(crate) winin: WindowControl,
     pub(crate) winout: WindowControl,
 
+    pub(crate) mosaic: Mosaic,
     pub(crate) bldcnt: BlendControl,
     pub(crate) bldalpha: BlendAlpha,
     pub(crate) bldy: BlendBrightness,
@@ -99,6 +102,7 @@ impl Ppu {
             winv: [WindowYOffset::zeroed(); 2],
             winin: WindowControl::zeroed(),
             winout: WindowControl::zeroed(),
+            mosaic: Mosaic::zeroed(),
             bldcnt: BlendControl::zeroed(),
             bldalpha: BlendAlpha::zeroed(),
             bldy: BlendBrightness::zeroed(),
@@ -140,7 +144,8 @@ impl Ppu {
                 }
                 BackgroundKind::Bitmap => {
                     if let Some(layout) = self.bitmap_layout() {
-                        renderer::render_bitmap_line(layout, memory, line, bg_line);
+                        let mosaic = background.mosaic;
+                        renderer::render_bitmap_line(layout, mosaic, memory, line, bg_line);
                     }
                 }
                 BackgroundKind::Affine => continue, // TODO: AFFIEN
@@ -155,6 +160,7 @@ impl Ppu {
         let mut obj_window = [false; SCREEN_WIDTH as usize];
         renderer::render_sprite_line(
             self.dispctrl,
+            self.mosaic.obj_size(),
             memory,
             line,
             &mut sprite_line,
@@ -187,11 +193,17 @@ impl Ppu {
     }
 
     fn background_view(&self, index: usize) -> BackgroundView {
+        let ctrl = self.bgcnt[index];
         BackgroundView {
             kind: self.dispctrl.mode().background_kind(index),
-            ctrl: self.bgcnt[index],
+            ctrl,
             hofs: self.bghofs[index].offset(),
             vofs: self.bgvofs[index].offset(),
+            mosaic: if ctrl.mosaic() {
+                self.mosaic.bg_size()
+            } else {
+                MosaicSize::NONE
+            },
         }
     }
 
@@ -220,6 +232,7 @@ impl Ppu {
     }
 
     pub(crate) fn save_io(&self, io: &mut [u8]) {
+        io[0x4C..0x4E].copy_from_slice(&self.mosaic.raw().to_le_bytes());
         io[0x50..0x52].copy_from_slice(&self.bldcnt.raw().to_le_bytes());
         io[0x52..0x54].copy_from_slice(&self.bldalpha.raw().to_le_bytes());
         io[0x54..0x56].copy_from_slice(&self.bldy.raw().to_le_bytes());
@@ -227,6 +240,7 @@ impl Ppu {
 
     pub(crate) fn load_io(&mut self, io: &[u8]) {
         let half = |offset: usize| u16::from_le_bytes(io[offset..(offset + 2)].try_into().unwrap());
+        self.mosaic = Mosaic::from_raw(half(0x4C));
         self.bldcnt = BlendControl::from_raw(half(0x50) & BlendControl::WRITE_MASK);
         self.bldalpha = BlendAlpha::from_raw(half(0x52) & BlendAlpha::WRITE_MASK);
         self.bldy = BlendBrightness::from_raw(half(0x54) & BlendBrightness::WRITE_MASK);
@@ -427,6 +441,7 @@ pub(crate) struct BackgroundView {
     pub(crate) kind: BackgroundKind,
     pub(crate) hofs: u16,
     pub(crate) vofs: u16,
+    pub(crate) mosaic: MosaicSize,
 }
 
 #[derive(Clone, Copy)]

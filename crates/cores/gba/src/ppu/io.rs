@@ -134,6 +134,15 @@ const WINOUT: Register<WindowControl> = Register::new(
 .read_mask(0x3F3F)
 .write_mask(0x3F3F);
 
+const MOSAIC: Register<Mosaic> = Register::new(
+    0x0400_004C,
+    "MOSAIC",
+    "PPU",
+    |bus| bus.ppu.mosaic,
+    |bus| &mut bus.ppu.mosaic,
+)
+.read_mask(0);
+
 const BLDCNT: Register<BlendControl> = Register::new(
     0x0400_0050,
     "BLDCNT",
@@ -204,6 +213,7 @@ pub(crate) fn register(map: &mut MmioMap) {
     map.register(&WIN1V);
     map.register(&WININ);
     map.register(&WINOUT);
+    map.register(&MOSAIC);
     map.register(&BLDCNT);
     map.register(&BLDALPHA);
     map.register(&BLDY);

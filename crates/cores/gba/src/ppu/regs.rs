@@ -469,3 +469,18 @@ pub struct BlendBrightness {
 impl BlendBrightness {
     pub const WRITE_MASK: u16 = Self::EV_MASK;
 }
+
+#[chapa::bitfield(u16, order = lsb0)]
+pub struct Mosaic {
+    #[bits(0..=3)]
+    pub bg_mosaic_hsize: u8,
+
+    #[bits(4..=7)]
+    pub bg_mosaic_vsize: u8,
+
+    #[bits(8..=11)]
+    pub obj_mosaic_hsize: u8,
+
+    #[bits(12..=15)]
+    pub obj_mosaic_vsize: u8,
+}

@@ -15,7 +15,8 @@ use workspace_model::{
 
 use super::window_trace::WindowDebugRow;
 use super::{GbaDebug, field};
-use crate::ppu::regs::{BackgroundKind, BackgroundMode};
+use crate::ppu::mosaic::MosaicSize;
+use crate::ppu::regs::{BackgroundKind, BackgroundMode, SpecialEffect, SpriteMapping};
 use crate::ppu::renderer::{render_bitmap_line, render_sprite_line, sprite_texel};
 use crate::ppu::sprite::{self, ObjMode};
 use crate::ppu::tile::{ColorDepth, Tile};
@@ -273,6 +274,7 @@ fn tilemap_window_overlays(core: &Gba, layer: usize) -> Vec<TilemapOverlay> {
                 let mut sprites = [None; SCREEN_WIDTH as usize];
                 render_sprite_line(
                     ppu.dispctrl,
+                    ppu.mosaic.obj_size(),
                     ppu.memory_view(),
                     y,
                     &mut sprites,
@@ -392,7 +394,7 @@ fn bitmap_bg2(core: &Gba) -> Option<BitmapImage> {
     let mut pixels = Vec::with_capacity(width * height);
     let mut output = [None; SCREEN_WIDTH as usize];
     for line in 0..height {
-        render_bitmap_line(layout, memory, line, &mut output);
+        render_bitmap_line(layout, MosaicSize::NONE, memory, line, &mut output);
         pixels.extend(
             output[..width]
                 .iter()
@@ -519,10 +521,97 @@ fn sprites(core: &Gba) -> Sprites {
     Sprites { entries }
 }
 
+fn layer_names(enabled: impl Fn(usize) -> bool, count: usize) -> String {
+    let names = ["BG0", "BG1", "BG2", "BG3", "OBJ", "Backdrop"];
+    let selected = names
+        .iter()
+        .take(count)
+        .enumerate()
+        .filter_map(|(index, &name)| enabled(index).then_some(name))
+        .collect::<Vec<_>>();
+    if selected.is_empty() {
+        "None".into()
+    } else {
+        selected.join(", ")
+    }
+}
+
+fn window_rows(core: &Gba) -> Vec<Row> {
+    let ppu = &core.ppu;
+    let display = ppu.dispctrl;
+    let enabled = [
+        display.enable_window0(),
+        display.enable_window1(),
+        display.enable_obj() && display.enable_obj_window(),
+    ];
+    let permissions = [
+        ppu.winin.raw() as u8,
+        (ppu.winin.raw() >> 8) as u8,
+        (ppu.winout.raw() >> 8) as u8,
+        ppu.winout.raw() as u8,
+    ];
+    let range = |start: u16, end: u16| {
+        let suffix = if start == end {
+            " (empty)"
+        } else if start > end {
+            " (wrap)"
+        } else {
+            ""
+        };
+        format!("{start} → {end}{suffix}")
+    };
+    ["WIN0", "WIN1", "OBJ window", "Outside"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let active = enabled
+                .get(index)
+                .copied()
+                .unwrap_or(enabled.contains(&true));
+            let mask = permissions[index];
+            let mut rows = vec![
+                field(
+                    "Visible layers",
+                    layer_names(|layer| mask & (1 << layer) != 0, 5),
+                ),
+                field(
+                    "Color effects",
+                    if mask & 0x20 != 0 {
+                        "Enabled"
+                    } else {
+                        "Disabled"
+                    }
+                    .into(),
+                ),
+            ];
+            if index < 2 {
+                rows.push(field(
+                    "X (end excl.)",
+                    range(ppu.winh[index].x1(), ppu.winh[index].x2()),
+                ));
+                rows.push(field(
+                    "Y (end excl.)",
+                    range(ppu.winv[index].y1(), ppu.winv[index].y2()),
+                ));
+            }
+            Row::Group {
+                id: format!("ppu-window-{index}").into(),
+                title: name.into(),
+                summary: if active { "Enabled" } else { "Disabled" }.into(),
+                active,
+                rows,
+            }
+        })
+        .collect()
+}
+
 pub(super) fn ppu_view(core: &Gba) -> StructuredView {
     let control = core.ppu.dispctrl;
     let status = core.ppu.dispstat;
     let vcount = core.ppu.vcount;
+    let blend = core.ppu.bldcnt;
+    let bg_mosaic = core.ppu.mosaic.bg_size();
+    let obj_mosaic = core.ppu.mosaic.obj_size();
     StructuredView {
         sections: vec![
             Section {
@@ -530,6 +619,15 @@ pub(super) fn ppu_view(core: &Gba) -> StructuredView {
                 rows: vec![
                     field("Background Mode", control.mode().to_string()),
                     field("Frame Select", control.frame_select().to_string()),
+                    field("Forced blank", control.forced_blank().to_string()),
+                    field(
+                        "OBJ mapping",
+                        match control.sprite_mapping() {
+                            SpriteMapping::OneDimensional => "1D",
+                            SpriteMapping::TwoDimensional => "2D",
+                        }
+                        .into(),
+                    ),
                 ],
                 ..Default::default()
             },
@@ -544,6 +642,7 @@ pub(super) fn ppu_view(core: &Gba) -> StructuredView {
                         FlagView::new("OBJ", control.enable_obj()),
                         FlagView::new("WIN0", control.enable_window0()),
                         FlagView::new("WIN1", control.enable_window1()),
+                        FlagView::new("OBJ window", control.enable_obj_window()),
                     ],
                     note: None,
                 }],
@@ -556,6 +655,62 @@ pub(super) fn ppu_view(core: &Gba) -> StructuredView {
                     field("VCOUNT Compare", status.vcount_compare().to_string()),
                     field("VCOUNT IRQ", status.vcounter_irq().to_string()),
                 ],
+                ..Default::default()
+            },
+            Section {
+                title: Some("Blending".into()),
+                rows: vec![
+                    field(
+                        "Mode",
+                        match blend.special_effect() {
+                            SpecialEffect::None => "None",
+                            SpecialEffect::AlphaBlend => "Alpha blend",
+                            SpecialEffect::BrightnessIncrease => "Brighten",
+                            SpecialEffect::BrightnessDecrease => "Darken",
+                        }
+                        .into(),
+                    ),
+                    field(
+                        "First targets",
+                        layer_names(|layer| blend.first_target(layer), 6),
+                    ),
+                    field(
+                        "Second targets",
+                        layer_names(|layer| blend.second_target(layer), 6),
+                    ),
+                    field(
+                        "Alpha (first / second)",
+                        format!(
+                            "{}/16 · {}/16",
+                            core.ppu.bldalpha.eva().min(16),
+                            core.ppu.bldalpha.evb().min(16)
+                        ),
+                    ),
+                    field("Brightness", format!("{}/16", core.ppu.bldy.ev().min(16))),
+                ],
+                ..Default::default()
+            },
+            Section {
+                title: Some("Mosaic".into()),
+                rows: vec![
+                    field(
+                        "BG blocks",
+                        format!("{} × {} px", bg_mosaic.width, bg_mosaic.height),
+                    ),
+                    field(
+                        "BG enables",
+                        layer_names(|layer| core.ppu.bgcnt[layer].mosaic(), 4),
+                    ),
+                    field(
+                        "OBJ blocks",
+                        format!("{} × {} px", obj_mosaic.width, obj_mosaic.height),
+                    ),
+                ],
+                ..Default::default()
+            },
+            Section {
+                title: Some("Windows".into()),
+                rows: window_rows(core),
                 ..Default::default()
             },
             Section {
@@ -575,7 +730,12 @@ pub(super) fn extend_manifest(manifest: &mut ComponentManifest) {
         .push(WorkspaceDescriptor::new(workspace, "PPU", WorkspaceIcon::Video).mmio_group("PPU"));
 
     let descriptor = |id, title, kind, location| {
-        PanelDescriptor::new(id, title, kind, location, RefreshPolicy::OnPause).tag(workspace)
+        let refresh = if id == panel::PPU {
+            RefreshPolicy::Continuous
+        } else {
+            RefreshPolicy::OnPause
+        };
+        PanelDescriptor::new(id, title, kind, location, refresh).tag(workspace)
     };
 
     manifest
