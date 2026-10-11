@@ -109,15 +109,8 @@ pub struct GridOverlay {
 }
 
 #[derive(Clone)]
-pub struct GridWindowBand {
-    pub rect: GridOverlay,
-    pub active: bool,
-    pub show_edges: bool,
-}
-
-#[derive(Clone)]
 pub struct GridWindowOverlay {
-    pub bands: Vec<GridWindowBand>,
+    pub bands: Vec<GridOverlay>,
     pub effective: Vec<GridOverlay>,
     pub label_anchor: Option<GridOverlay>,
     pub label: SharedString,
@@ -419,25 +412,11 @@ impl RenderOnce for GridPanel {
             ));
         }
 
-        // Header clicks collapse the panel, so the toggles must stop propagation.
-        let toggle =
-            |id: &'static str, checked: bool, label: &'static str, handler: ToggleCallback| {
-                checkbox(
-                    t,
-                    id,
-                    checked,
-                    label,
-                    CheckboxSize::Small,
-                    move |_, window, cx| {
-                        cx.stop_propagation();
-                        handler(window, cx);
-                    },
-                )
-            };
+        let mut options = Vec::new();
         if self.window_overlay_toggle
             && let Some(handler) = self.on_toggle_window_overlays.clone()
         {
-            selectors = selectors.child(toggle(
+            options.push((
                 "grid-window-overlays",
                 self.show_window_overlays,
                 "Overlays",
@@ -447,12 +426,7 @@ impl RenderOnce for GridPanel {
         if let Some(handler) = self.on_toggle_fill_width.clone()
             && self.content.is_some()
         {
-            selectors = selectors.child(toggle(
-                "grid-fill-width",
-                self.fill_width,
-                "Fill width",
-                handler,
-            ));
+            options.push(("grid-fill-width", self.fill_width, "Fill width", handler));
         }
 
         match &self.content {
@@ -536,6 +510,40 @@ impl RenderOnce for GridPanel {
             .collapsed(self.collapsed)
             .on_toggle_opt(self.on_toggle)
             .header_action(selectors);
+        if !options.is_empty() {
+            panel = panel.header_options(move |in_menu, theme| {
+                div()
+                    .flex()
+                    .gap_2()
+                    .whitespace_nowrap()
+                    .when(in_menu, |row| row.flex_col())
+                    .when(!in_menu, |row| row.items_center())
+                    .children(options.iter().map(|(id, checked, label, handler)| {
+                        let click_handler = handler.clone();
+                        let key_handler = handler.clone();
+                        checkbox(
+                            theme,
+                            id,
+                            *checked,
+                            *label,
+                            CheckboxSize::Small,
+                            move |_, window, cx| {
+                                cx.stop_propagation();
+                                click_handler(window, cx);
+                            },
+                        )
+                        .focusable()
+                        .tab_index(0)
+                        .on_key_down(move |event, window, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                cx.stop_propagation();
+                                key_handler(window, cx);
+                            }
+                        })
+                    }))
+                    .into_any_element()
+            });
+        }
         if let Some(meta) = self.meta {
             panel = panel.meta(meta);
         }

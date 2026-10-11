@@ -3,12 +3,17 @@ pub(crate) mod regs;
 pub(crate) mod renderer;
 pub(crate) mod sprite;
 pub(crate) mod tile;
+#[cfg(feature = "debug")]
+pub(crate) mod window_trace;
 
 use crate::bus::Width;
 use crate::ppu::regs::{BackgroundKind, BackgroundMode};
 use crate::ppu::sprite::OBJ_TILE_OFFSET;
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
-use regs::{BackgroundControl, BackgroundOffset, DisplayControl, DisplayStatus, VerticalCount};
+use regs::{
+    BackgroundControl, BackgroundOffset, DisplayControl, DisplayStatus, VerticalCount,
+    WindowControl, WindowXOffset, WindowYOffset,
+};
 
 const SCANLINES_PER_FRAME: u8 = 228;
 const VBLANK_START_SCANLINE: u8 = 160;
@@ -44,6 +49,8 @@ pub(crate) fn rgba(color: u16) -> Rgba {
 pub struct Ppu {
     #[cfg(feature = "debug")]
     pub(crate) revisions: Revisions,
+    #[cfg(feature = "debug")]
+    pub(crate) window_trace: window_trace::WindowTrace,
 
     pub(crate) dispstat: DisplayStatus,
     pub(crate) dispctrl: DisplayControl,
@@ -51,6 +58,10 @@ pub struct Ppu {
     pub(crate) bgcnt: [BackgroundControl; 4],
     pub(crate) bghofs: [BackgroundOffset; 4],
     pub(crate) bgvofs: [BackgroundOffset; 4],
+    pub(crate) winh: [WindowXOffset; 2],
+    pub(crate) winv: [WindowYOffset; 2],
+    pub(crate) winin: WindowControl,
+    pub(crate) winout: WindowControl,
 
     pub(crate) vram: Vec<u8>,
     pub(crate) palette: Vec<u8>,
@@ -63,6 +74,8 @@ impl Ppu {
     pub fn new() -> Self {
         Self {
             #[cfg(feature = "debug")]
+            window_trace: window_trace::WindowTrace::default(),
+            #[cfg(feature = "debug")]
             revisions: Revisions {
                 palette: 0,
                 vram: 0,
@@ -74,6 +87,10 @@ impl Ppu {
             bgcnt: [BackgroundControl::zeroed(); 4],
             bghofs: [BackgroundOffset::zeroed(); 4],
             bgvofs: [BackgroundOffset::zeroed(); 4],
+            winh: [WindowXOffset::zeroed(); 2],
+            winv: [WindowYOffset::zeroed(); 2],
+            winin: WindowControl::zeroed(),
+            winout: WindowControl::zeroed(),
             vram: vec![0; VRAM_SIZE as usize],
             palette: vec![0; PALETTE_SIZE as usize],
             oam: vec![0; OAM_SIZE as usize],
@@ -124,16 +141,36 @@ impl Ppu {
         bg_order.sort_by_key(|&(_, priority)| priority);
 
         let mut sprite_line = [None; SCREEN_WIDTH as usize];
-        if self.dispctrl.enable_obj() {
-            renderer::render_sprite_line(self.dispctrl, memory, line, &mut sprite_line);
-        }
+        let mut obj_window = [false; SCREEN_WIDTH as usize];
+        renderer::render_sprite_line(
+            self.dispctrl,
+            memory,
+            line,
+            &mut sprite_line,
+            &mut obj_window,
+        );
 
         let backdrop = palette_color(memory.palette, 0);
+        let windows = self.window_view();
+
+        #[cfg(feature = "debug")]
+        self.window_trace
+            .record(line, self.window_debug_row(obj_window));
+
         let start = line * SCREEN_WIDTH as usize;
         let output = (&mut self.frame[start..start + SCREEN_WIDTH as usize])
             .try_into()
             .unwrap();
-        renderer::composite(&bg_order, &bg_lines, &sprite_line, backdrop, output);
+        renderer::composite(
+            &bg_order,
+            &bg_lines,
+            &sprite_line,
+            &obj_window,
+            backdrop,
+            windows,
+            line,
+            output,
+        );
     }
 
     fn background_view(&self, index: usize) -> BackgroundView {
@@ -142,6 +179,20 @@ impl Ppu {
             ctrl: self.bgcnt[index],
             hofs: self.bghofs[index].offset(),
             vofs: self.bgvofs[index].offset(),
+        }
+    }
+
+    fn window_view(&self) -> WindowView {
+        WindowView {
+            enabled: [
+                self.dispctrl.enable_window0(),
+                self.dispctrl.enable_window1(),
+            ],
+            obj_enabled: self.dispctrl.enable_obj_window(),
+            winh: self.winh,
+            winv: self.winv,
+            winin: self.winin,
+            winout: self.winout,
         }
     }
 
@@ -167,6 +218,8 @@ impl Ppu {
     }
 
     pub(crate) fn start_vblank(&mut self) {
+        #[cfg(feature = "debug")]
+        self.window_trace.finish_frame();
         self.dispstat.set_vblank(true);
     }
 
@@ -325,6 +378,7 @@ pub(crate) struct BitmapLayout {
     pub(crate) base: usize,
 }
 
+#[cfg(feature = "debug")]
 impl BitmapLayout {
     pub(crate) fn address(self) -> u32 {
         VRAM_BASE + self.base as u32
@@ -337,6 +391,16 @@ pub(crate) struct BackgroundView {
     pub(crate) kind: BackgroundKind,
     pub(crate) hofs: u16,
     pub(crate) vofs: u16,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WindowView {
+    pub(crate) enabled: [bool; 2],
+    pub(crate) obj_enabled: bool,
+    pub(crate) winh: [WindowXOffset; 2],
+    pub(crate) winv: [WindowYOffset; 2],
+    pub(crate) winin: WindowControl,
+    pub(crate) winout: WindowControl,
 }
 
 #[derive(Clone, Copy)]

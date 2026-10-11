@@ -164,6 +164,7 @@ pub struct TilemapOverlay {
     pub label: Arc<str>,
     pub slot: usize,
     pub bands: Vec<TilemapOverlayBand>,
+    pub outline_bands: Option<Vec<TilemapOverlayBand>>,
 }
 
 #[derive(Clone)]

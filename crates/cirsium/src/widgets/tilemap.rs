@@ -5,9 +5,7 @@ use gpui::{Div, RenderImage};
 use crate::assets::icon;
 use crate::components::{footer_row, hex};
 use crate::theme::Theme;
-use crate::widgets::grid::{
-    GridContent, GridOverlay, GridPanel, GridWindowBand, GridWindowOverlay, build_atlas,
-};
+use crate::widgets::grid::{GridContent, GridOverlay, GridPanel, GridWindowOverlay, build_atlas};
 
 use gpui::prelude::*;
 
@@ -95,6 +93,29 @@ impl TilemapView {
         rects
     }
 
+    fn band_rects(
+        viewport: GridOverlay,
+        band: &debugger_model::TilemapOverlayBand,
+    ) -> Vec<GridOverlay> {
+        let relative = GridOverlay {
+            x: band.x,
+            y: band.y,
+            width: band.width,
+            height: band.height,
+        };
+        if band.inverted {
+            Self::outside_window_band(viewport, relative)
+        } else if band.width > 0 {
+            vec![GridOverlay {
+                x: viewport.x + band.x,
+                y: viewport.y + band.y,
+                ..relative
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+
     fn window_overlays(&self) -> Vec<GridWindowOverlay> {
         let Some(viewport) = self.viewport else {
             return Vec::new();
@@ -103,46 +124,20 @@ impl TilemapView {
         self.overlays
             .iter()
             .map(|overlay| {
-                let mut effective = Vec::new();
-                let bands: Vec<_> = overlay
+                let effective = overlay
                     .bands
                     .iter()
-                    .map(|band| {
-                        let relative = GridOverlay {
-                            x: band.x,
-                            y: band.y,
-                            width: band.width,
-                            height: band.height,
-                        };
-                        let rect = GridOverlay {
-                            x: viewport.x + band.x,
-                            y: viewport.y + band.y,
-                            width: band.width,
-                            height: band.height,
-                        };
-                        if band.active {
-                            if band.inverted {
-                                effective.extend(Self::outside_window_band(viewport, relative));
-                            } else if band.width > 0 {
-                                effective.push(rect);
-                            }
-                        }
-
-                        GridWindowBand {
-                            rect,
-                            active: band.active,
-                            show_edges: !(band.active
-                                && band.inverted
-                                && band.x == 0
-                                && band.width >= viewport.width),
-                        }
-                    })
+                    .filter(|band| band.active)
+                    .flat_map(|band| Self::band_rects(viewport, band))
                     .collect();
-                let label_anchor = bands
+                let bands: Vec<_> = overlay
+                    .outline_bands
+                    .as_ref()
+                    .unwrap_or(&overlay.bands)
                     .iter()
-                    .filter(|band| band.rect.width > 0)
-                    .max_by_key(|band| (band.active, band.rect.width))
-                    .map(|band| band.rect);
+                    .flat_map(|band| Self::band_rects(viewport, band))
+                    .collect();
+                let label_anchor = bands.iter().copied().min_by_key(|rect| (rect.y, rect.x));
 
                 GridWindowOverlay {
                     bands,

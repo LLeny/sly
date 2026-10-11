@@ -87,6 +87,53 @@ const BG2VOFS: Register<BackgroundOffset> = bgofs::<2, true>(0x0400_001A, "BG2VO
 const BG3HOFS: Register<BackgroundOffset> = bgofs::<3, false>(0x0400_001C, "BG3HOFS");
 const BG3VOFS: Register<BackgroundOffset> = bgofs::<3, true>(0x0400_001E, "BG3VOFS");
 
+const fn winh<const I: usize>(address: u32, name: &'static str) -> Register<WindowXOffset> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| bus.ppu.winh[I],
+        |bus| &mut bus.ppu.winh[I],
+    )
+    .read_mask(0)
+}
+
+const fn winv<const I: usize>(address: u32, name: &'static str) -> Register<WindowYOffset> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| bus.ppu.winv[I],
+        |bus| &mut bus.ppu.winv[I],
+    )
+    .read_mask(0)
+}
+
+const WIN0H: Register<WindowXOffset> = winh::<0>(0x0400_0040, "WIN0H");
+const WIN1H: Register<WindowXOffset> = winh::<1>(0x0400_0042, "WIN1H");
+const WIN0V: Register<WindowYOffset> = winv::<0>(0x0400_0044, "WIN0V");
+const WIN1V: Register<WindowYOffset> = winv::<1>(0x0400_0046, "WIN1V");
+
+const WININ: Register<WindowControl> = Register::new(
+    0x0400_0048,
+    "WININ",
+    "PPU",
+    |bus| bus.ppu.winin,
+    |bus| &mut bus.ppu.winin,
+)
+.read_mask(0x3F3F)
+.write_mask(0x3F3F);
+
+const WINOUT: Register<WindowControl> = Register::new(
+    0x0400_004A,
+    "WINOUT",
+    "PPU",
+    |bus| bus.ppu.winout,
+    |bus| &mut bus.ppu.winout,
+)
+.read_mask(0x3F3F)
+.write_mask(0x3F3F);
+
 const PALETTE: Handler = Handler {
     read: |bus, address, width| bus.ppu.read_palette(address, width),
     write: |bus, address, width, value| bus.ppu.write_palette(address, width, value),
@@ -121,6 +168,12 @@ pub(crate) fn register(map: &mut MmioMap) {
     map.register(&BG2VOFS);
     map.register(&BG3HOFS);
     map.register(&BG3VOFS);
+    map.register(&WIN0H);
+    map.register(&WIN1H);
+    map.register(&WIN0V);
+    map.register(&WIN1V);
+    map.register(&WININ);
+    map.register(&WINOUT);
     map.map(PALETTE_BASE..=PALETTE_END, PALETTE);
     map.map(VRAM_BASE..=VRAM_END, VRAM);
     map.map(OAM_BASE..=OAM_END, OAM);

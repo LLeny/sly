@@ -148,7 +148,10 @@ impl Gba {
             .collect();
 
         #[cfg(feature = "debug")]
-        self.ppu.revisions.bump();
+        {
+            self.ppu.revisions.bump();
+            self.ppu.window_trace.clear();
+        }
 
         Ok(())
     }

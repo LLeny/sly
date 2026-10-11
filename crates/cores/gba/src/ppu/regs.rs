@@ -137,6 +137,7 @@ pub enum SpriteMapping {
 }
 
 #[chapa::bitfield(u16, order = lsb0)]
+#[derive(PartialEq, Eq)]
 pub struct DisplayControl {
     #[bits(0..=2)]
     pub mode: BackgroundMode,
@@ -304,4 +305,78 @@ impl BackgroundControl {
 pub struct BackgroundOffset {
     #[bits(0..=8)]
     pub offset: u16,
+}
+
+#[chapa::bitfield(u16, order = lsb0)]
+#[derive(PartialEq, Eq)]
+pub struct WindowXOffset {
+    #[bits(0..=7)]
+    pub x2: u16,
+    #[bits(8..=15)]
+    pub x1: u16,
+}
+
+#[chapa::bitfield(u16, order = lsb0)]
+#[derive(PartialEq, Eq)]
+pub struct WindowYOffset {
+    #[bits(0..=7)]
+    pub y2: u16,
+    #[bits(8..=15)]
+    pub y1: u16,
+}
+
+#[chapa::bitfield(u16, order = lsb0)]
+#[derive(PartialEq, Eq)]
+pub struct WindowControl {
+    #[bits(0, overlay = "winin")]
+    pub win0_bg0_enable: bool,
+    #[bits(1, overlay = "winin")]
+    pub win0_bg1_enable: bool,
+    #[bits(2, overlay = "winin")]
+    pub win0_bg2_enable: bool,
+    #[bits(3, overlay = "winin")]
+    pub win0_bg3_enable: bool,
+    #[bits(4, overlay = "winin")]
+    pub win0_obj_enable: bool,
+    #[bits(5, overlay = "winin")]
+    pub win0_sfx_enable: bool,
+
+    #[bits(8, overlay = "winin")]
+    pub win1_bg0_enable: bool,
+    #[bits(9, overlay = "winin")]
+    pub win1_bg1_enable: bool,
+    #[bits(10, overlay = "winin")]
+    pub win1_bg2_enable: bool,
+    #[bits(11, overlay = "winin")]
+    pub win1_bg3_enable: bool,
+    #[bits(12, overlay = "winin")]
+    pub win1_obj_enable: bool,
+    #[bits(13, overlay = "winin")]
+    pub win1_sfx_enable: bool,
+
+    #[bits(0, overlay = "winout")]
+    pub outside_bg0_enable: bool,
+    #[bits(1, overlay = "winout")]
+    pub outside_bg1_enable: bool,
+    #[bits(2, overlay = "winout")]
+    pub outside_bg2_enable: bool,
+    #[bits(3, overlay = "winout")]
+    pub outside_bg3_enable: bool,
+    #[bits(4, overlay = "winout")]
+    pub outside_obj_enable: bool,
+    #[bits(5, overlay = "winout")]
+    pub outside_sfx_enable: bool,
+
+    #[bits(8, overlay = "winout")]
+    pub obj_win_bg0_enable: bool,
+    #[bits(9, overlay = "winout")]
+    pub obj_win_bg1_enable: bool,
+    #[bits(10, overlay = "winout")]
+    pub obj_win_bg2_enable: bool,
+    #[bits(11, overlay = "winout")]
+    pub obj_win_bg3_enable: bool,
+    #[bits(12, overlay = "winout")]
+    pub obj_win_obj_enable: bool,
+    #[bits(13, overlay = "winout")]
+    pub obj_win_sfx_enable: bool,
 }

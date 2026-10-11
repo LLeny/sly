@@ -1,11 +1,12 @@
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use debugger_model::{
     BitmapImage, BitmapSource, Field, FlagView, MemoryAddress, PaletteColor, PaletteSelection,
     PaletteView, Row, Section, SpriteEntry, Sprites, StructuredView, Tilemap, TilemapEntry,
-    TilemapViewport, Tileset, TilesetTile, VideoDebug, VideoResource, VideoResourceId,
-    VideoResourceKind, VideoRevision, panel,
+    TilemapOverlay, TilemapOverlayBand, TilemapViewport, Tileset, TilesetTile, VideoDebug,
+    VideoResource, VideoResourceId, VideoResourceKind, VideoRevision, panel,
 };
 use workspace_model::{
     ComponentManifest, DockLocation, PanelDescriptor, PanelGroupLayout, PanelKind, RefreshPolicy,
@@ -14,7 +15,9 @@ use workspace_model::{
 
 use super::{GbaDebug, field};
 use crate::ppu::regs::{BackgroundKind, BackgroundMode};
-use crate::ppu::renderer::{render_bitmap_line, sprite_texel};
+use crate::ppu::renderer::{
+    WindowRegion, render_bitmap_line, render_sprite_line, sprite_texel, window_region,
+};
 use crate::ppu::sprite::{self, ObjMode};
 use crate::ppu::tile::{ColorDepth, Tile};
 use crate::ppu::{BitmapLayout, VRAM_BASE, rgba};
@@ -56,7 +59,7 @@ fn background_row(core: &Gba, index: usize) -> Row {
         || "N/A".to_string(),
         |(width, height)| format!("{width} × {height}"),
     );
-    let summary = format!("{kind} · {dimensions} · priority {priority}");
+    let summary = format!("{kind} · {dimensions} · prio {priority}");
 
     let mut flags = vec![
         FlagView::new("Enabled", enabled),
@@ -231,6 +234,133 @@ fn background_tilemap(core: &Gba, index: usize) -> Option<Tilemap> {
         entries,
         viewport: background_viewport(core, index),
     })
+}
+
+fn tilemap_window_overlays(core: &Gba, layer: usize) -> Vec<TilemapOverlay> {
+    let Some(viewport) = background_viewport(core, layer) else {
+        return Vec::new();
+    };
+    let ppu = &core.ppu;
+    let Some((map_width, map_height)) = ppu.bgcnt[layer].dimensions(BackgroundKind::Text) else {
+        return Vec::new();
+    };
+    let (map_width, map_height) = (map_width as u32, map_height as u32);
+    let trace = ppu.window_trace.rows();
+    let mut bands: [Vec<TilemapOverlayBand>; 4] = std::array::from_fn(|_| Vec::new());
+    let mut outlines: [Vec<TilemapOverlayBand>; 4] = std::array::from_fn(|_| Vec::new());
+    let mut previous = HashMap::new();
+    let mut next = HashMap::new();
+
+    for y in 0..SCREEN_HEIGHT as usize {
+        let recorded = trace.get(y).copied().flatten();
+        let row = recorded.unwrap_or_else(|| {
+            let mut obj_window = [false; SCREEN_WIDTH as usize];
+            if ppu.dispctrl.enable_obj_window() {
+                let mut sprites = [None; SCREEN_WIDTH as usize];
+                render_sprite_line(
+                    ppu.dispctrl,
+                    ppu.memory_view(),
+                    y,
+                    &mut sprites,
+                    &mut obj_window,
+                );
+            }
+            ppu.window_debug_row(obj_window)
+        });
+        next.clear();
+        if row.display.mode().background_kind(layer) != BackgroundKind::Text {
+            previous.clear();
+            continue;
+        }
+        let pixels: [_; SCREEN_WIDTH as usize] = std::array::from_fn(|x| {
+            let region = window_region(row.windows, x, y, row.obj_window[x])?;
+            let masked =
+                !row.display.bg_enabled(layer) || !region.mask(row.windows).bg_enabled(layer);
+            Some((region.slot(), masked))
+        });
+
+        let mut push_band = |slot: usize, start: usize, end: usize, masked: bool, outline: bool| {
+            let target = if outline {
+                &mut outlines[slot]
+            } else {
+                &mut bands[slot]
+            };
+            let band = TilemapOverlayBand {
+                x: (u32::from(row.hofs[layer]) + start as u32 + map_width - viewport.x % map_width)
+                    % map_width,
+                y: (u32::from(row.vofs[layer]) + y as u32 + map_height - viewport.y % map_height)
+                    % map_height,
+                width: (end - start) as u32,
+                height: 1,
+                inverted: false,
+                active: masked,
+            };
+            let key = (slot, band.x, band.width, masked, outline);
+            let merged = previous.get(&key).copied().filter(|&index: &usize| {
+                let last = &target[index];
+                last.y + last.height == band.y
+            });
+            let index = if let Some(index) = merged {
+                target[index].height += 1;
+                index
+            } else {
+                let index = target.len();
+                target.push(band);
+                index
+            };
+            next.insert(key, index);
+        };
+
+        let mut x = 0;
+        while x < pixels.len() {
+            let start = x;
+            let pixel = pixels[x];
+            while x < pixels.len() && pixels[x] == pixel {
+                x += 1;
+            }
+            if let Some((slot, masked)) = pixel {
+                push_band(slot, start, x, masked, false);
+            }
+        }
+        if row.windows.any_enabled() {
+            for slot in 0..WindowRegion::OUTSIDE_SLOT {
+                let contains = |x| match slot {
+                    WindowRegion::OBJ_SLOT => row.windows.obj_enabled && row.obj_window[x],
+                    _ => row.windows.contains(slot, x, y),
+                };
+                let mut x = 0;
+                while x < SCREEN_WIDTH as usize {
+                    let start = x;
+                    let inside = contains(x);
+                    while x < SCREEN_WIDTH as usize && contains(x) == inside {
+                        x += 1;
+                    }
+                    if inside {
+                        push_band(slot, start, x, false, true);
+                    }
+                }
+            }
+        }
+        std::mem::swap(&mut previous, &mut next);
+    }
+    outlines[WindowRegion::OUTSIDE_SLOT].clone_from(&bands[WindowRegion::OUTSIDE_SLOT]);
+
+    bands
+        .into_iter()
+        .zip(outlines)
+        .enumerate()
+        .filter_map(|(slot, (bands, outlines))| {
+            if bands.is_empty() && outlines.is_empty() {
+                return None;
+            }
+            Some(TilemapOverlay {
+                label: WindowRegion::NAMES[slot].into(),
+                slot,
+                bands,
+                outline_bands: Some(outlines),
+            })
+        })
+        .collect()
 }
 
 fn bitmap_bg2(core: &Gba) -> Option<BitmapImage> {
@@ -576,6 +706,11 @@ impl VideoDebug for GbaDebug {
         background_viewport(&self.core, layer_index(&BG_LAYERS, resource.as_str())?)
     }
 
+    fn tilemap_overlays(&self, resource: &VideoResourceId) -> Vec<TilemapOverlay> {
+        layer_index(&BG_LAYERS, resource.as_str())
+            .map_or_else(Vec::new, |layer| tilemap_window_overlays(&self.core, layer))
+    }
+
     fn revision(&self, resource: &VideoResourceId) -> Option<VideoRevision> {
         let revisions = self.core.ppu.revisions;
         let layer = layer_index(&BG_LAYERS, resource.as_str());
@@ -602,8 +737,19 @@ impl VideoDebug for GbaDebug {
 
         let overlay = layer.map_or(0, |index| {
             let mut hash = DefaultHasher::new();
-            self.core.ppu.bghofs[index].raw().hash(&mut hash);
-            self.core.ppu.bgvofs[index].raw().hash(&mut hash);
+            let ppu = &self.core.ppu;
+            index.hash(&mut hash);
+            ppu.dispctrl.raw().hash(&mut hash);
+            ppu.bgcnt[index].raw().hash(&mut hash);
+            ppu.winh.map(|value| value.raw()).hash(&mut hash);
+            ppu.winv.map(|value| value.raw()).hash(&mut hash);
+            ppu.winin.raw().hash(&mut hash);
+            ppu.winout.raw().hash(&mut hash);
+            ppu.revisions.vram.hash(&mut hash);
+            ppu.revisions.oam.hash(&mut hash);
+            ppu.window_trace.generation().hash(&mut hash);
+            ppu.bghofs[index].raw().hash(&mut hash);
+            ppu.bgvofs[index].raw().hash(&mut hash);
             hash.finish()
         });
 

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::*;
 
 /// Side length the hover preview aims for.
@@ -283,14 +285,13 @@ fn render(
     let window_overlays: Arc<[GridWindowOverlay]> = window_overlays.into();
     if !window_overlays.is_empty() {
         let painted = window_overlays.clone();
-        let colors = [theme.warning, theme.info];
-        let inactive = theme.text_dim;
+        let colors = [theme.warning, theme.info, theme.success, theme.accent];
         grid = grid.child(
             canvas(
                 |_, _, _| {},
                 move |bounds, _, window, _| {
                     self::paint_window_overlays(
-                        window, bounds, &painted, map_w, map_h, scale, colors, inactive,
+                        window, bounds, &painted, map_w, map_h, scale, colors,
                     );
                 },
             )
@@ -309,7 +310,7 @@ fn render(
             else {
                 continue;
             };
-            let color = colors[overlay.slot.min(1)];
+            let color = slot_color(&colors, overlay.slot);
             let label_width = px((f32::from(bounds.size.width) - 4.).max(0.));
             grid = grid.child(
                 div()
@@ -498,6 +499,10 @@ fn preview(
     Some(view)
 }
 
+fn slot_color(colors: &[Hsla], slot: usize) -> Hsla {
+    colors[slot.min(colors.len() - 1)]
+}
+
 #[expect(clippy::too_many_arguments)]
 fn paint_window_overlays(
     window: &mut Window,
@@ -506,8 +511,7 @@ fn paint_window_overlays(
     map_w: u32,
     map_h: u32,
     scale: f32,
-    colors: [Hsla; 2],
-    inactive: Hsla,
+    colors: [Hsla; 4],
 ) {
     let offset = |bounds: Bounds<Pixels>| Bounds {
         origin: point(
@@ -518,38 +522,70 @@ fn paint_window_overlays(
     };
 
     for overlay in overlays {
-        let color = colors[overlay.slot.min(1)];
+        let color = slot_color(&colors, overlay.slot);
         for rect in &overlay.effective {
             for bounds in rect.rects(map_w, map_h, scale) {
-                window.paint_quad(fill(offset(bounds), with_alpha(color, 0.14)));
+                window.paint_quad(fill(
+                    offset(bounds),
+                    gpui::hsla(color.h, color.s, 0.04, 0.80),
+                ));
             }
         }
     }
 
-    for overlay in overlays {
+    for overlay in overlays.iter().rev() {
+        let color = slot_color(&colors, overlay.slot);
+        let mut edges = BTreeMap::<(bool, u32), Vec<(u32, i32)>>::new();
         for band in &overlay.bands {
-            if !band.show_edges || band.rect.width == 0 || band.rect.height == 0 {
+            if band.width == 0 || band.height == 0 {
                 continue;
             }
 
-            let color = if band.active {
-                colors[overlay.slot.min(1)]
-            } else {
-                inactive
-            };
-            let left = band.rect.x % map_w;
-            let right = band.rect.x.saturating_add(band.rect.width) % map_w;
-            for (y, height) in GridOverlay::spans(band.rect.y, band.rect.height, map_h) {
-                let edge = |x: u32| {
-                    offset(Bounds {
-                        origin: point(px(x as f32 * scale), px(y as f32 * scale)),
-                        size: size(px(1.), px(height as f32 * scale)),
-                    })
-                };
-                window.paint_quad(fill(edge(left), with_alpha(color, 0.9)));
-                if right != left {
-                    window.paint_quad(fill(edge(right), with_alpha(color, 0.9)));
+            for (y, height) in GridOverlay::spans(band.y, band.height, map_h) {
+                for (x, width) in GridOverlay::spans(band.x, band.width, map_w) {
+                    for (horizontal, position, start, end, sign) in [
+                        (true, y, x, x + width, 1),
+                        (true, y + height, x, x + width, -1),
+                        (false, x, y, y + height, 1),
+                        (false, x + width, y, y + height, -1),
+                    ] {
+                        edges
+                            .entry((horizontal, position))
+                            .or_default()
+                            .extend([(start, sign), (end, -sign)]);
+                    }
                 }
+            }
+        }
+        for ((horizontal, position), mut events) in edges {
+            events.sort_unstable_by_key(|&(position, _)| position);
+
+            let mut count = 0;
+            let mut previous = 0;
+            for (end, delta) in events {
+                if count != 0 && end > previous {
+                    let along = (previous as f32 * scale).round();
+                    let length = (end as f32 * scale).round() - along;
+                    let limit = if horizontal { map_h } else { map_w };
+                    let across = (position as f32 * scale)
+                        .round()
+                        .min((limit as f32 * scale - 1.).max(0.));
+                    let (x, y, width, height) = if horizontal {
+                        (along, across, length, 1.)
+                    } else {
+                        (across, along, 1., length)
+                    };
+                    window.paint_quad(fill(
+                        offset(Bounds {
+                            origin: point(px(x), px(y)),
+                            size: size(px(width), px(height)),
+                        }),
+                        with_alpha(color, 0.9),
+                    ));
+                }
+
+                count += delta;
+                previous = end;
             }
         }
     }

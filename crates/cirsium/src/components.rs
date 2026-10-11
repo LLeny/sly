@@ -1,6 +1,7 @@
 mod code_editor;
 mod combobox;
 mod copyable;
+mod header_options;
 mod menu;
 mod panel;
 mod primitives;

@@ -375,6 +375,7 @@ pub(super) fn tilemap_window_overlays(core: &Snes, layer: usize) -> Vec<TilemapO
                 label: label.into(),
                 slot: window,
                 bands,
+                outline_bands: None,
             })
         })
         .collect()
