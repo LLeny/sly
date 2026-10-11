@@ -18,13 +18,14 @@ use super::{GbaDebug, field};
 use crate::ppu::mosaic::MosaicSize;
 use crate::ppu::regs::{BackgroundKind, BackgroundMode, SpecialEffect, SpriteMapping};
 use crate::ppu::renderer::{render_bitmap_line, render_sprite_line, sprite_texel};
-use crate::ppu::sprite::{self, ObjMode};
+use crate::ppu::sprite::{self, OBJ_PALETTE_BASE, ObjMode};
 use crate::ppu::tile::{ColorDepth, Tile};
 use crate::ppu::window::WindowRegion;
 use crate::ppu::{BitmapLayout, VRAM_BASE, rgba};
 use crate::{Gba, SCREEN_HEIGHT, SCREEN_WIDTH};
 
 const PALETTE: &str = "gba.palette";
+const OBJ_PALETTE: &str = "gba.palette.obj";
 const SPRITES: &str = "gba.objects";
 
 impl WindowRegion {
@@ -468,9 +469,9 @@ fn sprites(core: &Gba) -> Sprites {
                 Field::new(
                     "Transform",
                     format!(
-                        "Affine #{}, double size {}",
+                        "Affine #{}{}",
                         attr.rotation_scaling_parameter(),
-                        attr.double_size()
+                        if attr.double_size() { " (2x)" } else { "" }
                     ),
                 )
             } else {
@@ -810,7 +811,8 @@ pub(super) fn extend_manifest(manifest: &mut ComponentManifest) {
 
 impl VideoDebug for GbaDebug {
     fn resources(&self) -> Vec<VideoResource> {
-        let palette = VideoResource::new(PALETTE, "Palette", VideoResourceKind::Palette);
+        let palette = VideoResource::new(PALETTE, "BG", VideoResourceKind::Palette);
+        let obj_palette = VideoResource::new(OBJ_PALETTE, "OBJ", VideoResourceKind::Palette);
         let sprites = VideoResource::new(SPRITES, "Objects", VideoResourceKind::Sprites);
         let layers = BG_LAYERS
             .iter()
@@ -819,7 +821,7 @@ impl VideoDebug for GbaDebug {
             .iter()
             .map(|&(id, name)| VideoResource::new(id, name, VideoResourceKind::Tileset));
 
-        [palette, sprites]
+        [palette, obj_palette, sprites]
             .into_iter()
             .chain(layers)
             .chain(tilesets)
@@ -827,16 +829,18 @@ impl VideoDebug for GbaDebug {
     }
 
     fn palette(&self, resource: &VideoResourceId) -> Option<PaletteView> {
-        if resource.as_str() != PALETTE {
-            return None;
-        }
+        let base = match resource.as_str() {
+            PALETTE => 0,
+            OBJ_PALETTE => OBJ_PALETTE_BASE,
+            _ => return None,
+        };
 
         Some(PaletteView {
             palettes: (0..16)
                 .map(|bank| {
                     (0..16)
                         .map(|color| {
-                            let raw = self.core.ppu.palette_color(bank * 16 + color);
+                            let raw = self.core.ppu.palette_color(base + (bank * 16) + color);
                             let [r, g, b, _] = rgba(raw);
                             PaletteColor {
                                 raw: raw.into(),
@@ -889,7 +893,7 @@ impl VideoDebug for GbaDebug {
         let revisions = self.core.ppu.revisions;
         let layer = layer_index(&BG_LAYERS, resource.as_str());
         let pixels = match resource.as_str() {
-            PALETTE => revisions.palette,
+            PALETTE | OBJ_PALETTE => revisions.palette,
             SPRITES => {
                 let mut hash = DefaultHasher::new();
                 revisions.vram.hash(&mut hash);
