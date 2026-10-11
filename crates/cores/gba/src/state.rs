@@ -45,6 +45,7 @@ impl Gba {
     pub(crate) fn encode_state(&self) -> Result<Vec<u8>, StateError> {
         let mut io = self.mmio.io.clone();
         self.dma.save_io(&mut io);
+        self.ppu.save_io(&mut io);
         let state = State {
             registers: self.cpu.registers,
             cpsr: self.cpu.cpsr.raw(),
@@ -125,6 +126,7 @@ impl Gba {
         self.mmio.iwram = state.iwram.into_owned();
         self.mmio.io = state.io.into_owned();
         self.dma.load_io(&self.mmio.io);
+        self.ppu.load_io(&self.mmio.io);
         self.dma.latches = state.dma_latches;
         self.ppu.vram.copy_from_slice(&state.vram);
         self.ppu.palette.copy_from_slice(&state.palette);

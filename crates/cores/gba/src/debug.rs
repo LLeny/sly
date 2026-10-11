@@ -5,6 +5,7 @@ mod disasm;
 mod dma;
 mod mmio;
 mod video;
+pub(crate) mod window_trace;
 
 use std::ops::RangeInclusive;
 use std::sync::Arc;

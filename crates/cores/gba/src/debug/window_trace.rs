@@ -1,7 +1,8 @@
-use super::regs::DisplayControl;
-use super::renderer::ObjWindowLine;
-use super::{Ppu, WindowView};
 use crate::SCREEN_HEIGHT;
+use crate::ppu::Ppu;
+use crate::ppu::regs::DisplayControl;
+use crate::ppu::renderer::ObjWindowLine;
+use crate::ppu::window::WindowView;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct WindowDebugRow {
@@ -12,13 +13,13 @@ pub(crate) struct WindowDebugRow {
     pub(crate) obj_window: ObjWindowLine,
 }
 
-impl Ppu {
-    pub(crate) fn window_debug_row(&self, obj_window: ObjWindowLine) -> WindowDebugRow {
-        WindowDebugRow {
-            windows: self.window_view(),
-            display: self.dispctrl,
-            hofs: self.bghofs.map(|offset| offset.offset()),
-            vofs: self.bgvofs.map(|offset| offset.offset()),
+impl WindowDebugRow {
+    pub(crate) fn capture(ppu: &Ppu, obj_window: ObjWindowLine) -> Self {
+        Self {
+            windows: ppu.window_view(),
+            display: ppu.dispctrl,
+            hofs: ppu.bghofs.map(|offset| offset.offset()),
+            vofs: ppu.bgvofs.map(|offset| offset.offset()),
             obj_window,
         }
     }

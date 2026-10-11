@@ -380,3 +380,92 @@ pub struct WindowControl {
     #[bits(13, overlay = "winout")]
     pub obj_win_sfx_enable: bool,
 }
+
+#[chapa::bitenum]
+pub enum SpecialEffect {
+    #[fallback]
+    None = 0,
+    AlphaBlend = 1,
+    BrightnessIncrease = 2,
+    BrightnessDecrease = 3,
+}
+
+#[chapa::bitfield(u16, order = lsb0)]
+pub struct BlendControl {
+    #[bits(0)]
+    pub bg0_first_target: bool,
+
+    #[bits(1)]
+    pub bg1_first_target: bool,
+
+    #[bits(2)]
+    pub bg2_first_target: bool,
+
+    #[bits(3)]
+    pub bg3_first_target: bool,
+
+    #[bits(4)]
+    pub obj_first_target: bool,
+
+    #[bits(5)]
+    pub backdrop_first_target: bool,
+
+    #[bits(6..=7)]
+    pub special_effect: SpecialEffect,
+
+    #[bits(8)]
+    pub bg0_second_target: bool,
+
+    #[bits(9)]
+    pub bg1_second_target: bool,
+
+    #[bits(10)]
+    pub bg2_second_target: bool,
+
+    #[bits(11)]
+    pub bg3_second_target: bool,
+
+    #[bits(12)]
+    pub obj_second_target: bool,
+
+    #[bits(13)]
+    pub backdrop_second_target: bool,
+}
+
+pub(crate) const OBJ_LAYER: usize = 4;
+pub(crate) const BACKDROP_LAYER: usize = 5;
+
+impl BlendControl {
+    pub const WRITE_MASK: u16 = 0x3FFF;
+
+    pub(crate) fn first_target(self, layer: usize) -> bool {
+        layer <= BACKDROP_LAYER && (self.raw() >> layer) & 1 != 0
+    }
+
+    pub(crate) fn second_target(self, layer: usize) -> bool {
+        layer <= BACKDROP_LAYER && (self.raw() >> (8 + layer)) & 1 != 0
+    }
+}
+
+#[chapa::bitfield(u16, order = lsb0)]
+pub struct BlendAlpha {
+    #[bits(0..=4)]
+    pub eva: u8,
+
+    #[bits(8..=12)]
+    pub evb: u8,
+}
+
+impl BlendAlpha {
+    pub const WRITE_MASK: u16 = Self::EVA_MASK | Self::EVB_MASK;
+}
+
+#[chapa::bitfield(u16, order = lsb0)]
+pub struct BlendBrightness {
+    #[bits(0..=4)]
+    pub ev: u8,
+}
+
+impl BlendBrightness {
+    pub const WRITE_MASK: u16 = Self::EV_MASK;
+}

@@ -134,6 +134,36 @@ const WINOUT: Register<WindowControl> = Register::new(
 .read_mask(0x3F3F)
 .write_mask(0x3F3F);
 
+const BLDCNT: Register<BlendControl> = Register::new(
+    0x0400_0050,
+    "BLDCNT",
+    "PPU",
+    |bus| bus.ppu.bldcnt,
+    |bus| &mut bus.ppu.bldcnt,
+)
+.read_mask(BlendControl::WRITE_MASK)
+.write_mask(BlendControl::WRITE_MASK);
+
+const BLDALPHA: Register<BlendAlpha> = Register::new(
+    0x0400_0052,
+    "BLDALPHA",
+    "PPU",
+    |bus| bus.ppu.bldalpha,
+    |bus| &mut bus.ppu.bldalpha,
+)
+.read_mask(BlendAlpha::WRITE_MASK)
+.write_mask(BlendAlpha::WRITE_MASK);
+
+const BLDY: Register<BlendBrightness> = Register::new(
+    0x0400_0054,
+    "BLDY",
+    "PPU",
+    |bus| bus.ppu.bldy,
+    |bus| &mut bus.ppu.bldy,
+)
+.read_mask(0)
+.write_mask(BlendBrightness::WRITE_MASK);
+
 const PALETTE: Handler = Handler {
     read: |bus, address, width| bus.ppu.read_palette(address, width),
     write: |bus, address, width, value| bus.ppu.write_palette(address, width, value),
@@ -174,6 +204,9 @@ pub(crate) fn register(map: &mut MmioMap) {
     map.register(&WIN1V);
     map.register(&WININ);
     map.register(&WINOUT);
+    map.register(&BLDCNT);
+    map.register(&BLDALPHA);
+    map.register(&BLDY);
     map.map(PALETTE_BASE..=PALETTE_END, PALETTE);
     map.map(VRAM_BASE..=VRAM_END, VRAM);
     map.map(OAM_BASE..=OAM_END, OAM);

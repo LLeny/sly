@@ -1,19 +1,23 @@
+pub(crate) mod blend;
 pub(crate) mod io;
 pub(crate) mod regs;
 pub(crate) mod renderer;
 pub(crate) mod sprite;
 pub(crate) mod tile;
-#[cfg(feature = "debug")]
-pub(crate) mod window_trace;
+pub(crate) mod window;
 
 use crate::bus::Width;
+#[cfg(feature = "debug")]
+use crate::debug::window_trace::{WindowDebugRow, WindowTrace};
 use crate::ppu::regs::{BackgroundKind, BackgroundMode};
 use crate::ppu::sprite::OBJ_TILE_OFFSET;
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
+use blend::BlendView;
 use regs::{
-    BackgroundControl, BackgroundOffset, DisplayControl, DisplayStatus, VerticalCount,
-    WindowControl, WindowXOffset, WindowYOffset,
+    BackgroundControl, BackgroundOffset, BlendAlpha, BlendBrightness, BlendControl, DisplayControl,
+    DisplayStatus, VerticalCount, WindowControl, WindowXOffset, WindowYOffset,
 };
+use window::WindowView;
 
 const SCANLINES_PER_FRAME: u8 = 228;
 const VBLANK_START_SCANLINE: u8 = 160;
@@ -50,7 +54,7 @@ pub struct Ppu {
     #[cfg(feature = "debug")]
     pub(crate) revisions: Revisions,
     #[cfg(feature = "debug")]
-    pub(crate) window_trace: window_trace::WindowTrace,
+    pub(crate) window_trace: WindowTrace,
 
     pub(crate) dispstat: DisplayStatus,
     pub(crate) dispctrl: DisplayControl,
@@ -63,6 +67,10 @@ pub struct Ppu {
     pub(crate) winin: WindowControl,
     pub(crate) winout: WindowControl,
 
+    pub(crate) bldcnt: BlendControl,
+    pub(crate) bldalpha: BlendAlpha,
+    pub(crate) bldy: BlendBrightness,
+
     pub(crate) vram: Vec<u8>,
     pub(crate) palette: Vec<u8>,
     pub(crate) oam: Vec<u8>,
@@ -74,7 +82,7 @@ impl Ppu {
     pub fn new() -> Self {
         Self {
             #[cfg(feature = "debug")]
-            window_trace: window_trace::WindowTrace::default(),
+            window_trace: WindowTrace::default(),
             #[cfg(feature = "debug")]
             revisions: Revisions {
                 palette: 0,
@@ -91,6 +99,9 @@ impl Ppu {
             winv: [WindowYOffset::zeroed(); 2],
             winin: WindowControl::zeroed(),
             winout: WindowControl::zeroed(),
+            bldcnt: BlendControl::zeroed(),
+            bldalpha: BlendAlpha::zeroed(),
+            bldy: BlendBrightness::zeroed(),
             vram: vec![0; VRAM_SIZE as usize],
             palette: vec![0; PALETTE_SIZE as usize],
             oam: vec![0; OAM_SIZE as usize],
@@ -152,10 +163,11 @@ impl Ppu {
 
         let backdrop = palette_color(memory.palette, 0);
         let windows = self.window_view();
+        let blending = self.blend_view();
 
         #[cfg(feature = "debug")]
         self.window_trace
-            .record(line, self.window_debug_row(obj_window));
+            .record(line, WindowDebugRow::capture(self, obj_window));
 
         let start = line * SCREEN_WIDTH as usize;
         let output = (&mut self.frame[start..start + SCREEN_WIDTH as usize])
@@ -168,6 +180,7 @@ impl Ppu {
             &obj_window,
             backdrop,
             windows,
+            blending,
             line,
             output,
         );
@@ -182,7 +195,7 @@ impl Ppu {
         }
     }
 
-    fn window_view(&self) -> WindowView {
+    pub(crate) fn window_view(&self) -> WindowView {
         WindowView {
             enabled: [
                 self.dispctrl.enable_window0(),
@@ -194,6 +207,29 @@ impl Ppu {
             winin: self.winin,
             winout: self.winout,
         }
+    }
+
+    fn blend_view(&self) -> BlendView {
+        let coefficient = |value: u8| u16::from(value.min(16));
+        BlendView {
+            control: self.bldcnt,
+            eva: coefficient(self.bldalpha.eva()),
+            evb: coefficient(self.bldalpha.evb()),
+            evy: coefficient(self.bldy.ev()),
+        }
+    }
+
+    pub(crate) fn save_io(&self, io: &mut [u8]) {
+        io[0x50..0x52].copy_from_slice(&self.bldcnt.raw().to_le_bytes());
+        io[0x52..0x54].copy_from_slice(&self.bldalpha.raw().to_le_bytes());
+        io[0x54..0x56].copy_from_slice(&self.bldy.raw().to_le_bytes());
+    }
+
+    pub(crate) fn load_io(&mut self, io: &[u8]) {
+        let half = |offset: usize| u16::from_le_bytes(io[offset..(offset + 2)].try_into().unwrap());
+        self.bldcnt = BlendControl::from_raw(half(0x50) & BlendControl::WRITE_MASK);
+        self.bldalpha = BlendAlpha::from_raw(half(0x52) & BlendAlpha::WRITE_MASK);
+        self.bldy = BlendBrightness::from_raw(half(0x54) & BlendBrightness::WRITE_MASK);
     }
 
     pub(crate) fn memory_view(&self) -> VideoMemoryView<'_> {
@@ -391,16 +427,6 @@ pub(crate) struct BackgroundView {
     pub(crate) kind: BackgroundKind,
     pub(crate) hofs: u16,
     pub(crate) vofs: u16,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) struct WindowView {
-    pub(crate) enabled: [bool; 2],
-    pub(crate) obj_enabled: bool,
-    pub(crate) winh: [WindowXOffset; 2],
-    pub(crate) winv: [WindowYOffset; 2],
-    pub(crate) winin: WindowControl,
-    pub(crate) winout: WindowControl,
 }
 
 #[derive(Clone, Copy)]

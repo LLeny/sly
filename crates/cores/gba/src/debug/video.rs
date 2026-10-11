@@ -13,18 +13,32 @@ use workspace_model::{
     WorkspaceDescriptor, WorkspaceIcon,
 };
 
+use super::window_trace::WindowDebugRow;
 use super::{GbaDebug, field};
 use crate::ppu::regs::{BackgroundKind, BackgroundMode};
-use crate::ppu::renderer::{
-    WindowRegion, render_bitmap_line, render_sprite_line, sprite_texel, window_region,
-};
+use crate::ppu::renderer::{render_bitmap_line, render_sprite_line, sprite_texel};
 use crate::ppu::sprite::{self, ObjMode};
 use crate::ppu::tile::{ColorDepth, Tile};
+use crate::ppu::window::WindowRegion;
 use crate::ppu::{BitmapLayout, VRAM_BASE, rgba};
 use crate::{Gba, SCREEN_HEIGHT, SCREEN_WIDTH};
 
 const PALETTE: &str = "gba.palette";
 const SPRITES: &str = "gba.objects";
+
+impl WindowRegion {
+    const NAMES: [&str; 4] = ["WIN0", "WIN1", "OBJ", "OUT"];
+    const OBJ_SLOT: usize = 2;
+    const OUTSIDE_SLOT: usize = 3;
+
+    fn slot(self) -> usize {
+        match self {
+            Self::Rectangle(index) => index,
+            Self::Obj => Self::OBJ_SLOT,
+            Self::Outside => Self::OUTSIDE_SLOT,
+        }
+    }
+}
 
 fn background_row(core: &Gba, index: usize) -> Row {
     let display = core.ppu.dispctrl;
@@ -265,7 +279,7 @@ fn tilemap_window_overlays(core: &Gba, layer: usize) -> Vec<TilemapOverlay> {
                     &mut obj_window,
                 );
             }
-            ppu.window_debug_row(obj_window)
+            WindowDebugRow::capture(ppu, obj_window)
         });
         next.clear();
         if row.display.mode().background_kind(layer) != BackgroundKind::Text {
@@ -273,7 +287,7 @@ fn tilemap_window_overlays(core: &Gba, layer: usize) -> Vec<TilemapOverlay> {
             continue;
         }
         let pixels: [_; SCREEN_WIDTH as usize] = std::array::from_fn(|x| {
-            let region = window_region(row.windows, x, y, row.obj_window[x])?;
+            let region = row.windows.region(x, y, row.obj_window[x])?;
             let masked =
                 !row.display.bg_enabled(layer) || !region.mask(row.windows).bg_enabled(layer);
             Some((region.slot(), masked))
