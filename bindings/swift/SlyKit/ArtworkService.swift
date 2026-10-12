@@ -185,11 +185,13 @@ private struct ArtworkDiskCache {
     private let directory: URL
 
     init(fileManager: FileManager = .default) {
-        let baseDirectory = fileManager.urls(
-            for: .cachesDirectory,
-            in: .userDomainMask
-        ).first ?? fileManager.temporaryDirectory
-        directory = baseDirectory
+        let baseDirectory =
+            fileManager.urls(
+                for: .cachesDirectory,
+                in: .userDomainMask
+            ).first ?? fileManager.temporaryDirectory
+        directory =
+            baseDirectory
             .appendingPathComponent("Sly", isDirectory: true)
             .appendingPathComponent("Artwork", isDirectory: true)
     }

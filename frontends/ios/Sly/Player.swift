@@ -62,7 +62,7 @@ public final class Player: Identifiable {
 
     func persistSaveRAM() throws {
         guard let saveRAM = core.persistableSaveRAM(),
-              saveRAM != lastPersistedSaveRAM
+            saveRAM != lastPersistedSaveRAM
         else {
             return
         }
@@ -82,7 +82,8 @@ public final class Player: Identifiable {
 
     private func restoreSaveRAM() throws {
         guard lastPersistedSaveRAM != nil,
-              let saveRAM = try AppFiles.loadSaveRAM(path: saveRAMPath) else {
+            let saveRAM = try AppFiles.loadSaveRAM(path: saveRAMPath)
+        else {
             return
         }
 
@@ -115,7 +116,7 @@ private enum PlayerError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case let .backupCapacityMismatch(expected, actual):
+        case .backupCapacityMismatch(let expected, let actual):
             "Stored save RAM is \(actual) bytes; this cartridge expects \(expected) bytes."
         }
     }

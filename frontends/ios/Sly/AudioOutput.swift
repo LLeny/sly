@@ -16,7 +16,7 @@ final class AudioOutput {
 
     init?(core: EmulatorCore) {
         guard let spec = core.audioSpec,
-              let frameIntervalNanoseconds = core.frameIntervalNanoseconds
+            let frameIntervalNanoseconds = core.frameIntervalNanoseconds
         else {
             return nil
         }
@@ -28,15 +28,15 @@ final class AudioOutput {
         let playbackSampleRate = Double(spec.sampleRate)
 
         guard spec.sampleRate > 0,
-              channelCount > 0,
-              emulatedFrameDuration.isFinite,
-              emulatedFrameDuration > 0,
-              playbackSampleRate.isFinite,
-              playbackSampleRate > 0,
-              let format = AVAudioFormat(
-                  standardFormatWithSampleRate: playbackSampleRate,
-                  channels: AVAudioChannelCount(channelCount)
-              )
+            channelCount > 0,
+            emulatedFrameDuration.isFinite,
+            emulatedFrameDuration > 0,
+            playbackSampleRate.isFinite,
+            playbackSampleRate > 0,
+            let format = AVAudioFormat(
+                standardFormatWithSampleRate: playbackSampleRate,
+                channels: AVAudioChannelCount(channelCount)
+            )
         else {
             return nil
         }
@@ -71,19 +71,20 @@ final class AudioOutput {
             let samples = core.drainAudio(maxSamples: maximumSamplesPerFrame)
             let frameCount = samples.count / channelCount
             guard frameCount > 0,
-                  let buffer = AVAudioPCMBuffer(
-                      pcmFormat: format,
-                      frameCapacity: AVAudioFrameCount(frameCount)
-                  ),
-                  let channels = buffer.floatChannelData
+                let buffer = AVAudioPCMBuffer(
+                    pcmFormat: format,
+                    frameCapacity: AVAudioFrameCount(frameCount)
+                ),
+                let channels = buffer.floatChannelData
             else { break }
 
             buffer.frameLength = AVAudioFrameCount(frameCount)
             for frame in 0..<frameCount {
                 for channel in 0..<channelCount {
-                    channels[channel][frame] = Float(
-                        samples[frame * channelCount + channel]
-                    ) / Self.int16FullScale
+                    channels[channel][frame] =
+                        Float(
+                            samples[frame * channelCount + channel]
+                        ) / Self.int16FullScale
                 }
             }
 
@@ -114,9 +115,8 @@ final class AudioOutput {
 
     private func startPlaybackIfReady() {
         guard !isPaused,
-              !playerNode.isPlaying,
-              hasStartedPlayback ||
-                  scheduledBufferCount >= Self.startupBufferCount
+            !playerNode.isPlaying,
+            hasStartedPlayback || scheduledBufferCount >= Self.startupBufferCount
         else {
             return
         }

@@ -1,5 +1,5 @@
-import SwiftUI
 import SlyKit
+import SwiftUI
 
 struct PlayerView: View {
     let player: Player

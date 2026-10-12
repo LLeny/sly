@@ -7,11 +7,23 @@ public enum SlyError: Error, Equatable {
     case native(status: Int, message: String)
 }
 
-public enum System: Hashable, Sendable {
-    case snes
-    case gba
+/// A system supported by the linked native core library.
+public struct System: Hashable, Sendable {
+    private let nativeValue: UInt32
 
-    public static let all: [System] = [.snes, .gba]
+    // Convenience names.
+    public static let snes = System(native: SLY_SYSTEM_SNES)
+    public static let gba = System(native: SLY_SYSTEM_GBA)
+
+    public static let all: [System] = (0..<sly_system_count()).compactMap { index in
+        var native = SlySystem(rawValue: 0)
+        guard sly_system_at(index, &native) else { return nil }
+        return System(native: native)
+    }
+
+    private init(native: SlySystem) {
+        nativeValue = native.rawValue
+    }
 
     public var slug: String {
         nativeString(sly_system_slug(native))
@@ -32,10 +44,7 @@ public enum System: Hashable, Sendable {
     }
 
     var native: SlySystem {
-        switch self {
-        case .snes: SLY_SYSTEM_SNES
-        case .gba: SLY_SYSTEM_GBA
-        }
+        SlySystem(rawValue: nativeValue)
     }
 }
 
@@ -206,7 +215,9 @@ public final class EmulatorCore {
             return ControllerDescriptor(
                 port: port,
                 name: nativeString(sly_core_controller_name(handle, index)),
-                buttons: Button.allCases.filter { sly_core_supports_button(handle, port, $0.native) }
+                buttons: Button.allCases.filter {
+                    sly_core_supports_button(handle, port, $0.native)
+                }
             )
         }
     }

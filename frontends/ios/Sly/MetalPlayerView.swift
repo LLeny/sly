@@ -1,7 +1,7 @@
 import CoreImage
 import MetalKit
-import SwiftUI
 import SlyKit
+import SwiftUI
 
 struct MetalPlayerView: UIViewRepresentable {
     let player: Player
@@ -62,11 +62,12 @@ struct MetalPlayerView: UIViewRepresentable {
         private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         private var frameTextures: [(texture: MTLTexture, image: CIImage)] = []
         private var nextFrameTexture = 0
-        private var cachedBackground: (
-            color: UIColor,
-            bounds: CGRect,
-            image: CIImage
-        )?
+        private var cachedBackground:
+            (
+                color: UIColor,
+                bounds: CGRect,
+                image: CIImage
+            )?
 
         init(
             player: Player,
@@ -74,7 +75,7 @@ struct MetalPlayerView: UIViewRepresentable {
             imageFiltering: ImageFiltering
         ) {
             guard let device = MTLCreateSystemDefaultDevice(),
-                  let commandQueue = device.makeCommandQueue()
+                let commandQueue = device.makeCommandQueue()
             else {
                 fatalError("Metal is unavailable")
             }
@@ -93,9 +94,9 @@ struct MetalPlayerView: UIViewRepresentable {
 
         func draw(in view: MTKView) {
             guard !isPaused,
-                  let intervalNS = player.core.frameIntervalNanoseconds,
-                  intervalNS > 0,
-                  let drawable = view.currentDrawable
+                let intervalNS = player.core.frameIntervalNanoseconds,
+                intervalNS > 0,
+                let drawable = view.currentDrawable
             else { return }
 
             let interval = Double(intervalNS) / 1_000_000_000
@@ -114,7 +115,7 @@ struct MetalPlayerView: UIViewRepresentable {
             guard let frame = newestFrame else { return }
 
             guard let image = upload(frame),
-                  let commandBuffer = commandQueue.makeCommandBuffer()
+                let commandBuffer = commandQueue.makeCommandBuffer()
             else {
                 return
             }
@@ -146,13 +147,15 @@ struct MetalPlayerView: UIViewRepresentable {
                 ),
                 bounds: bounds
             )
-            let scaledImage = switch imageFiltering {
-            case .sharpPixels:
-                image.samplingNearest()
-            case .smooth:
-                image
-            }
-            let output = scaledImage
+            let scaledImage =
+                switch imageFiltering {
+                case .sharpPixels:
+                    image.samplingNearest()
+                case .smooth:
+                    image
+                }
+            let output =
+                scaledImage
                 .transformed(by: transform)
                 .composited(over: background)
 
@@ -174,8 +177,9 @@ struct MetalPlayerView: UIViewRepresentable {
             bounds: CGRect
         ) -> CIImage {
             if let cached = cachedBackground,
-               cached.color == color,
-               cached.bounds == bounds {
+                cached.color == color,
+                cached.bounds == bounds
+            {
                 return cached.image
             }
 
@@ -191,8 +195,7 @@ struct MetalPlayerView: UIViewRepresentable {
             isPaused: Bool,
             imageFiltering: ImageFiltering
         ) {
-            if self.player !== player ||
-                self.framesPerSecond != framesPerSecond {
+            if self.player !== player || self.framesPerSecond != framesPerSecond {
                 audioOutput?.stop()
                 lastFrameTime = nil
                 frameDebt = 0
@@ -219,14 +222,15 @@ struct MetalPlayerView: UIViewRepresentable {
 
         private func upload(_ frame: Frame) -> CIImage? {
             guard frame.width > 0,
-                  frame.height > 0,
-                  frame.rgba.count == frame.width * frame.height * 4
+                frame.height > 0,
+                frame.rgba.count == frame.width * frame.height * 4
             else {
                 return nil
             }
 
-            if frameTextures.first?.texture.width != frame.width ||
-                frameTextures.first?.texture.height != frame.height {
+            if frameTextures.first?.texture.width != frame.width
+                || frameTextures.first?.texture.height != frame.height
+            {
                 let descriptor = MTLTextureDescriptor.texture2DDescriptor(
                     pixelFormat: .rgba8Unorm,
                     width: frame.width,
@@ -237,13 +241,14 @@ struct MetalPlayerView: UIViewRepresentable {
                 descriptor.usage = .shaderRead
                 frameTextures = (0..<bufferedFrameCount)
                     .compactMap { _ in
-                        guard let texture = device.makeTexture(
-                            descriptor: descriptor
-                        ),
-                              let image = CIImage(
-                                  mtlTexture: texture,
-                                  options: [.colorSpace: colorSpace]
-                              )
+                        guard
+                            let texture = device.makeTexture(
+                                descriptor: descriptor
+                            ),
+                            let image = CIImage(
+                                mtlTexture: texture,
+                                options: [.colorSpace: colorSpace]
+                            )
                         else {
                             return nil
                         }
