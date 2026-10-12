@@ -1,3 +1,4 @@
+pub(crate) mod affine;
 pub(crate) mod blend;
 pub(crate) mod io;
 pub(crate) mod mosaic;
@@ -13,11 +14,13 @@ use crate::debug::window_trace::{WindowDebugRow, WindowTrace};
 use crate::ppu::regs::{BackgroundKind, BackgroundMode};
 use crate::ppu::sprite::OBJ_TILE_OFFSET;
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
+use affine::AffineMatrix;
 use blend::BlendView;
 use mosaic::MosaicSize;
 use regs::{
-    BackgroundControl, BackgroundOffset, BlendAlpha, BlendBrightness, BlendControl, DisplayControl,
-    DisplayStatus, Mosaic, VerticalCount, WindowControl, WindowXOffset, WindowYOffset,
+    AffineParameter, BackgroundControl, BackgroundOffset, BlendAlpha, BlendBrightness,
+    BlendControl, DisplayControl, DisplayStatus, Mosaic, ReferencePoint, VerticalCount,
+    WindowControl, WindowXOffset, WindowYOffset,
 };
 use window::WindowView;
 
@@ -64,6 +67,12 @@ pub struct Ppu {
     pub(crate) bgcnt: [BackgroundControl; 4],
     pub(crate) bghofs: [BackgroundOffset; 4],
     pub(crate) bgvofs: [BackgroundOffset; 4],
+    /// PA, PB, PC, PD for BG2 and BG3.
+    pub(crate) bg_matrix: [[AffineParameter; 4]; 2],
+    /// X, Y for BG2 and BG3.
+    pub(crate) bg_ref: [[ReferencePoint; 2]; 2],
+    /// Internal reference points: latched on write and at vblank, advanced per scanline.
+    pub(crate) bg_ref_internal: [[i32; 2]; 2],
     pub(crate) winh: [WindowXOffset; 2],
     pub(crate) winv: [WindowYOffset; 2],
     pub(crate) winin: WindowControl,
@@ -98,6 +107,14 @@ impl Ppu {
             bgcnt: [BackgroundControl::zeroed(); 4],
             bghofs: [BackgroundOffset::zeroed(); 4],
             bgvofs: [BackgroundOffset::zeroed(); 4],
+            bg_matrix: [[
+                AffineParameter::from_raw(0x100),
+                AffineParameter::zeroed(),
+                AffineParameter::zeroed(),
+                AffineParameter::from_raw(0x100),
+            ]; 2],
+            bg_ref: [[ReferencePoint::zeroed(); 2]; 2],
+            bg_ref_internal: [[0; 2]; 2],
             winh: [WindowXOffset::zeroed(); 2],
             winv: [WindowYOffset::zeroed(); 2],
             winin: WindowControl::zeroed(),
@@ -148,7 +165,15 @@ impl Ppu {
                         renderer::render_bitmap_line(layout, mosaic, memory, line, bg_line);
                     }
                 }
-                BackgroundKind::Affine => continue, // TODO: AFFIEN
+                BackgroundKind::Affine => {
+                    let affine = index - 2;
+                    let matrix = AffineMatrix::from_params(self.bg_matrix[affine]);
+                    let [x, y] = self.bg_ref_internal[affine];
+                    let origin = (x, y);
+                    renderer::render_affine_background_line(
+                        background, matrix, origin, memory, bg_line,
+                    );
+                }
                 BackgroundKind::Unavailable => continue,
             }
             bg_order.push((index, self.bgcnt[index].priority()));
@@ -264,6 +289,7 @@ impl Ppu {
 
         if self.vcount.scanline() < SCREEN_HEIGHT as u8 {
             self.render_scanline();
+            self.step_reference_points();
         }
     }
 
@@ -271,6 +297,20 @@ impl Ppu {
         #[cfg(feature = "debug")]
         self.window_trace.finish_frame();
         self.dispstat.set_vblank(true);
+        self.reload_reference_points();
+    }
+
+    /// Advances the internal reference points by PB/PD to the start of the next scanline.
+    fn step_reference_points(&mut self) {
+        for i in 0..2 {
+            let [_, pb, _, pd] = self.bg_matrix[i];
+            self.bg_ref_internal[i][0] += pb.value();
+            self.bg_ref_internal[i][1] += pd.value();
+        }
+    }
+
+    fn reload_reference_points(&mut self) {
+        self.bg_ref_internal = self.bg_ref.map(|point| point.map(ReferencePoint::value));
     }
 
     pub(crate) fn end_vblank(&mut self) {

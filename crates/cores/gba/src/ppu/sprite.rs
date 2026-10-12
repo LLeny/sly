@@ -63,7 +63,7 @@ pub struct Attribute {
     pub x_coordinate: u16,
 
     #[bits(25..=29, overlay = "affine")]
-    pub rotation_scaling_parameter: u8,
+    pub matrix_index: u8,
 
     #[bits(28, overlay = "not_affine")]
     pub horizontal_flip: bool,
@@ -104,6 +104,32 @@ impl Attribute {
             (Vertical, Size3) => (32, 64),
             _ => unreachable!("Prohibited shape/size combination"),
         }
+    }
+
+    pub fn bounds(&self) -> (usize, usize) {
+        let (width, height) = self.dimensions();
+        if self.affine() && self.double_size() {
+            (width * 2, height * 2)
+        } else {
+            (width, height)
+        }
+    }
+
+    pub fn flip(&self, x: usize, y: usize) -> (usize, usize) {
+        let (width, height) = self.dimensions();
+
+        let x = if !self.affine() && self.horizontal_flip() {
+            width - 1 - x
+        } else {
+            x
+        };
+        let y = if !self.affine() && self.vertical_flip() {
+            height - 1 - y
+        } else {
+            y
+        };
+
+        (x, y)
     }
 
     pub fn tile_addr(&self, mapping: SpriteMapping, tx: usize, ty: usize) -> usize {

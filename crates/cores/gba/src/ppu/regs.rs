@@ -484,3 +484,41 @@ pub struct Mosaic {
     #[bits(12..=15)]
     pub obj_mosaic_vsize: u8,
 }
+
+#[chapa::bitfield(u32, order = lsb0)]
+pub struct ReferencePoint {
+    #[bits(0..=7)]
+    pub fractional: u8,
+
+    #[bits(8..=26)]
+    pub integer: u32,
+
+    #[bits(27)]
+    pub sign: bool,
+}
+
+impl ReferencePoint {
+    pub const WRITE_MASK: u32 = Self::FRACTIONAL_MASK | Self::INTEGER_MASK | Self::SIGN_MASK;
+
+    pub fn value(self) -> i32 {
+        ((self.raw() << 4) as i32) >> 4
+    }
+}
+
+#[chapa::bitfield(u16, order = lsb0)]
+pub struct AffineParameter {
+    #[bits(0..=7)]
+    pub fractional: u8,
+
+    #[bits(8..=14)]
+    pub integer: u8,
+
+    #[bits(15)]
+    pub sign: bool,
+}
+
+impl AffineParameter {
+    pub fn value(self) -> i32 {
+        i32::from(self.raw() as i16)
+    }
+}

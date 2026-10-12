@@ -443,19 +443,9 @@ fn sprites(core: &Gba) -> Sprites {
         .map(|attr| {
             let (width, height) = attr.dimensions();
             let mut pixels = vec![[0; 4]; width * height];
-            let flips = !attr.affine();
             for (row, line) in pixels.chunks_exact_mut(width).enumerate() {
                 for (col, dst) in line.iter_mut().enumerate() {
-                    let x = if flips && attr.horizontal_flip() {
-                        width - 1 - col
-                    } else {
-                        col
-                    };
-                    let y = if flips && attr.vertical_flip() {
-                        height - 1 - row
-                    } else {
-                        row
-                    };
+                    let (x, y) = attr.flip(col, row);
                     if let Some(color) = sprite_texel(attr, mapping, memory, x, y) {
                         *dst = rgba(color);
                     }
@@ -470,7 +460,7 @@ fn sprites(core: &Gba) -> Sprites {
                     "Transform",
                     format!(
                         "Affine #{}{}",
-                        attr.rotation_scaling_parameter(),
+                        attr.matrix_index(),
                         if attr.double_size() { " (2x)" } else { "" }
                     ),
                 )

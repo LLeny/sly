@@ -1,4 +1,5 @@
 use crate::SCREEN_WIDTH;
+use crate::ppu::affine::AffineMatrix;
 use crate::ppu::blend::{BlendView, LayerPixel};
 use crate::ppu::mosaic::MosaicSize;
 use crate::ppu::regs::{BACKDROP_LAYER, DisplayControl, OBJ_LAYER, SpriteMapping};
@@ -112,6 +113,53 @@ pub(crate) fn render_background_line(
     }
 }
 
+pub(crate) fn render_affine_background_line(
+    bg: BackgroundView,
+    matrix: AffineMatrix,
+    (mut x, mut y): (i32, i32),
+    memory: VideoMemoryView<'_>,
+    output: &mut LayerLine,
+) {
+    let Some((size, _)) = bg.ctrl.dimensions(bg.kind) else {
+        return;
+    };
+    let depth = bg.ctrl.effective_color_depth(bg.kind);
+    // affine maps are always a power of two in size, so wrapping is a mask
+    let wrap_mask = if bg.ctrl.wraparound() {
+        size - 1
+    } else {
+        usize::MAX
+    };
+
+    for dst in output.iter_mut() {
+        let tx = ((x >> 8) as usize) & wrap_mask;
+        let ty = ((y >> 8) as usize) & wrap_mask;
+        x += matrix.pa;
+        y += matrix.pc;
+
+        if tx >= size || ty >= size {
+            continue;
+        }
+
+        let Some((_, entry)) = bg
+            .ctrl
+            .map_entry(bg.kind, memory.vram, tx / 8, ty / 8, size)
+        else {
+            continue;
+        };
+        let tile_addr = bg.ctrl.tile_offset(entry.tile_number() as usize, depth);
+        let Some(data) = memory.vram.get(tile_addr..(tile_addr + depth.tile_size())) else {
+            continue;
+        };
+
+        let tile = Tile { data, depth };
+        let index = tile.pixel(tx % 8, ty % 8) as usize;
+        if index != 0 {
+            *dst = Some(palette_color(memory.palette, index));
+        }
+    }
+}
+
 pub(crate) fn render_bitmap_line(
     layout: BitmapLayout,
     mosaic: MosaicSize,
@@ -151,12 +199,7 @@ pub(crate) fn render_sprite_line(
 
     let mapping = display.sprite_mapping();
     for attr in sprite::attributes(memory.oam) {
-        if attr.affine() {
-            // TODO: affine shit
-            continue;
-        }
-
-        if attr.disable_obj() {
+        if !attr.affine() && attr.disable_obj() {
             continue;
         }
 
@@ -167,8 +210,10 @@ pub(crate) fn render_sprite_line(
         };
 
         let (width, height) = attr.dimensions();
+        let (box_width, box_height) = attr.bounds();
+
         let row = (line as u8).wrapping_sub(attr.y_coordinate()) as usize;
-        if row >= height {
+        if row >= box_height {
             continue;
         }
 
@@ -179,24 +224,37 @@ pub(crate) fn render_sprite_line(
         };
         let row = row - (line - mosaic.y(line)).min(row);
 
-        let y = if attr.vertical_flip() {
-            height - 1 - row
-        } else {
-            row
-        };
+        let matrix = attr
+            .affine()
+            .then(|| AffineMatrix::from_oam(memory.oam, attr.matrix_index() as usize));
+        let dy = row as i32 - (box_height / 2) as i32;
         let x_start = attr.x_coordinate() as usize;
-        for col in 0..width {
+        for col in 0..box_width {
             let screen_x = (x_start + col) & 0x1FF;
             let Some(dst) = output.get_mut(screen_x) else {
                 continue;
             };
 
             let col = col - (screen_x - mosaic.x(screen_x)).min(col);
-            let x = if attr.horizontal_flip() {
-                width - 1 - col
+            let (x, y) = if let Some(matrix) = matrix {
+                let dx = col as i32 - (box_width / 2) as i32;
+                let (tx, ty) = matrix.apply(dx, dy);
+                let x = tx + (width / 2) as i32;
+                let y = ty + (height / 2) as i32;
+
+                let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
+                    continue;
+                };
+
+                if x >= width || y >= height {
+                    continue;
+                }
+
+                (x, y)
             } else {
-                col
+                attr.flip(col, row)
             };
+
             let Some(color) = sprite_texel(attr, mapping, memory, x, y) else {
                 continue;
             };

@@ -87,6 +87,55 @@ const BG2VOFS: Register<BackgroundOffset> = bgofs::<2, true>(0x0400_001A, "BG2VO
 const BG3HOFS: Register<BackgroundOffset> = bgofs::<3, false>(0x0400_001C, "BG3HOFS");
 const BG3VOFS: Register<BackgroundOffset> = bgofs::<3, true>(0x0400_001E, "BG3VOFS");
 
+const fn bgp<const I: usize, const P: usize>(
+    address: u32,
+    name: &'static str,
+) -> Register<AffineParameter> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| bus.ppu.bg_matrix[I - 2][P],
+        |bus| &mut bus.ppu.bg_matrix[I - 2][P],
+    )
+    .read_mask(0)
+}
+
+const BG2PA: Register<AffineParameter> = bgp::<2, 0>(0x0400_0020, "BG2PA");
+const BG2PB: Register<AffineParameter> = bgp::<2, 1>(0x0400_0022, "BG2PB");
+const BG2PC: Register<AffineParameter> = bgp::<2, 2>(0x0400_0024, "BG2PC");
+const BG2PD: Register<AffineParameter> = bgp::<2, 3>(0x0400_0026, "BG2PD");
+const BG3PA: Register<AffineParameter> = bgp::<3, 0>(0x0400_0030, "BG3PA");
+const BG3PB: Register<AffineParameter> = bgp::<3, 1>(0x0400_0032, "BG3PB");
+const BG3PC: Register<AffineParameter> = bgp::<3, 2>(0x0400_0034, "BG3PC");
+const BG3PD: Register<AffineParameter> = bgp::<3, 3>(0x0400_0036, "BG3PD");
+
+const fn bgref<const I: usize, const A: usize>(
+    address: u32,
+    name: &'static str,
+) -> Register<ReferencePoint> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| bus.ppu.bg_ref[I - 2][A],
+        |bus| &mut bus.ppu.bg_ref[I - 2][A],
+    )
+    .read_mask(0)
+    .write_mask(ReferencePoint::WRITE_MASK)
+    .write_with(|bus, value, mask| {
+        let ppu = &mut bus.ppu;
+        let point = &mut ppu.bg_ref[I - 2][A];
+        *point = ReferencePoint::from_raw((point.raw() & !mask) | (value.raw() & mask));
+        ppu.bg_ref_internal[I - 2][A] = point.value();
+    })
+}
+
+const BG2X: Register<ReferencePoint> = bgref::<2, 0>(0x0400_0028, "BG2X");
+const BG2Y: Register<ReferencePoint> = bgref::<2, 1>(0x0400_002C, "BG2Y");
+const BG3X: Register<ReferencePoint> = bgref::<3, 0>(0x0400_0038, "BG3X");
+const BG3Y: Register<ReferencePoint> = bgref::<3, 1>(0x0400_003C, "BG3Y");
+
 const fn winh<const I: usize>(address: u32, name: &'static str) -> Register<WindowXOffset> {
     Register::new(
         address,
@@ -207,6 +256,18 @@ pub(crate) fn register(map: &mut MmioMap) {
     map.register(&BG2VOFS);
     map.register(&BG3HOFS);
     map.register(&BG3VOFS);
+    map.register(&BG2PA);
+    map.register(&BG2PB);
+    map.register(&BG2PC);
+    map.register(&BG2PD);
+    map.register(&BG2X);
+    map.register(&BG2Y);
+    map.register(&BG3PA);
+    map.register(&BG3PB);
+    map.register(&BG3PC);
+    map.register(&BG3PD);
+    map.register(&BG3X);
+    map.register(&BG3Y);
     map.register(&WIN0H);
     map.register(&WIN1H);
     map.register(&WIN0V);
