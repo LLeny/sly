@@ -1,10 +1,10 @@
-import SwiftUI
 import SlyKit
+import SwiftUI
 
 struct BrowserView: View {
     @Binding var player: Player?
     @State private var roms: [System: [URL]] = [:]
-    @State private var selectedPlatform = LibraryPlatform.snes
+    @State private var selectedSystem = System.snes
     @State private var searchText = ""
 
     private let columns = [
@@ -12,7 +12,7 @@ struct BrowserView: View {
             .adaptive(minimum: 96, maximum: 120),
             spacing: 12,
             alignment: .top
-        ),
+        )
     ]
 
     @AppStorage(AppSettings.showFileExtensionsKey)
@@ -24,53 +24,41 @@ struct BrowserView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                if let system = selectedPlatform.system {
-                    let visibleRoms = filteredRoms(for: system)
-                    if visibleRoms.isEmpty {
-                        placeholder { emptyLibrary }
-                    } else {
-                        LazyVGrid(
-                            columns: columns,
-                            alignment: .leading,
-                            spacing: 16
-                        ) {
-                            ForEach(visibleRoms, id: \.self) { rom in
-                                Button {
-                                    play(system: system, rom: rom)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        ArtworkCoverView(system: system, rom: rom)
-                                        Text(displayName(for: rom))
-                                            .font(.subheadline.weight(.medium))
-                                            .foregroundStyle(.primary)
-                                            .lineLimit(2)
-                                            .multilineTextAlignment(.leading)
-                                            .frame(
-                                                height: 40,
-                                                alignment: .topLeading
-                                            )
-                                    }
-                                    .frame(
-                                        maxWidth: .infinity,
-                                        alignment: .leading
-                                    )
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(16)
-                    }
+                let visibleRoms = filteredRoms(for: selectedSystem)
+                if visibleRoms.isEmpty {
+                    placeholder { emptyLibrary }
                 } else {
-                    placeholder {
-                        ContentUnavailableView(
-                            "GBA Core Not Available",
-                            systemImage: "gamecontroller",
-                            description: Text(
-                                "Game Boy Advance support has not been added yet."
-                            )
-                        )
+                    LazyVGrid(
+                        columns: columns,
+                        alignment: .leading,
+                        spacing: 16
+                    ) {
+                        ForEach(visibleRoms, id: \.self) { rom in
+                            Button {
+                                play(system: selectedSystem, rom: rom)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ArtworkCoverView(system: selectedSystem, rom: rom)
+                                    Text(displayName(for: rom))
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                        .frame(
+                                            height: 40,
+                                            alignment: .topLeading
+                                        )
+                                }
+                                .frame(
+                                    maxWidth: .infinity,
+                                    alignment: .leading
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
+                    .padding(16)
                 }
             }
             .refreshable {
@@ -84,13 +72,13 @@ struct BrowserView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Picker("Core", selection: $selectedPlatform) {
-                            ForEach(LibraryPlatform.allCases) { platform in
-                                Text(platform.shortName).tag(platform)
+                        Picker("Core", selection: $selectedSystem) {
+                            ForEach(System.all, id: \.self) { system in
+                                Text(system.displayName).tag(system)
                             }
                         }
                     } label: {
-                        Label(selectedPlatform.shortName, systemImage: "cpu")
+                        Label(selectedSystem.displayName, systemImage: "cpu")
                     }
                     .accessibilityLabel("Core")
                 }
@@ -158,7 +146,7 @@ struct BrowserView: View {
             ContentUnavailableView(
                 "No Games",
                 systemImage: "gamecontroller",
-                description: Text("Add ROMs to the Sly \"roms\" folder.")
+                description: Text("Add ROMs to the Sly \"roms/\(selectedSystem.slug)\" folder.")
             )
         } else {
             ContentUnavailableView.search(text: searchText)
@@ -169,26 +157,5 @@ struct BrowserView: View {
         content()
             .frame(maxWidth: .infinity)
             .padding(.top, 80)
-    }
-}
-
-private enum LibraryPlatform: String, CaseIterable, Identifiable {
-    case snes
-    case gba
-
-    var id: Self { self }
-
-    var shortName: String {
-        switch self {
-        case .snes: "SNES"
-        case .gba: "GBA"
-        }
-    }
-
-    var system: System? {
-        switch self {
-        case .snes: .snes
-        case .gba: nil
-        }
     }
 }

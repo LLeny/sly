@@ -32,16 +32,19 @@ struct AppFiles {
                 system.slug,
                 isDirectory: true
             )
-            guard let files = FileManager.default.enumerator(
-                at: folder,
-                includingPropertiesForKeys: [.isRegularFileKey],
-                options: [.skipsHiddenFiles]
-            ) else {
+            guard
+                let files = FileManager.default.enumerator(
+                    at: folder,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles]
+                )
+            else {
                 continue
             }
 
             let extensions = Set(system.romExtensions)
-            for case let url as URL in files where
+            for case let url as URL in files
+            where
                 extensions.contains(url.pathExtension.lowercased())
             {
                 result[system, default: []].append(url)
