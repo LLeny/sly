@@ -443,7 +443,7 @@ fn sprites(core: &Gba) -> Sprites {
         .map(|attr| {
             let (width, height) = attr.dimensions();
             let mut pixels = vec![[0; 4]; width * height];
-            for (row, line) in pixels.chunks_exact_mut(width).enumerate() {
+            for (row, line) in pixels.chunks_exact_mut(width.max(1)).enumerate() {
                 for (col, dst) in line.iter_mut().enumerate() {
                     let (x, y) = attr.flip(col, row);
                     if let Some(color) = sprite_texel(attr, mapping, memory, x, y) {
