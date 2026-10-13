@@ -5,13 +5,40 @@ use gpui::{Div, RenderImage};
 use crate::assets::icon;
 use crate::components::{footer_row, hex};
 use crate::theme::Theme;
-use crate::widgets::grid::{
-    GridContent, GridOverlay, GridPanel, GridWindowBand, GridWindowOverlay, build_atlas,
-};
+use crate::widgets::grid::{GridContent, GridOverlay, GridPanel, GridWindowOverlay, build_atlas};
 
 use gpui::prelude::*;
 
 use debugger_model::TilemapEntry;
+
+#[derive(Clone)]
+pub enum BackgroundLayerView {
+    Tilemap(TilemapView),
+    Bitmap(super::bitmap::BitmapView),
+}
+
+impl BackgroundLayerView {
+    pub fn load(
+        video: &dyn debugger_model::VideoDebug,
+        resource: &debugger_model::VideoResourceId,
+    ) -> Option<Self> {
+        video
+            .tilemap(resource)
+            .map(|map| Self::Tilemap(map.into()))
+            .or_else(|| {
+                video
+                    .bitmap(resource)
+                    .map(|bitmap| Self::Bitmap(bitmap.into()))
+            })
+    }
+
+    pub fn image(self) -> Option<Arc<RenderImage>> {
+        match self {
+            Self::Tilemap(view) => view.image,
+            Self::Bitmap(view) => view.image,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct TilemapView {
@@ -66,6 +93,29 @@ impl TilemapView {
         rects
     }
 
+    fn band_rects(
+        viewport: GridOverlay,
+        band: &debugger_model::TilemapOverlayBand,
+    ) -> Vec<GridOverlay> {
+        let relative = GridOverlay {
+            x: band.x,
+            y: band.y,
+            width: band.width,
+            height: band.height,
+        };
+        if band.inverted {
+            Self::outside_window_band(viewport, relative)
+        } else if band.width > 0 {
+            vec![GridOverlay {
+                x: viewport.x + band.x,
+                y: viewport.y + band.y,
+                ..relative
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+
     fn window_overlays(&self) -> Vec<GridWindowOverlay> {
         let Some(viewport) = self.viewport else {
             return Vec::new();
@@ -74,46 +124,20 @@ impl TilemapView {
         self.overlays
             .iter()
             .map(|overlay| {
-                let mut effective = Vec::new();
-                let bands: Vec<_> = overlay
+                let effective = overlay
                     .bands
                     .iter()
-                    .map(|band| {
-                        let relative = GridOverlay {
-                            x: band.x,
-                            y: band.y,
-                            width: band.width,
-                            height: band.height,
-                        };
-                        let rect = GridOverlay {
-                            x: viewport.x + band.x,
-                            y: viewport.y + band.y,
-                            width: band.width,
-                            height: band.height,
-                        };
-                        if band.active {
-                            if band.inverted {
-                                effective.extend(Self::outside_window_band(viewport, relative));
-                            } else if band.width > 0 {
-                                effective.push(rect);
-                            }
-                        }
-
-                        GridWindowBand {
-                            rect,
-                            active: band.active,
-                            show_edges: !(band.active
-                                && band.inverted
-                                && band.x == 0
-                                && band.width >= viewport.width),
-                        }
-                    })
+                    .filter(|band| band.active)
+                    .flat_map(|band| Self::band_rects(viewport, band))
                     .collect();
-                let label_anchor = bands
+                let bands: Vec<_> = overlay
+                    .outline_bands
+                    .as_ref()
+                    .unwrap_or(&overlay.bands)
                     .iter()
-                    .filter(|band| band.rect.width > 0)
-                    .max_by_key(|band| (band.active, band.rect.width))
-                    .map(|band| band.rect);
+                    .flat_map(|band| Self::band_rects(viewport, band))
+                    .collect();
+                let label_anchor = bands.iter().copied().min_by_key(|rect| (rect.y, rect.x));
 
                 GridWindowOverlay {
                     bands,
@@ -170,7 +194,15 @@ pub struct TilemapWidget;
 impl TilemapWidget {
     pub const ID: &'static str = debugger_model::panel::TILEMAP;
 
-    pub fn panel(view: Option<TilemapView>) -> GridPanel {
+    pub fn panel(view: Option<BackgroundLayerView>) -> GridPanel {
+        let view = match view {
+            Some(BackgroundLayerView::Bitmap(view)) => {
+                return super::bitmap::BitmapWidget::panel_with_id(Self::ID, Some(view));
+            }
+            Some(BackgroundLayerView::Tilemap(view)) => Some(view),
+            None => None,
+        };
+        let has_window_overlays = view.as_ref().is_some_and(|view| !view.overlays.is_empty());
         let content = view.as_ref().map(|view| GridContent {
             image: view.image.clone(),
             cols: view.width,
@@ -184,7 +216,7 @@ impl TilemapWidget {
         });
 
         let mut panel = GridPanel::new(Self::ID, "Tilemap", icon::MAP, content)
-            .window_overlay_toggle(true)
+            .window_overlay_toggle(has_window_overlays)
             .placeholder("Select an entry to inspect");
         if let Some(view) = view {
             panel = panel
@@ -206,10 +238,7 @@ fn detail_row(theme: &Theme, view: &TilemapView, index: usize) -> Div {
         .child(footer_row(
             theme,
             format!("({x}, {y})"),
-            crate::components::mono_text(
-                theme,
-                format!("{} {}", entry.address.region, hex(entry.address.addr, 16)),
-            ),
+            crate::components::mono_text(theme, hex(entry.address.addr, 16)),
         ))
         .child(super::tileset::details(theme, &entry.details))
 }

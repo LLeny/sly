@@ -20,7 +20,7 @@ use roms::RomFile;
 #[derive(Parser)]
 #[command(author, version, about)]
 struct Args {
-    /// System to run (e.g. snes)
+    /// System to run (gba or snes)
     system: String,
 
     /// Folder containing ROM files (plain or zipped)

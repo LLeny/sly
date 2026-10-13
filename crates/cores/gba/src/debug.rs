@@ -5,6 +5,7 @@ mod disasm;
 mod dma;
 mod mmio;
 mod video;
+pub(crate) mod window_trace;
 
 use std::ops::RangeInclusive;
 use std::sync::Arc;
@@ -589,4 +590,8 @@ impl debugger_model::DebugCore for GbaDebug {
     fn latest_access(&self) -> Option<(Arc<str>, u32)> {
         self.accesses.latest.map(|addr| (SPACE.into(), addr))
     }
+}
+
+fn field(label: &str, value: String) -> Row {
+    Row::Field(Field::new(label, value))
 }

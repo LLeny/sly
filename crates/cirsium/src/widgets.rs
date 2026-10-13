@@ -38,9 +38,7 @@ pub use disassembly::{
 };
 
 pub use framebuffer::{FramebufferView, FramebufferWidget, stage_bgra};
-pub use grid::{
-    GridContent, GridOverlay, GridPanel, GridWindowBand, GridWindowOverlay, VideoResource,
-};
+pub use grid::{GridContent, GridHover, GridOverlay, GridPanel, GridWindowOverlay, VideoResource};
 
 pub use log::{LogEntry, LogLevel, LogView, LogWidget, short_target};
 pub use memory::{MemoryCell, MemoryRow, MemoryWidget, RowProvider, ascii_glyph};
@@ -56,7 +54,7 @@ pub use script::{
 pub use sprites::{SpritesView, SpritesWidget};
 pub use structured::{StructuredPanel, StructuredView};
 pub use table::{TablePanel, TableView};
-pub use tilemap::{TilemapView, TilemapWidget};
+pub use tilemap::{BackgroundLayerView, TilemapView, TilemapWidget};
 pub use tileset::{TilesetView, TilesetWidget};
 
 pub mod bitmap;

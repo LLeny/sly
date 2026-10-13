@@ -375,6 +375,7 @@ pub(super) fn tilemap_window_overlays(core: &Snes, layer: usize) -> Vec<TilemapO
                 label: label.into(),
                 slot: window,
                 bands,
+                outline_bands: None,
             })
         })
         .collect()
@@ -665,11 +666,12 @@ impl VideoDebug for SnesDebug {
 
         for i in 0..BG_LAYERS {
             let name = bg_layer_name(&self.core, i);
-            let enabled = self.core.ppu.bg_mode.bpp(i).is_some() || mode7_bg_layer(&self.core, i);
             for (prefix, kind) in [(TILES_PREFIX, Tileset), (MAP_PREFIX, Tilemap)] {
-                let mut resource = VideoResource::new(format!("{prefix}{i}"), name.clone(), kind);
-                resource.enabled = enabled;
-                resources.push(resource);
+                resources.push(VideoResource::new(
+                    format!("{prefix}{i}"),
+                    name.clone(),
+                    kind,
+                ));
             }
         }
 

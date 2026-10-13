@@ -4,23 +4,35 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    App, Bounds, ClickEvent, Div, Hsla, ImageFiltering, MouseMoveEvent, Pixels, Point, RenderImage,
-    SharedString, Size, Window, canvas, div, fill, img, point, px, size,
+    Anchor, AnchoredPositionMode, App, Bounds, ClickEvent, Div, Hsla, ImageFiltering,
+    MouseMoveEvent, Pixels, Point, RenderImage, SharedString, Size, Window, anchored, canvas,
+    deferred, div, fill, img, point, px, size,
 };
 
 use crate::components::{
-    ClickHandler, FOOTER_ROW_H, Panel, Segmented, empty_state, footer_placeholder,
+    CheckboxSize, ClickHandler, FOOTER_ROW_H, Panel, Segmented, checkbox, empty_state,
+    footer_placeholder,
 };
 use crate::theme::{Theme, with_alpha};
 
 mod image_grid;
 
 pub(super) type SelectCallback = Rc<dyn Fn(usize, &mut Window, &mut App) + 'static>;
-pub(super) type HoverCallback = Rc<dyn Fn(Option<usize>, &mut Window, &mut App) + 'static>;
+pub(super) type HoverCallback = Rc<dyn Fn(Option<GridHover>, &mut Window, &mut App) + 'static>;
 pub(super) type ViewportCallback = Rc<dyn Fn(Size<f32>, &mut Window, &mut App) + 'static>;
-type OverlayToggleCallback = Rc<dyn Fn(&mut Window, &mut App) + 'static>;
+type ToggleCallback = Rc<dyn Fn(&mut Window, &mut App) + 'static>;
 
 type DetailFn = Box<dyn Fn(&Theme, usize) -> Div + 'static>;
+
+const DETAILS_WIDTH: f32 = 256.;
+const DETAILS_BREAKPOINT: f32 = 640.;
+const DETAILS_GAP: f32 = 12.;
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct GridHover {
+    pub index: usize,
+    pub position: Point<Pixels>,
+}
 
 pub use debugger_model::VideoResource;
 
@@ -97,15 +109,8 @@ pub struct GridOverlay {
 }
 
 #[derive(Clone)]
-pub struct GridWindowBand {
-    pub rect: GridOverlay,
-    pub active: bool,
-    pub show_edges: bool,
-}
-
-#[derive(Clone)]
 pub struct GridWindowOverlay {
-    pub bands: Vec<GridWindowBand>,
+    pub bands: Vec<GridOverlay>,
     pub effective: Vec<GridOverlay>,
     pub label_anchor: Option<GridOverlay>,
     pub label: SharedString,
@@ -167,11 +172,15 @@ pub struct GridPanel {
     content: Option<GridContent>,
     detail: Option<DetailFn>,
     detail_rows: usize,
+    side_details_width: Option<f32>,
     placeholder: &'static str,
     layers: Vec<VideoResource>,
     layer: usize,
     selected: Option<usize>,
-    hovered: Option<usize>,
+    hovered: Option<GridHover>,
+    pinned: Option<GridHover>,
+    inline_details: bool,
+    hover_details: bool,
     viewport: Size<f32>,
     collapsed: bool,
     on_toggle: Option<ClickHandler>,
@@ -181,7 +190,9 @@ pub struct GridPanel {
     on_viewport: Option<ViewportCallback>,
     window_overlay_toggle: bool,
     show_window_overlays: bool,
-    on_toggle_window_overlays: Option<OverlayToggleCallback>,
+    on_toggle_window_overlays: Option<ToggleCallback>,
+    fill_width: bool,
+    on_toggle_fill_width: Option<ToggleCallback>,
 }
 
 impl GridPanel {
@@ -199,11 +210,15 @@ impl GridPanel {
             content,
             detail: None,
             detail_rows: 1,
+            side_details_width: None,
             placeholder: "",
             layers: Vec::new(),
             layer: 0,
             selected: None,
             hovered: None,
+            pinned: None,
+            inline_details: true,
+            hover_details: false,
             viewport: size(0., 0.),
             collapsed: false,
             on_toggle: None,
@@ -214,6 +229,8 @@ impl GridPanel {
             window_overlay_toggle: false,
             show_window_overlays: true,
             on_toggle_window_overlays: None,
+            fill_width: false,
+            on_toggle_fill_width: None,
         }
     }
 
@@ -237,6 +254,11 @@ impl GridPanel {
         self
     }
 
+    pub fn side_details(mut self, width: f32) -> Self {
+        self.side_details_width = Some(width);
+        self
+    }
+
     pub fn placeholder(mut self, placeholder: &'static str) -> Self {
         self.placeholder = placeholder;
         self
@@ -257,8 +279,26 @@ impl GridPanel {
         self
     }
 
-    pub fn hovered(mut self, hovered: Option<usize>) -> Self {
+    pub fn hovered(mut self, hovered: Option<GridHover>) -> Self {
         self.hovered = hovered;
+        self
+    }
+
+    /// Keeps the hover popup open at `pinned.position` while `pinned.index` stays selected.
+    pub fn pinned(mut self, pinned: Option<GridHover>) -> Self {
+        self.pinned = pinned;
+        self
+    }
+
+    /// Shows the selected cell's details beside or below the grid.
+    pub fn inline_details(mut self, enabled: bool) -> Self {
+        self.inline_details = enabled;
+        self
+    }
+
+    /// Shows the hovered cell's details in its popup.
+    pub fn hover_details(mut self, enabled: bool) -> Self {
+        self.hover_details = enabled;
         self
     }
 
@@ -287,7 +327,7 @@ impl GridPanel {
 
     pub fn on_hover(
         mut self,
-        handler: impl Fn(Option<usize>, &mut Window, &mut App) + 'static,
+        handler: impl Fn(Option<GridHover>, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_hover = Some(Rc::new(handler));
         self
@@ -314,6 +354,20 @@ impl GridPanel {
         self
     }
 
+    /// Sizes cells to the full width and scrolls vertically instead of fitting the whole grid.
+    pub fn fill_width(mut self, enabled: bool) -> Self {
+        self.fill_width = enabled;
+        self
+    }
+
+    pub fn on_toggle_fill_width(
+        mut self,
+        handler: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_toggle_fill_width = Some(Rc::new(handler));
+        self
+    }
+
     pub fn window_overlay_toggle(mut self, enabled: bool) -> Self {
         self.window_overlay_toggle = enabled;
         self
@@ -329,14 +383,27 @@ impl GridPanel {
 }
 
 impl RenderOnce for GridPanel {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
 
-        let mut body = div().flex().flex_col().flex_1().min_h(px(0.)).gap_2();
+        // Measure the whole body so moving the inspector cannot change the breakpoint.
+        let side_details = self.inline_details
+            && (self.side_details_width.is_some() || self.viewport.width >= DETAILS_BREAKPOINT);
+        let detail_width = self.side_details_width.unwrap_or(DETAILS_WIDTH);
+        let mut body = div()
+            .relative()
+            .flex()
+            .when(!side_details, |body| body.flex_col())
+            .flex_1()
+            .min_w(px(0.))
+            .min_h(px(0.))
+            .gap(px(DETAILS_GAP))
+            .child(self::measure(self.on_viewport));
 
         let mut selectors = div().flex().items_center().gap_2();
-        if !self.layers.is_empty() {
+        // A lone resource has nothing to switch to.
+        if self.layers.len() > 1 {
             selectors = selectors.child(self::picker(
                 format!("{}-layer", self.id),
                 &self.layers,
@@ -345,18 +412,21 @@ impl RenderOnce for GridPanel {
             ));
         }
 
-        if self.window_overlay_toggle {
-            let mut toggle = Segmented::new(format!("{}-windows", self.id))
-                .option_label("windows", "Overlays")
-                .selected(if self.show_window_overlays {
-                    "windows"
-                } else {
-                    ""
-                });
-            if let Some(handler) = self.on_toggle_window_overlays.clone() {
-                toggle = toggle.on_select(move |_, window, cx| handler(window, cx));
-            }
-            selectors = selectors.child(toggle);
+        let mut options = Vec::new();
+        if self.window_overlay_toggle
+            && let Some(handler) = self.on_toggle_window_overlays.clone()
+        {
+            options.push((
+                "grid-window-overlays",
+                self.show_window_overlays,
+                "Overlays",
+                handler,
+            ));
+        }
+        if let Some(handler) = self.on_toggle_fill_width.clone()
+            && self.content.is_some()
+        {
+            options.push(("grid-fill-width", self.fill_width, "Fill width", handler));
         }
 
         match &self.content {
@@ -371,29 +441,66 @@ impl RenderOnce for GridPanel {
                 );
             }
             Some(content) => {
+                let detail_height = FOOTER_ROW_H * (self.detail_rows as f32);
+                let detail_height = if self.viewport.height > 0. {
+                    detail_height.min(self.viewport.height * 0.45)
+                } else {
+                    detail_height
+                };
+                let grid_viewport = if !self.inline_details {
+                    self.viewport
+                } else if side_details {
+                    size(
+                        (self.viewport.width - detail_width - DETAILS_GAP).max(0.),
+                        self.viewport.height,
+                    )
+                } else {
+                    size(
+                        self.viewport.width,
+                        (self.viewport.height - detail_height - DETAILS_GAP).max(0.),
+                    )
+                };
                 body = body.child(image_grid::cell_grid(
                     t,
                     self.id,
                     content,
-                    self.selected,
-                    self.hovered,
-                    self.viewport,
+                    image_grid::Interaction {
+                        selected: self.selected,
+                        hovered: self.hovered,
+                        pinned: self.pinned,
+                        detail: self.detail.as_ref().filter(|_| self.hover_details),
+                    },
+                    grid_viewport,
+                    window.viewport_size(),
                     self.on_select,
                     self.on_hover,
-                    self.on_viewport,
                     self.show_window_overlays,
+                    self.fill_width,
                 ));
 
-                let selected = self.selected.filter(|&index| index < content.count);
-                let slot = div()
-                    .flex_none()
-                    .flex()
-                    .flex_col()
-                    .h(px(FOOTER_ROW_H * self.detail_rows as f32));
-                body = body.child(match (selected, &self.detail) {
-                    (Some(index), Some(detail)) => slot.child(detail(t, index)),
-                    _ => slot.child(footer_placeholder(t, self.placeholder)),
-                });
+                if self.inline_details {
+                    let selected = self.selected.filter(|&index| index < content.count);
+                    let slot = div()
+                        .id(format!("{}-details", self.id))
+                        .flex_none()
+                        .flex()
+                        .flex_col()
+                        .min_w(px(0.))
+                        .min_h(px(0.))
+                        .when(side_details, |slot| {
+                            slot.w(px(detail_width))
+                                .h_full()
+                                .border_l_1()
+                                .border_color(t.border_subtle)
+                                .pl_2()
+                        })
+                        .when(!side_details, |slot| slot.h(px(detail_height)))
+                        .overflow_y_scroll();
+                    body = body.child(match (selected, &self.detail) {
+                        (Some(index), Some(detail)) => slot.child(detail(t, index).flex_none()),
+                        _ => slot.child(footer_placeholder(t, self.placeholder).flex_none()),
+                    });
+                }
             }
         }
 
@@ -403,6 +510,40 @@ impl RenderOnce for GridPanel {
             .collapsed(self.collapsed)
             .on_toggle_opt(self.on_toggle)
             .header_action(selectors);
+        if !options.is_empty() {
+            panel = panel.header_options(move |in_menu, theme| {
+                div()
+                    .flex()
+                    .gap_2()
+                    .whitespace_nowrap()
+                    .when(in_menu, |row| row.flex_col())
+                    .when(!in_menu, |row| row.items_center())
+                    .children(options.iter().map(|(id, checked, label, handler)| {
+                        let click_handler = handler.clone();
+                        let key_handler = handler.clone();
+                        checkbox(
+                            theme,
+                            id,
+                            *checked,
+                            *label,
+                            CheckboxSize::Small,
+                            move |_, window, cx| {
+                                cx.stop_propagation();
+                                click_handler(window, cx);
+                            },
+                        )
+                        .focusable()
+                        .tab_index(0)
+                        .on_key_down(move |event, window, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                cx.stop_propagation();
+                                key_handler(window, cx);
+                            }
+                        })
+                    }))
+                    .into_any_element()
+            });
+        }
         if let Some(meta) = self.meta {
             panel = panel.meta(meta);
         }
@@ -431,8 +572,23 @@ pub(super) fn picker(
     let segmented = |id: SharedString, key: usize| {
         let mut segmented = Segmented::new(id).selected(key.to_string());
         if let Some(handler) = handler.clone() {
+            let enabled_members: Vec<_> = layers
+                .iter()
+                .enumerate()
+                .map(|(index, layer)| {
+                    if layer.enabled {
+                        Some(index)
+                    } else {
+                        layers
+                            .iter()
+                            .position(|candidate| candidate.name == layer.name && candidate.enabled)
+                    }
+                })
+                .collect();
             segmented = segmented.on_select(move |key, window, cx| {
-                if let Ok(index) = key.parse() {
+                if let Ok(index) = key.parse::<usize>()
+                    && let Some(&Some(index)) = enabled_members.get(index)
+                {
                     handler(index, window, cx);
                 }
             });

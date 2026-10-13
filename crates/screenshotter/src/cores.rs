@@ -1,3 +1,4 @@
+mod gba;
 mod snes;
 
 use std::time::Duration;
@@ -27,7 +28,7 @@ impl System {
     }
 }
 
-static SYSTEMS: &[System] = &[snes::SYSTEM];
+static SYSTEMS: &[System] = &[gba::SYSTEM, snes::SYSTEM];
 
 pub fn select(name: &str) -> Option<&'static System> {
     SYSTEMS.iter().find(|system| system.slug() == name)
@@ -35,4 +36,25 @@ pub fn select(name: &str) -> Option<&'static System> {
 
 pub fn available() -> Vec<&'static str> {
     SYSTEMS.iter().map(System::slug).collect()
+}
+
+fn game_id(title: &str, crc: u32) -> String {
+    let mut normalized = String::new();
+    for chunk in title.split(|c: char| !c.is_ascii_alphanumeric()) {
+        if chunk.is_empty() {
+            continue;
+        }
+
+        if !normalized.is_empty() {
+            normalized.push('-');
+        }
+
+        normalized.push_str(&chunk.to_ascii_uppercase());
+    }
+
+    if normalized.is_empty() {
+        normalized.push_str("UNKNOWN");
+    }
+
+    format!("{normalized}-{crc:08X}")
 }

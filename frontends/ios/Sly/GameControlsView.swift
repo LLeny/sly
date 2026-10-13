@@ -1,5 +1,5 @@
-import SwiftUI
 import SlyKit
+import SwiftUI
 import UIKit
 
 private struct ControlButtonConfiguration: Sendable {
@@ -22,20 +22,27 @@ private struct CoreControlConfiguration: Sendable {
 
     init(controller: SlyKit.ControllerDescriptor?) {
         port = controller?.port ?? 0
+
         let supported = Set(controller?.buttons ?? [])
         directions = supported.intersection([.up, .down, .left, .right])
-        func control(_ button: SlyKit.Button, _ label: String, _ color: Color? = nil) -> ControlButtonConfiguration? {
-            supported.contains(button) ? ControlButtonConfiguration(label: label, button: button, color: color) : nil
+
+        func control(_ button: SlyKit.Button, _ label: String, _ color: Color? = nil)
+            -> ControlButtonConfiguration?
+        {
+            supported.contains(button)
+                ? ControlButtonConfiguration(label: label, button: button, color: color) : nil
         }
+
         leftShoulder = control(.l, "L")
         rightShoulder = control(.r, "R")
         centerButtons = [control(.select, "SELECT"), control(.start, "START")].compactMap { $0 }
-        faceButtons = FaceButtonConfiguration(buttons: [
-            control(.x, "X", Color(red: 0.18, green: 0.38, blue: 0.72)),
-            control(.a, "A", Color(red: 0.78, green: 0.20, blue: 0.27)),
-            control(.b, "B", Color(red: 0.88, green: 0.68, blue: 0.12)),
-            control(.y, "Y", Color(red: 0.20, green: 0.56, blue: 0.34)),
-        ].compactMap { $0 })
+        faceButtons = FaceButtonConfiguration(
+            buttons: [
+                control(.x, "X", Color(red: 0.18, green: 0.38, blue: 0.72)),
+                control(.a, "A", Color(red: 0.78, green: 0.20, blue: 0.27)),
+                control(.b, "B", Color(red: 0.88, green: 0.68, blue: 0.12)),
+                control(.y, "Y", Color(red: 0.20, green: 0.56, blue: 0.34)),
+            ].compactMap { $0 })
     }
 }
 
@@ -88,7 +95,9 @@ struct GameControlsView: View {
 
                 HStack(spacing: ControlsLayout.padSpacing) {
                     if !configuration.directions.isEmpty {
-                        DirectionPad(size: padSize, allowed: configuration.directions, onButtonChanged: setButton)
+                        DirectionPad(
+                            size: padSize, allowed: configuration.directions,
+                            onButtonChanged: setButton)
                     }
 
                     Spacer(minLength: 0)
@@ -180,7 +189,9 @@ private struct FaceButtonLayout {
         case 0: return []
         case 1: centers = [CGPoint(x: size / 2, y: size / 2)]
         case 2:
-            centers = [CGPoint(x: size * 0.75, y: size * 0.35), CGPoint(x: size * 0.25, y: size * 0.65)]
+            centers = [
+                CGPoint(x: size * 0.75, y: size * 0.35), CGPoint(x: size * 0.25, y: size * 0.65),
+            ]
         default:
             centers = [
                 CGPoint(x: size / 2, y: buttonSize / 2),
@@ -189,7 +200,9 @@ private struct FaceButtonLayout {
                 CGPoint(x: buttonSize / 2, y: size / 2),
             ]
         }
-        return zip(configuration.buttons, centers).map { FaceButtonPlacement(control: $0.0, center: $0.1) }
+        return zip(configuration.buttons, centers).map {
+            FaceButtonPlacement(control: $0.0, center: $0.1)
+        }
     }
 }
 
@@ -457,7 +470,7 @@ private struct DirectionPad: View {
 }
 
 private struct DPadShape: Shape {
-    func path(in rect: CGRect) -> Path {
+    nonisolated func path(in rect: CGRect) -> Path {
         let unit = min(rect.width, rect.height) / 3
         let corner = unit * 0.18
         let cornerSize = CGSize(width: corner, height: corner)
@@ -502,8 +515,8 @@ private func emitButtonChanges(
     }
 }
 
-private extension ControlButtonConfiguration {
-    func fill(isPressed: Bool) -> Color {
+extension ControlButtonConfiguration {
+    fileprivate func fill(isPressed: Bool) -> Color {
         guard let color else { return controlFill(isPressed) }
         return isPressed ? color.opacity(0.72) : color
     }
@@ -536,15 +549,16 @@ private struct ControlButton<ControlShape: Shape>: View {
             label: control.label,
             onPressedChanged: { pressed in
                 onButtonChanged(control.button, pressed)
+            },
+            content: { isPressed in
+                ControlButtonLabel(
+                    control: control,
+                    font: font,
+                    shape: shape,
+                    isPressed: isPressed
+                )
             }
-        ) { isPressed in
-            ControlButtonLabel(
-                control: control,
-                font: font,
-                shape: shape,
-                isPressed: isPressed
-            )
-        }
+        )
     }
 }
 

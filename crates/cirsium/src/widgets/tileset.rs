@@ -68,6 +68,7 @@ impl TilesetWidget {
         });
 
         let mut panel = GridPanel::new(Self::ID, "Tileset", icon::GRID, content)
+            .side_details(224.)
             .placeholder("Select a tile to inspect");
         if let Some(view) = view {
             panel = panel
@@ -84,9 +85,8 @@ impl TilesetWidget {
                             mono_text(
                                 theme,
                                 format!(
-                                    "{} bytes @ {} {}",
+                                    "{} bytes @ {}",
                                     view.tile_bytes,
-                                    tile.address.region,
                                     debugger_model::hex(tile.address.addr, 16)
                                 ),
                             ),

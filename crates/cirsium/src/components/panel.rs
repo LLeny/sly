@@ -2,6 +2,7 @@ use gpui::prelude::*;
 use gpui::{App, ClickEvent, FontWeight, SharedString, Window, div, px, svg};
 
 use super::ClickHandler;
+use super::header_options::{HeaderOptions, OptionsBuilder};
 use crate::assets::icon;
 use crate::theme::Theme;
 
@@ -25,6 +26,7 @@ pub struct Panel {
     sizing: Sizing,
     on_toggle: Option<ClickHandler>,
     header_action: Option<gpui::AnyElement>,
+    header_options: Option<OptionsBuilder>,
     body: Option<gpui::AnyElement>,
 }
 
@@ -39,6 +41,7 @@ impl Panel {
             sizing: Sizing::Fixed,
             on_toggle: None,
             header_action: None,
+            header_options: None,
             body: None,
         }
     }
@@ -100,6 +103,14 @@ impl Panel {
         self
     }
 
+    pub fn header_options(
+        mut self,
+        build: impl Fn(bool, &Theme) -> gpui::AnyElement + 'static,
+    ) -> Self {
+        self.header_options = Some(Box::new(build));
+        self
+    }
+
     pub fn child(mut self, body: impl IntoElement) -> Self {
         self.body = Some(body.into_any_element());
         self
@@ -156,7 +167,7 @@ impl PanelChrome {
 }
 
 impl RenderOnce for Panel {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(mut self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::global(cx);
         let t = &*theme;
         let chevron = if self.collapsed {
@@ -165,13 +176,15 @@ impl RenderOnce for Panel {
             icon::CHEVRON_DOWN
         };
 
+        let responsive = self.header_options.is_some();
         let mut left = div()
             .flex()
             .flex_1()
             .items_center()
             .gap_2()
             .min_w(px(0.))
-            .overflow_hidden();
+            .overflow_hidden()
+            .when(responsive, |left| left.flex_none());
         if let Some(glyph) = self.glyph.clone() {
             left = left.child(
                 svg()
@@ -184,7 +197,6 @@ impl RenderOnce for Panel {
 
         left = left.child(
             div()
-                .flex_1()
                 .min_w(px(0.))
                 .text_xs()
                 .font_weight(FontWeight::SEMIBOLD)
@@ -194,18 +206,20 @@ impl RenderOnce for Panel {
                 .child(self.title.to_uppercase()),
         );
 
-        let mut right = div().flex().flex_none().items_center().gap_2();
-        if let Some(action) = self.header_action {
-            right = right.child(action);
-        }
         if let Some(meta) = self.meta.clone() {
-            right = right.child(
+            left = left.child(
                 div()
+                    .flex_none()
                     .font_family(t.mono_font)
                     .text_xs()
                     .text_color(t.text_muted)
+                    .whitespace_nowrap()
                     .child(meta),
             );
+        }
+        let mut right = div().flex().flex_none().items_center().gap_2();
+        if !responsive && let Some(action) = self.header_action.take() {
+            right = right.child(action);
         }
         right = right.child(svg().path(chevron).size(px(12.)).text_color(t.text_muted));
 
@@ -222,8 +236,15 @@ impl RenderOnce for Panel {
             .border_b_1()
             .border_color(t.border_subtle)
             .hover(move |s| s.bg(hover_bg))
-            .child(left)
-            .child(right);
+            .child(left);
+        if let Some(build) = self.header_options {
+            header = header.gap_2().child(HeaderOptions {
+                id: format!("{}-options", self.id).into(),
+                primary: self.header_action,
+                build,
+            });
+        }
+        header = header.child(right);
         if let Some(toggle) = self.on_toggle {
             header = header.on_click(toggle);
         }

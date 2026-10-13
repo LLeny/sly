@@ -35,6 +35,193 @@ const VCOUNT: Register<VerticalCount> = Register::new(
 .read_mask(VerticalCount::SCANLINE_MASK)
 .read_only();
 
+const fn bgcnt<const I: usize>(address: u32, name: &'static str) -> Register<BackgroundControl> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| bus.ppu.bgcnt[I],
+        |bus| &mut bus.ppu.bgcnt[I],
+    )
+    .write_mask(BackgroundControl::WRITE_MASK)
+}
+
+const BG0CNT: Register<BackgroundControl> = bgcnt::<0>(0x0400_0008, "BG0CNT");
+const BG1CNT: Register<BackgroundControl> = bgcnt::<1>(0x0400_000A, "BG1CNT");
+const BG2CNT: Register<BackgroundControl> = bgcnt::<2>(0x0400_000C, "BG2CNT");
+const BG3CNT: Register<BackgroundControl> = bgcnt::<3>(0x0400_000E, "BG3CNT");
+
+const fn bgofs<const I: usize, const VERTICAL: bool>(
+    address: u32,
+    name: &'static str,
+) -> Register<BackgroundOffset> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| {
+            if VERTICAL {
+                bus.ppu.bgvofs[I]
+            } else {
+                bus.ppu.bghofs[I]
+            }
+        },
+        |bus| {
+            if VERTICAL {
+                &mut bus.ppu.bgvofs[I]
+            } else {
+                &mut bus.ppu.bghofs[I]
+            }
+        },
+    )
+    .read_mask(0)
+    .write_mask(BackgroundOffset::OFFSET_MASK)
+}
+
+const BG0HOFS: Register<BackgroundOffset> = bgofs::<0, false>(0x0400_0010, "BG0HOFS");
+const BG0VOFS: Register<BackgroundOffset> = bgofs::<0, true>(0x0400_0012, "BG0VOFS");
+const BG1HOFS: Register<BackgroundOffset> = bgofs::<1, false>(0x0400_0014, "BG1HOFS");
+const BG1VOFS: Register<BackgroundOffset> = bgofs::<1, true>(0x0400_0016, "BG1VOFS");
+const BG2HOFS: Register<BackgroundOffset> = bgofs::<2, false>(0x0400_0018, "BG2HOFS");
+const BG2VOFS: Register<BackgroundOffset> = bgofs::<2, true>(0x0400_001A, "BG2VOFS");
+const BG3HOFS: Register<BackgroundOffset> = bgofs::<3, false>(0x0400_001C, "BG3HOFS");
+const BG3VOFS: Register<BackgroundOffset> = bgofs::<3, true>(0x0400_001E, "BG3VOFS");
+
+const fn bgp<const I: usize, const P: usize>(
+    address: u32,
+    name: &'static str,
+) -> Register<AffineParameter> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| bus.ppu.bg_matrix[I - 2][P],
+        |bus| &mut bus.ppu.bg_matrix[I - 2][P],
+    )
+    .read_mask(0)
+}
+
+const BG2PA: Register<AffineParameter> = bgp::<2, 0>(0x0400_0020, "BG2PA");
+const BG2PB: Register<AffineParameter> = bgp::<2, 1>(0x0400_0022, "BG2PB");
+const BG2PC: Register<AffineParameter> = bgp::<2, 2>(0x0400_0024, "BG2PC");
+const BG2PD: Register<AffineParameter> = bgp::<2, 3>(0x0400_0026, "BG2PD");
+const BG3PA: Register<AffineParameter> = bgp::<3, 0>(0x0400_0030, "BG3PA");
+const BG3PB: Register<AffineParameter> = bgp::<3, 1>(0x0400_0032, "BG3PB");
+const BG3PC: Register<AffineParameter> = bgp::<3, 2>(0x0400_0034, "BG3PC");
+const BG3PD: Register<AffineParameter> = bgp::<3, 3>(0x0400_0036, "BG3PD");
+
+const fn bgref<const I: usize, const A: usize>(
+    address: u32,
+    name: &'static str,
+) -> Register<ReferencePoint> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| bus.ppu.bg_ref[I - 2][A],
+        |bus| &mut bus.ppu.bg_ref[I - 2][A],
+    )
+    .read_mask(0)
+    .write_mask(ReferencePoint::WRITE_MASK)
+    .write_with(|bus, value, mask| {
+        let ppu = &mut bus.ppu;
+        let point = &mut ppu.bg_ref[I - 2][A];
+        *point = ReferencePoint::from_raw((point.raw() & !mask) | (value.raw() & mask));
+        ppu.bg_ref_internal[I - 2][A] = point.value();
+    })
+}
+
+const BG2X: Register<ReferencePoint> = bgref::<2, 0>(0x0400_0028, "BG2X");
+const BG2Y: Register<ReferencePoint> = bgref::<2, 1>(0x0400_002C, "BG2Y");
+const BG3X: Register<ReferencePoint> = bgref::<3, 0>(0x0400_0038, "BG3X");
+const BG3Y: Register<ReferencePoint> = bgref::<3, 1>(0x0400_003C, "BG3Y");
+
+const fn winh<const I: usize>(address: u32, name: &'static str) -> Register<WindowXOffset> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| bus.ppu.winh[I],
+        |bus| &mut bus.ppu.winh[I],
+    )
+    .read_mask(0)
+}
+
+const fn winv<const I: usize>(address: u32, name: &'static str) -> Register<WindowYOffset> {
+    Register::new(
+        address,
+        name,
+        "PPU",
+        |bus| bus.ppu.winv[I],
+        |bus| &mut bus.ppu.winv[I],
+    )
+    .read_mask(0)
+}
+
+const WIN0H: Register<WindowXOffset> = winh::<0>(0x0400_0040, "WIN0H");
+const WIN1H: Register<WindowXOffset> = winh::<1>(0x0400_0042, "WIN1H");
+const WIN0V: Register<WindowYOffset> = winv::<0>(0x0400_0044, "WIN0V");
+const WIN1V: Register<WindowYOffset> = winv::<1>(0x0400_0046, "WIN1V");
+
+const WININ: Register<WindowControl> = Register::new(
+    0x0400_0048,
+    "WININ",
+    "PPU",
+    |bus| bus.ppu.winin,
+    |bus| &mut bus.ppu.winin,
+)
+.read_mask(0x3F3F)
+.write_mask(0x3F3F);
+
+const WINOUT: Register<WindowControl> = Register::new(
+    0x0400_004A,
+    "WINOUT",
+    "PPU",
+    |bus| bus.ppu.winout,
+    |bus| &mut bus.ppu.winout,
+)
+.read_mask(0x3F3F)
+.write_mask(0x3F3F);
+
+const MOSAIC: Register<Mosaic> = Register::new(
+    0x0400_004C,
+    "MOSAIC",
+    "PPU",
+    |bus| bus.ppu.mosaic,
+    |bus| &mut bus.ppu.mosaic,
+)
+.read_mask(0);
+
+const BLDCNT: Register<BlendControl> = Register::new(
+    0x0400_0050,
+    "BLDCNT",
+    "PPU",
+    |bus| bus.ppu.bldcnt,
+    |bus| &mut bus.ppu.bldcnt,
+)
+.read_mask(BlendControl::WRITE_MASK)
+.write_mask(BlendControl::WRITE_MASK);
+
+const BLDALPHA: Register<BlendAlpha> = Register::new(
+    0x0400_0052,
+    "BLDALPHA",
+    "PPU",
+    |bus| bus.ppu.bldalpha,
+    |bus| &mut bus.ppu.bldalpha,
+)
+.read_mask(BlendAlpha::WRITE_MASK)
+.write_mask(BlendAlpha::WRITE_MASK);
+
+const BLDY: Register<BlendBrightness> = Register::new(
+    0x0400_0054,
+    "BLDY",
+    "PPU",
+    |bus| bus.ppu.bldy,
+    |bus| &mut bus.ppu.bldy,
+)
+.read_mask(0)
+.write_mask(BlendBrightness::WRITE_MASK);
+
 const PALETTE: Handler = Handler {
     read: |bus, address, width| bus.ppu.read_palette(address, width),
     write: |bus, address, width, value| bus.ppu.write_palette(address, width, value),
@@ -57,6 +244,40 @@ pub(crate) fn register(map: &mut MmioMap) {
     map.register(&DISPCTL);
     map.register(&DISPSTAT);
     map.register(&VCOUNT);
+    map.register(&BG0CNT);
+    map.register(&BG1CNT);
+    map.register(&BG2CNT);
+    map.register(&BG3CNT);
+    map.register(&BG0HOFS);
+    map.register(&BG0VOFS);
+    map.register(&BG1HOFS);
+    map.register(&BG1VOFS);
+    map.register(&BG2HOFS);
+    map.register(&BG2VOFS);
+    map.register(&BG3HOFS);
+    map.register(&BG3VOFS);
+    map.register(&BG2PA);
+    map.register(&BG2PB);
+    map.register(&BG2PC);
+    map.register(&BG2PD);
+    map.register(&BG2X);
+    map.register(&BG2Y);
+    map.register(&BG3PA);
+    map.register(&BG3PB);
+    map.register(&BG3PC);
+    map.register(&BG3PD);
+    map.register(&BG3X);
+    map.register(&BG3Y);
+    map.register(&WIN0H);
+    map.register(&WIN1H);
+    map.register(&WIN0V);
+    map.register(&WIN1V);
+    map.register(&WININ);
+    map.register(&WINOUT);
+    map.register(&MOSAIC);
+    map.register(&BLDCNT);
+    map.register(&BLDALPHA);
+    map.register(&BLDY);
     map.map(PALETTE_BASE..=PALETTE_END, PALETTE);
     map.map(VRAM_BASE..=VRAM_END, VRAM);
     map.map(OAM_BASE..=OAM_END, OAM);

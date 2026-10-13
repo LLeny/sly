@@ -27,7 +27,7 @@ struct SnesScreenshotter {
 impl SnesScreenshotter {
     fn new(rom: Vec<u8>) -> Result<Self> {
         let cartridge = Cartridge::new(rom).context("parsing cartridge header")?;
-        let game_id = Self::game_id(&cartridge);
+        let game_id = crate::cores::game_id(&cartridge.title(), crc32fast::hash(&cartridge.rom));
         let frame_rate =
             snes::cartridge::frame_rate(snes::cartridge::tv_system(cartridge.region()));
 
@@ -36,32 +36,6 @@ impl SnesScreenshotter {
             game_id,
             frame_rate,
         })
-    }
-
-    fn game_id(cartridge: &Cartridge) -> String {
-        let crc = crc32fast::hash(&cartridge.rom);
-
-        let mut title = String::new();
-        for chunk in cartridge
-            .title()
-            .split(|c: char| !c.is_ascii_alphanumeric())
-        {
-            if chunk.is_empty() {
-                continue;
-            }
-
-            if !title.is_empty() {
-                title.push('-');
-            }
-
-            title.push_str(&chunk.to_ascii_uppercase());
-        }
-
-        if title.is_empty() {
-            title.push_str("UNKNOWN");
-        }
-
-        format!("{title}-{crc:08X}")
     }
 }
 

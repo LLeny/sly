@@ -1,5 +1,5 @@
-import SwiftUI
 import SlyKit
+import SwiftUI
 
 struct SettingsView: View {
     @AppStorage(AppSettings.imageFilteringKey)
@@ -58,8 +58,7 @@ struct SettingsView: View {
                     Text("Library")
                 } footer: {
                     Text(
-                        "Automatic uses the ROMs detected region and falls " +
-                        "back to another available cover when necessary."
+                        "Automatic uses the ROMs detected region and falls back to another available cover when necessary."
                     )
                 }
 
@@ -72,8 +71,7 @@ struct SettingsView: View {
                     Text("Save States")
                 } footer: {
                     Text(
-                        "Automatically resumes a ROM from its quick save " +
-                        "when one is available."
+                        "Automatically resumes a ROM from its quick save when one is available."
                     )
                 }
 

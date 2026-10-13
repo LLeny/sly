@@ -1,5 +1,5 @@
-import SwiftUI
 import SlyKit
+import SwiftUI
 
 struct ArtworkCoverView: View {
     let system: System
@@ -43,7 +43,8 @@ struct ArtworkCoverView: View {
                         apiKey: artworkAPIKey
                     )
                     try Task.checkCancellation()
-                    cover = loaded
+                    cover =
+                        loaded
                         .flatMap { UIImage(data: $0.data) }
                         .map(Image.init(uiImage:))
                     isLoading = false

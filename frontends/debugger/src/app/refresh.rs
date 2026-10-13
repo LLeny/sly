@@ -103,12 +103,11 @@ impl Debugger {
         }
 
         self.tilemap_key = key;
-        Self::drop_grid_image(cx, self.tilemap.take().and_then(|v| v.image));
+        Self::drop_grid_image(cx, self.tilemap.take().and_then(BackgroundLayerView::image));
         self.tilemap = self
             .target
             .video()
-            .and_then(|v| v.tilemap(self.tilemap_ui.resource.as_ref()?))
-            .map(Into::into);
+            .and_then(|v| BackgroundLayerView::load(v, self.tilemap_ui.resource.as_ref()?));
 
         self.tilemap_overlay_key = None;
         self.apply_tilemap_overlay(overlay_key);
@@ -128,7 +127,7 @@ impl Debugger {
             return;
         };
 
-        if let Some(view) = &mut self.tilemap {
+        if let Some(BackgroundLayerView::Tilemap(view)) = &mut self.tilemap {
             let viewport = video.tilemap_viewport(resource);
             view.viewport = viewport.filter(|v| v.transform.is_none()).map(Into::into);
             view.footprint = viewport.filter(|v| v.transform.is_some());
@@ -490,6 +489,14 @@ impl Debugger {
             .layers(resources.clone())
             .selected(state.selected())
             .hovered(state.hovered)
+            .pinned(state.pinned)
+            .inline_details(self.grid_inline_details)
+            .hover_details(self.grid_hover_details)
+            .fill_width(self.grid_fill_width.contains(id))
+            .on_toggle_fill_width({
+                let this = this.clone();
+                move |_, cx| this.update(cx, |d, cx| d.toggle_grid_fill_width(id, cx))
+            })
             .viewport(state.viewport)
             .window_overlays_visible(state.show_window_overlays)
             .collapsed(self.is_collapsed(id))
@@ -500,6 +507,7 @@ impl Debugger {
                     this.update(cx, |d, cx| {
                         ui(d).resource = resources.get(layer).map(|r| r.id.clone());
                         ui(d).hovered = None;
+                        ui(d).pinned = None;
                         refresh(d, cx);
                         d.refresh_generic_panels(false);
                         cx.notify();
@@ -510,7 +518,8 @@ impl Debugger {
                 let this = this.clone();
                 move |index, _, cx| {
                     this.update(cx, |d, cx| {
-                        ui(d).toggle_selected(index);
+                        let pin = d.grid_pin_popup;
+                        ui(d).toggle_selected(index, pin);
                         d.refresh_generic_panels(false);
                         cx.notify();
                     })

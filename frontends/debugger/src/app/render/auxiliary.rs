@@ -49,6 +49,30 @@ impl Debugger {
                     CheckboxSize::Small,
                     cx.listener(|this, _, _, cx| this.toggle_live_refresh(cx)),
                 ))
+                .child(checkbox(
+                    t,
+                    "set-grid-inline-details",
+                    self.grid_inline_details,
+                    "Show stats in view",
+                    CheckboxSize::Small,
+                    cx.listener(|this, _, _, cx| this.toggle_grid_inline_details(cx)),
+                ))
+                .child(checkbox(
+                    t,
+                    "set-grid-hover-details",
+                    self.grid_hover_details,
+                    "Show stats on hover",
+                    CheckboxSize::Small,
+                    cx.listener(|this, _, _, cx| this.toggle_grid_hover_details(cx)),
+                ))
+                .child(checkbox(
+                    t,
+                    "set-grid-pin-popup",
+                    self.grid_pin_popup,
+                    "Pin popup on click",
+                    CheckboxSize::Small,
+                    cx.listener(|this, _, _, cx| this.toggle_grid_pin_popup(cx)),
+                ))
                 .child(div().text_xs().text_color(t.text_muted).child("LOG"))
                 .child(checkbox(
                     t,

@@ -385,6 +385,43 @@ impl Debugger {
         cx.notify();
     }
 
+    pub(super) fn toggle_grid_inline_details(&mut self, cx: &mut Context<Self>) {
+        self.grid_inline_details = !self.grid_inline_details;
+        self.save_preferences(cx);
+        cx.notify();
+    }
+
+    pub(super) fn toggle_grid_hover_details(&mut self, cx: &mut Context<Self>) {
+        self.grid_hover_details = !self.grid_hover_details;
+        self.save_preferences(cx);
+        cx.notify();
+    }
+
+    pub(super) fn toggle_grid_pin_popup(&mut self, cx: &mut Context<Self>) {
+        self.grid_pin_popup = !self.grid_pin_popup;
+        if !self.grid_pin_popup {
+            for state in [
+                &mut self.palette_ui,
+                &mut self.tileset_ui,
+                &mut self.tilemap_ui,
+                &mut self.sprites_ui,
+                &mut self.bitmap_ui,
+            ] {
+                state.pinned = None;
+            }
+        }
+        self.save_preferences(cx);
+        cx.notify();
+    }
+
+    pub(super) fn toggle_grid_fill_width(&mut self, id: &str, cx: &mut Context<Self>) {
+        if !self.grid_fill_width.remove(id) {
+            self.grid_fill_width.insert(id.to_owned());
+        }
+        self.save_preferences(cx);
+        cx.notify();
+    }
+
     pub(super) fn on_log_filter_event(
         &mut self,
         input: Entity<TextInput>,

@@ -10,14 +10,14 @@ use cirsium::components::{
     status_bar, title_bar,
 };
 use cirsium::widgets::{
-    AudioScopeView, AudioScopeWidget, AudioScopesView, BitmapView, BitmapWidget, BreakpointKind,
-    BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView, CartridgeWidget,
-    ChannelScopesWidget, ControlsView, ControlsWidget, CpuWidget, DisassemblyWidget,
-    FramebufferView, FramebufferWidget, GridPanel, LogWidget, MemoryWidget, MmioView, MmioWidget,
-    PaletteView, PaletteWidget, RowProvider, SavestatesWidget, ScriptBuiltinsWidget,
-    ScriptConsoleWidget, ScriptEditorWidget, SpritesView, SpritesWidget, StructuredPanel,
-    StructuredView, TablePanel, TableView, TilemapView, TilemapWidget, TilesetView, TilesetWidget,
-    ViewMode,
+    AudioScopeView, AudioScopeWidget, AudioScopesView, BackgroundLayerView, BitmapView,
+    BitmapWidget, BreakpointKind, BreakpointsWidget, CallStackView, CallStackWidget, CartridgeView,
+    CartridgeWidget, ChannelScopesWidget, ControlsView, ControlsWidget, CpuWidget,
+    DisassemblyWidget, FramebufferView, FramebufferWidget, GridHover, GridPanel, LogWidget,
+    MemoryWidget, MmioView, MmioWidget, PaletteView, PaletteWidget, RowProvider, SavestatesWidget,
+    ScriptBuiltinsWidget, ScriptConsoleWidget, ScriptEditorWidget, SpritesView, SpritesWidget,
+    StructuredPanel, StructuredView, TablePanel, TableView, TilemapWidget, TilesetView,
+    TilesetWidget, ViewMode,
 };
 
 use cirsium::{
@@ -69,24 +69,29 @@ struct ProcessorPane {
 struct GridState {
     resource: Option<VideoResourceId>,
     selected: HashMap<VideoResourceId, usize>,
-    hovered: Option<usize>,
+    hovered: Option<GridHover>,
+    pinned: Option<GridHover>,
     viewport: Size<f32>,
     show_window_overlays: bool,
 }
 
 impl GridState {
     fn sync(&mut self, resources: &[VideoResource], kind: VideoResourceKind) {
-        if !resources
+        let current = resources
             .iter()
-            .any(|r| r.kind == kind && Some(&r.id) == self.resource.as_ref())
-        {
-            self.resource = resources
-                .iter()
-                .find(|r| r.kind == kind && r.enabled)
-                .or_else(|| resources.iter().find(|r| r.kind == kind))
-                .map(|r| r.id.clone());
+            .position(|r| r.kind == kind && Some(&r.id) == self.resource.as_ref());
+        let next = resources
+            .iter()
+            .cycle()
+            .skip(current.unwrap_or(0))
+            .take(resources.len())
+            .find(|r| r.kind == kind && r.enabled)
+            .map(|r| r.id.clone());
 
+        if next != self.resource {
+            self.resource = next;
             self.hovered = None;
+            self.pinned = None;
         }
     }
 
@@ -104,19 +109,22 @@ impl GridState {
             .copied()
     }
 
-    fn toggle_selected(&mut self, index: usize) {
+    fn toggle_selected(&mut self, index: usize, pin: bool) {
         let Some(resource) = self.resource.clone() else {
             return;
         };
 
         if self.selected.get(&resource) == Some(&index) {
             self.selected.remove(&resource);
+            self.pinned = None;
         } else {
             self.selected.insert(resource, index);
+            // Selecting a cell can keep its hover popup open where it was clicked.
+            self.pinned = self.hovered.filter(|hover| pin && hover.index == index);
         }
     }
 
-    fn set_hovered(&mut self, hovered: Option<usize>) -> bool {
+    fn set_hovered(&mut self, hovered: Option<GridHover>) -> bool {
         let changed = self.hovered != hovered;
         if changed {
             self.hovered = hovered;
@@ -130,6 +138,8 @@ impl GridState {
 
         if changed {
             self.viewport = viewport;
+            // The pin is anchored in window space, so it would drift away from its cell.
+            self.pinned = None;
         }
 
         changed
@@ -189,7 +199,7 @@ pub(crate) struct Debugger {
     bitmap_ui: GridState,
     bitmap_key: Option<VideoCacheKey>,
     tileset_ui: GridState,
-    tilemap: Option<TilemapView>,
+    tilemap: Option<BackgroundLayerView>,
     tilemap_ui: GridState,
     sprites: Option<SpritesView>,
     sprites_ui: GridState,
@@ -229,6 +239,10 @@ pub(crate) struct Debugger {
     artwork_key_input: Entity<TextInput>,
     art_query: Option<crate::cover::ArtQuery>,
     live_refresh: bool,
+    grid_inline_details: bool,
+    grid_hover_details: bool,
+    grid_pin_popup: bool,
+    grid_fill_width: HashSet<String>,
     workspace: SharedString,
     execution: ExecutionState,
     game_focus: FocusHandle,
@@ -382,7 +396,10 @@ impl Debugger {
             bitmap_key: None,
             tileset_ui: GridState::default(),
             tilemap: None,
-            tilemap_ui: GridState::default(),
+            tilemap_ui: GridState {
+                show_window_overlays: true,
+                ..GridState::default()
+            },
             sprites: None,
             sprites_ui: GridState::default(),
             framebuffer: target.software_frame().map(Into::into),
@@ -426,6 +443,10 @@ impl Debugger {
             artwork_key_input: cx.new(|cx| TextInput::new(cx, "Anonymous").secret()),
             art_query: None,
             live_refresh: true,
+            grid_inline_details: true,
+            grid_hover_details: false,
+            grid_pin_popup: false,
+            grid_fill_width: HashSet::new(),
             workspace,
             execution: ExecutionState::Paused,
             game_focus: cx.focus_handle(),
