@@ -265,7 +265,7 @@ For pull requests:
 
 ### LLM usage
 
-You may use LLMs to help write your code, but I recommend against it. Either way, you're expected to understand every change you submit and be able to explain it yourself. **Don't act as a proxy for an LLM**. Issues, PR descriptions and discussions must be written by you.
+You may use LLMs to help write your code, but I strongly recommend against it. Either way, you're expected to understand every change you submit and be able to explain it yourself. Don't act as a proxy for an LLM. Issues, PR descriptions and discussions must be written by you. LLM usage must be disclosed.
 
 ## License
 
