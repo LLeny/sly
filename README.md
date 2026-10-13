@@ -248,6 +248,25 @@ cargo run --release -p testrunner -- spc700 --opcodes 00 --limit 100
 
 New CPUs can be registered in [testrunner](crates/testrunner/src/cores.rs).
 
+## Contributing
+
+Contributions are welcome, whether it's a game compatibility fix, a new debugger feature or a whole new core. For bigger changes, open an issue first so we can talk about it before you sink time into it.
+
+Sly also needs more than code! If you have design experience, help with app icons, UI and UX, box art and cartridge models or other visual assets would be very welcome. Open an issue to share your ideas or work.
+
+For pull requests:
+
+* Branch off `dev` and open your PR against it.
+* Run `cargo fmt --all` and make sure the checks under [Testing](#testing) pass.
+* Keep hardware changes in their core and match the style of the surrounding code.
+* Explain what changed and how you tested it. If you ran the CPU tests or checked specific games, mention them.
+* Add screenshots for anything visual.
+* Don't commit ROMs, BIOS files or build output.
+
+### LLM usage
+
+You may use LLMs to help write your code, but I recommend against it. Either way, you're expected to understand every change you submit and be able to explain it yourself. **Don't act as a proxy for an LLM**. Issues, PR descriptions and discussions must be written by you.
+
 ## License
 
 [GPL-3.0](LICENSE) · [Third-party notices](licenses)
