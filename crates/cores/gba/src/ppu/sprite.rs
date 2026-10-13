@@ -103,7 +103,7 @@ impl Attribute {
             (Vertical, Size2) => (16, 32),
             (Vertical, Size3) => (32, 64),
             // The prohibited shape has no size, so the sprite is never drawn
-            // First found in: Wario Land 4 shits itself when loading into a game if I don't support this 
+            // First found in: Wario Land 4 shits itself when loading into a game if I don't support this
             _ => (0, 0),
         }
     }
