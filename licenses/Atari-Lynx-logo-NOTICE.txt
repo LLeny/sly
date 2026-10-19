@@ -1,0 +1,9 @@
+The Atari Lynx logo in `assets/systems/lynx.svg` is a vectorization of the
+original Atari Corporation logo, released into the public domain on Wikimedia
+Commons:
+
+- Source: https://upload.wikimedia.org/wikipedia/commons/c/c6/Atari_Lynx_logo.svg
+- File page: https://commons.wikimedia.org/wiki/File:Atari_Lynx_logo.svg
+
+The logo is a trademark of its respective owner; its use here is nominative,
+alongside the other console logos in `assets/systems/`.

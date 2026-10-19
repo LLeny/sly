@@ -3,7 +3,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use core_model::{Button, ControllerDescriptor, System};
+use core_model::{Button, ControllerDescriptor, DisplayRotation};
 
 use crate::library::{LibraryEntry, read_rom};
 use crate::worker::LatestJob;
@@ -28,7 +28,7 @@ pub struct LoadedGame {
     core: core_loader::PlayerCore,
     storage: storage::Session<storage::FsStore>,
     interval: Duration,
-    system: System,
+    rotation: DisplayRotation,
     pub warnings: Vec<String>,
 }
 
@@ -46,8 +46,8 @@ impl LoadedGame {
         let cartridge = core_model::RomFile::new()
             .data(bytes)
             .filename(entry.path.display().to_string());
-        let mut core = core_loader::load(entry.system, cartridge)
-            .map_err(|error| error.to_string())?;
+        let mut core =
+            core_loader::load(entry.system, cartridge).map_err(|error| error.to_string())?;
 
         let interval = core
             .frame_interval()
@@ -68,11 +68,16 @@ impl LoadedGame {
             ));
         }
 
+        let rotation = core
+            .cartridge_info()
+            .map(|info| info.display_rotation)
+            .unwrap_or_default();
+
         Ok(Self {
             core,
             storage,
             interval,
-            system: entry.system,
+            rotation,
             warnings,
         })
     }
@@ -87,10 +92,11 @@ impl LoadedGame {
             controllers,
             audio: None,
             audio_samples: Vec::new(),
-            clock: FrameClock::new(self.interval),
+            clock: FrameClock::new(),
+            interval: self.interval,
             next_backup: Instant::now() + BACKUP_INTERVAL,
             sequence: 1,
-            system: self.system,
+            rotation: self.rotation,
             paused: false,
             volume: sanitize_volume(volume),
             warnings: self.warnings,
@@ -108,6 +114,7 @@ pub struct VideoFrame<'a> {
     pub stride: u32,
     pub sequence: u64,
     pub display_aspect: f32,
+    pub rotation: DisplayRotation,
     pub bytes: &'a [u8],
 }
 
@@ -118,9 +125,10 @@ pub struct GameSession {
     audio: Option<audio::AudioPlayer>,
     audio_samples: Vec<i16>,
     clock: FrameClock,
+    interval: Duration,
     next_backup: Instant,
     sequence: u64,
-    system: System,
+    rotation: DisplayRotation,
     paused: bool,
     volume: f32,
     warnings: Vec<String>,
@@ -133,7 +141,8 @@ impl GameSession {
             return false;
         }
 
-        let due = self.clock.frames_due(now);
+        let interval = self.core.frame_interval().unwrap_or(self.interval);
+        let due = self.clock.frames_due(now, interval);
 
         for _ in 0..due {
             self.core.run_frame();
@@ -182,15 +191,18 @@ impl GameSession {
             .software_frame()
             .filter(|frame| frame.is_valid())?;
 
+        let display_aspect = self
+            .core
+            .display_aspect()
+            .unwrap_or_else(|| frame.width as f32 / frame.height.max(1) as f32);
+
         Some(VideoFrame {
             width: frame.width,
             height: frame.height,
             stride: frame.width.checked_mul(4)?,
             sequence: self.sequence,
-            display_aspect: match self.system {
-                System::Snes => 4.0 / 3.0,
-                System::Gba => 3.0 / 2.0,
-            },
+            display_aspect,
+            rotation: self.rotation,
             bytes: frame.bytes(),
         })
     }
@@ -328,33 +340,29 @@ fn sanitize_volume(volume: f32) -> f32 {
 }
 
 struct FrameClock {
-    interval: Duration,
     next: Option<Instant>,
 }
 
 impl FrameClock {
-    fn new(interval: Duration) -> Self {
-        Self {
-            interval,
-            next: None,
-        }
+    fn new() -> Self {
+        Self { next: None }
     }
 
     fn reset(&mut self) {
         self.next = None;
     }
 
-    fn frames_due(&mut self, now: Instant) -> u32 {
+    fn frames_due(&mut self, now: Instant, interval: Duration) -> u32 {
         let mut next = self.next.unwrap_or(now);
         let mut due = 0;
 
         while now >= next && due < MAX_CATCH_UP {
             due += 1;
-            next += self.interval;
+            next += interval;
         }
 
         if now >= next {
-            next = now + self.interval;
+            next = now + interval;
         }
 
         self.next = Some(next);

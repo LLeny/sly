@@ -1,0 +1,13 @@
+[package]
+name = "lynx"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+core-model = { path = "../../models/core" }
+holani = { git = "https://github.com/LLeny/holani", tag = "1.0.0" }
+postcard = "1.1.3"
+serde = { version = "1", features = ["derive"] }
+sha1 = "0.10"
+crc32fast = "1"
+tracing = { workspace = true }

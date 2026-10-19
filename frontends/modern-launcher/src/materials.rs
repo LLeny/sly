@@ -50,10 +50,23 @@ const GBA_FINISHES: &[CartridgeFinish] = &[
     },
 ];
 
+const LYNX_FINISHES: &[CartridgeFinish] = &[
+    DEFAULT_FINISH,
+    CartridgeFinish {
+        id: "black",
+        name: "Black plastic",
+        shell: Some(ShellFinish {
+            color: [0.012, 0.012, 0.014],
+            roughness: 0.3,
+        }),
+    },
+];
+
 pub fn cartridge_finishes(system: System) -> &'static [CartridgeFinish] {
     match system {
         System::Snes => SNES_FINISHES,
         System::Gba => GBA_FINISHES,
+        System::Lynx => LYNX_FINISHES,
     }
 }
 

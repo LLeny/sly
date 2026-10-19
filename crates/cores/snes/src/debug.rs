@@ -205,6 +205,10 @@ impl Core for SnesDebug {
         })
     }
 
+    fn display_aspect(&self) -> Option<f32> {
+        self.core.display_aspect()
+    }
+
     fn frame_interval(&self) -> Option<Duration> {
         Some(self::frame_interval(&self.core))
     }

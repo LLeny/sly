@@ -8,6 +8,12 @@ struct Presentation {
 
 @fragment
 fn fs(in: Fullscreen) -> @location(0) vec4<f32> {
-    let pixel = textureSample(framebuffer, pixel_sampler, in.uv);
+    var uv = in.uv;
+    switch u32(presentation.opacity.y + 0.5) {
+        case 1u: { uv = vec2<f32>(uv.y, 1.0 - uv.x); }
+        case 2u: { uv = vec2<f32>(1.0 - uv.y, uv.x); }
+        default: {}
+    }
+    let pixel = textureSample(framebuffer, pixel_sampler, uv);
     return vec4(pixel.rgb, pixel.a * presentation.opacity.x);
 }

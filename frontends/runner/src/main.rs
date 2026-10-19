@@ -7,6 +7,7 @@ use core_model::Core;
 use sdl3::event::Event;
 use sdl3::keyboard::{Keycode, Scancode};
 use sdl3::pixels::PixelFormat;
+use sdl3::render::FRect;
 use sdl3::render::ScaleMode;
 
 const SCALE: u32 = 2;
@@ -297,6 +298,7 @@ fn main() {
         .tv_system
         .map(|system| system.to_string())
         .unwrap_or_else(|| cartridge.system.name().to_string());
+    let rotation = cartridge.display_rotation;
 
     let frame_duration = core.frame_interval().expect("Player requires a paced core");
     let target_fps = 1.0 / frame_duration.as_secs_f64();
@@ -460,13 +462,37 @@ fn main() {
             .update(None, frame.bytes(), frame_width as usize * 4)
             .expect("Failed to update texture");
         canvas.clear();
-        canvas
-            .copy(&texture, None, None)
-            .expect("Failed to copy texture");
+        match rotation {
+            core_model::DisplayRotation::None => {
+                canvas
+                    .copy(&texture, None, None)
+                    .expect("Failed to copy texture");
+            }
+            rotation => {
+                let (win_w, win_h) = canvas.output_size().expect("Failed to get canvas size");
+                let frame_w = frame_width as f32;
+                let frame_h = frame_height as f32;
+                let dst_w = (win_h as f32).min(win_w as f32 * frame_w / frame_h);
+                let dst_h = dst_w * frame_h / frame_w;
+                let dst = FRect::new(
+                    (win_w as f32 - dst_w) / 2.0,
+                    (win_h as f32 - dst_h) / 2.0,
+                    dst_w,
+                    dst_h,
+                );
+                let angle = match rotation {
+                    core_model::DisplayRotation::Rotate90 => 90.0,
+                    _ => 270.0,
+                };
+                canvas
+                    .copy_ex(&texture, None, dst, angle, None, false, false)
+                    .expect("Failed to copy texture");
+            }
+        }
         canvas.present();
 
         if !uncapped {
-            next_frame += frame_duration;
+            next_frame += core.frame_interval().unwrap_or(frame_duration);
             let now = Instant::now();
             if next_frame > now {
                 std::thread::sleep(next_frame - now);

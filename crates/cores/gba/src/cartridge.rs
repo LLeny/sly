@@ -37,6 +37,7 @@ impl Cartridge {
             tv_system: None,
             rom: crate::cartridge_header::identity(&self.rom.data),
             backup: None,
+            display_rotation: core_model::DisplayRotation::None,
         })
     }
 }

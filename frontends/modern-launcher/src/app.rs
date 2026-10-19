@@ -753,8 +753,19 @@ impl App {
             if let Some(frame) = session.frame()
                 && self.frame_sequence != Some(frame.sequence)
             {
-                renderer.update_game(frame.width, frame.height, frame.stride, frame.bytes);
-                self.game_size = Some(([frame.width, frame.height], frame.display_aspect));
+                renderer.update_game(
+                    frame.width,
+                    frame.height,
+                    frame.stride,
+                    frame.bytes,
+                    frame.rotation,
+                );
+                let dimensions = if frame.rotation == core_model::DisplayRotation::None {
+                    [frame.width, frame.height]
+                } else {
+                    [frame.height, frame.width]
+                };
+                self.game_size = Some((dimensions, frame.display_aspect));
                 self.frame_sequence = Some(frame.sequence);
             }
 

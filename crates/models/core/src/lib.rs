@@ -9,7 +9,7 @@ use std::time::Duration;
 pub use cartridge::{Cartridge, RomFile};
 pub use input::ControllerDescriptor;
 pub use metadata::{
-    BackupKind, BackupMemory, CartridgeInfo, GameId, RomIdentity, format_byte_size,
+    BackupKind, BackupMemory, CartridgeInfo, DisplayRotation, GameId, RomIdentity, format_byte_size,
 };
 pub use state::StateError;
 
@@ -37,15 +37,17 @@ pub struct AudioSpec {
 pub enum System {
     Snes,
     Gba,
+    Lynx,
 }
 
 impl System {
-    pub const ALL: [System; 2] = [System::Snes, System::Gba];
+    pub const ALL: [System; 3] = [System::Snes, System::Gba, System::Lynx];
 
     pub const fn slug(self) -> &'static str {
         match self {
             System::Snes => "snes",
             System::Gba => "gba",
+            System::Lynx => "lynx",
         }
     }
 
@@ -53,6 +55,7 @@ impl System {
         match self {
             System::Snes => "SNES",
             System::Gba => "GBA",
+            System::Lynx => "Lynx",
         }
     }
 
@@ -60,6 +63,7 @@ impl System {
         match self {
             System::Snes => "Super Nintendo Entertainment System",
             System::Gba => "Game Boy Advance",
+            System::Lynx => "Atari Lynx",
         }
     }
 
@@ -67,6 +71,7 @@ impl System {
         match self {
             System::Snes => &["sfc", "smc"],
             System::Gba => &["gba"],
+            System::Lynx => &["lnx", "o"],
         }
     }
 }
@@ -249,6 +254,10 @@ pub trait Core {
     }
 
     fn software_frame(&self) -> Option<SoftwareFrame<'_>> {
+        None
+    }
+
+    fn display_aspect(&self) -> Option<f32> {
         None
     }
 

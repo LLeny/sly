@@ -339,6 +339,10 @@ impl<M: MemoryMap> core_model::Core for Snes<M> {
         })
     }
 
+    fn display_aspect(&self) -> Option<f32> {
+        Some(4.0 / 3.0)
+    }
+
     fn save_state(&self) -> Result<Vec<u8>, core_model::StateError> {
         Snes::save_state(self)
     }

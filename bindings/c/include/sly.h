@@ -29,6 +29,7 @@ typedef enum SlyStatus {
 typedef enum SlySystem {
   SLY_SYSTEM_SNES = 0,
   SLY_SYSTEM_GBA = 1,
+  SLY_SYSTEM_LYNX = 2,
 } SlySystem;
 
 typedef enum SlyRegion {
@@ -66,6 +67,12 @@ typedef enum SlyBackupKind {
   SLY_BACKUP_KIND_EEPROM,
   SLY_BACKUP_KIND_FLASH,
 } SlyBackupKind;
+
+typedef enum SlyDisplayRotation {
+  SLY_DISPLAY_ROTATION_NONE = 0,
+  SLY_DISPLAY_ROTATION_ROTATE90 = 1,
+  SLY_DISPLAY_ROTATION_ROTATE270 = 2,
+} SlyDisplayRotation;
 
 typedef enum SlyButton {
   SLY_BUTTON_UP = 0,
@@ -120,6 +127,7 @@ typedef struct SlyCartridgeInfo {
   enum SlyBackupKind backup_kind;
   size_t backup_capacity;
   bool backup_battery_backed;
+  enum SlyDisplayRotation display_rotation;
 } SlyCartridgeInfo;
 
 typedef struct SlyAudioSpec {

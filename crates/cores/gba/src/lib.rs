@@ -290,6 +290,10 @@ impl core_model::Core for Gba {
         })
     }
 
+    fn display_aspect(&self) -> Option<f32> {
+        Some(3.0 / 2.0)
+    }
+
     fn frame_interval(&self) -> Option<Duration> {
         Some(Duration::from_secs_f64(FRAME_CYCLES as f64 / CLOCK_HZ))
     }

@@ -64,6 +64,7 @@ pub fn info(cartridge: &core_model::RomFile) -> CartridgeInfo {
         tv_system: None,
         rom: identity(&cartridge.data),
         backup: None,
+        display_rotation: core_model::DisplayRotation::None,
     }
 }
 

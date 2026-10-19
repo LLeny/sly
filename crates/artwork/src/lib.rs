@@ -16,5 +16,8 @@ pub const fn info(system: System) -> SystemInfo {
         System::Gba => SystemInfo {
             libretro_name: "Nintendo - Game Boy Advance",
         },
+        System::Lynx => SystemInfo {
+            libretro_name: "Atari - Lynx",
+        },
     }
 }

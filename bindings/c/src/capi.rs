@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::ffi::{CString, c_char};
 use std::sync::OnceLock;
 
-use core_model::{BackupKind, CartridgeInfo, StateError, System, TvSystem};
+use core_model::{BackupKind, CartridgeInfo, DisplayRotation, StateError, System, TvSystem};
 
 use crate::runtime::{Runtime, button_from_index, inspect_cartridge, system_from_index};
 
@@ -32,6 +32,15 @@ pub enum SlyStatus {
 pub enum SlySystem {
     Snes = 0,
     Gba = 1,
+    Lynx = 2,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SlyDisplayRotation {
+    None = 0,
+    Rotate90 = 1,
+    Rotate270 = 2,
 }
 
 #[repr(C)]
@@ -112,6 +121,7 @@ pub struct SlyCartridgeInfo {
     pub backup_kind: SlyBackupKind,
     pub backup_capacity: usize,
     pub backup_battery_backed: bool,
+    pub display_rotation: SlyDisplayRotation,
 }
 
 struct SystemMetadata {
@@ -161,6 +171,15 @@ fn binding_system(system: System) -> SlySystem {
     match system {
         System::Snes => SlySystem::Snes,
         System::Gba => SlySystem::Gba,
+        System::Lynx => SlySystem::Lynx,
+    }
+}
+
+pub fn binding_rotation(rotation: DisplayRotation) -> SlyDisplayRotation {
+    match rotation {
+        DisplayRotation::None => SlyDisplayRotation::None,
+        DisplayRotation::Rotate90 => SlyDisplayRotation::Rotate90,
+        DisplayRotation::Rotate270 => SlyDisplayRotation::Rotate270,
     }
 }
 
@@ -194,6 +213,7 @@ fn binding_cartridge(meta: &CartridgeInfo) -> SlyCartridgeInfo {
         backup_kind: binding_backup(meta.backup.map(|backup| backup.kind)),
         backup_capacity: meta.backup.map_or(0, |backup| backup.capacity),
         backup_battery_backed: meta.backup.is_some_and(|backup| backup.battery_backed),
+        display_rotation: binding_rotation(meta.display_rotation),
     }
 }
 

@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/cores/gba",
     "crates/cores/snes",
+    "crates/cores/lynx",
 
     "crates/models/core",
     "crates/models/debugger",

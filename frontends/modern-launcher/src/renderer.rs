@@ -217,6 +217,15 @@ pub struct Renderer {
     pub last_draws: usize,
     pub last_upload_bytes: usize,
     game_texture: Option<(Texture, [u32; 2])>,
+    game_rotation: core_model::DisplayRotation,
+}
+
+fn rotate_code(rotation: core_model::DisplayRotation) -> f32 {
+    match rotation {
+        core_model::DisplayRotation::None => 0.0,
+        core_model::DisplayRotation::Rotate90 => 1.0,
+        core_model::DisplayRotation::Rotate270 => 2.0,
+    }
 }
 
 impl Renderer {
@@ -568,7 +577,9 @@ impl Renderer {
             ModelKind::JapaneseBoxProxy,
             ModelKind::GbaBox,
             ModelKind::GbaJapaneseBox,
+            ModelKind::LynxBox,
             ModelKind::GbaCartridge,
+            ModelKind::LynxCartridge,
             ModelKind::UsCartridge,
             ModelKind::JpPalCartridge,
         ] {
@@ -634,6 +645,7 @@ impl Renderer {
             last_draws: 0,
             last_upload_bytes: 0,
             game_texture: None,
+            game_rotation: core_model::DisplayRotation::None,
         })
     }
 
@@ -798,7 +810,16 @@ impl Renderer {
         Ok(true)
     }
 
-    pub fn update_game(&mut self, width: u32, height: u32, stride: u32, bytes: &[u8]) {
+    pub fn update_game(
+        &mut self,
+        width: u32,
+        height: u32,
+        stride: u32,
+        bytes: &[u8],
+        rotation: core_model::DisplayRotation,
+    ) {
+        self.game_rotation = rotation;
+
         if self
             .game_texture
             .as_ref()
@@ -1074,7 +1095,12 @@ impl Renderer {
             self.queue.write_buffer(
                 &self.game_uniform,
                 0,
-                bytemuck::cast_slice(&[game.opacity.clamp(0.0, 1.0), 0.0, 0.0, 0.0]),
+                bytemuck::cast_slice(&[
+                    game.opacity.clamp(0.0, 1.0),
+                    rotate_code(self.game_rotation),
+                    0.0,
+                    0.0,
+                ]),
             );
         }
 

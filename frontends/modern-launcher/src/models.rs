@@ -11,16 +11,22 @@ pub enum ModelKind {
     JapaneseBoxProxy,
     GbaBox,
     GbaJapaneseBox,
+    LynxBox,
     UsCartridge,
     JpPalCartridge,
     GbaCartridge,
+    LynxCartridge,
 }
 
 impl ModelKind {
     pub const fn is_box(self) -> bool {
         matches!(
             self,
-            Self::WesternBox | Self::JapaneseBoxProxy | Self::GbaBox | Self::GbaJapaneseBox
+            Self::WesternBox
+                | Self::JapaneseBoxProxy
+                | Self::GbaBox
+                | Self::GbaJapaneseBox
+                | Self::LynxBox
         )
     }
 }
@@ -162,6 +168,9 @@ impl Model {
             (ModelKind::GbaJapaneseBox, _) => {
                 include_bytes!("../../../vendor/models/gba-japanese-box.glb")
             }
+            (ModelKind::LynxBox, _) => {
+                include_bytes!("../../../vendor/models/lynx-western-box.glb")
+            }
             (ModelKind::UsCartridge, ModelDetail::Low) => {
                 include_bytes!("../../../vendor/models/snes-us-low.glb")
             }
@@ -176,6 +185,9 @@ impl Model {
             }
             (ModelKind::GbaCartridge, _) => {
                 include_bytes!("../../../vendor/models/gba-cartridge-low.glb")
+            }
+            (ModelKind::LynxCartridge, _) => {
+                include_bytes!("../../../vendor/models/lynx-cartridge.glb")
             }
         };
 
@@ -646,7 +658,9 @@ fn material_slot(name: &str) -> Option<MaterialSlot> {
         "Western_Box_Spine" => MaterialSlot::BoxSpine,
         "Western_Box_Edges" => MaterialSlot::BoxEdges,
         "PAL_Label" | "NTSC_Label" | "GBA_Label" => MaterialSlot::CartridgeLabel,
-        "PAL_Purchased_Shell" | "NTSC_Purchased_Shell" | "GBA_Shell" => MaterialSlot::Shell,
+        "PAL_Purchased_Shell" | "NTSC_Purchased_Shell" | "GBA_Shell" | "Lynx_Shell" => {
+            MaterialSlot::Shell
+        }
         "PAL_Purchased_Hardware" | "NTSC_Purchased_Hardware" | "GBA_Hardware" | "GBA_Chip" => {
             MaterialSlot::Hardware
         }
@@ -670,6 +684,7 @@ impl PresentationProfile {
             }
             ModelKind::GbaBox => ([125.0, 125.0, 25.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
             ModelKind::GbaJapaneseBox => ([138.0, 88.0, 22.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]),
+            ModelKind::LynxBox => ([132.0, 188.0, 28.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
             _ => unreachable!("packaging must use a box model"),
         };
 
@@ -691,6 +706,12 @@ impl PresentationProfile {
                     Some([57.000015, 32.958633, 6.226722]),
                     [0.0, 1.1758879e-5, -8.28295e-6],
                     Some([2.7939677e-9, -0.0015970371, 0.0018489606]),
+                    0.0,
+                ),
+                Some(ModelKind::LynxCartridge) => (
+                    Some([57.25, 59.0, 7.0]),
+                    [0.0; 3],
+                    Some([0.0, 0.0, 0.0035]),
                     0.0,
                 ),
                 None => (None, [0.0; 3], None, 0.0),
@@ -732,6 +753,10 @@ pub fn profiles() -> Result<Profiles> {
             (System::Gba, Europe, GbaBox, Some(GbaCartridge)),
             (System::Gba, Japan, GbaJapaneseBox, Some(GbaCartridge)),
             (System::Gba, Unknown, GbaBox, Some(GbaCartridge)),
+            (System::Lynx, NorthAmerica, LynxBox, Some(LynxCartridge)),
+            (System::Lynx, Europe, LynxBox, Some(LynxCartridge)),
+            (System::Lynx, Japan, LynxBox, Some(LynxCartridge)),
+            (System::Lynx, Unknown, LynxBox, Some(LynxCartridge)),
         ]
         .into_iter()
         .map(|(system, market, box_model, cartridge_model)| {

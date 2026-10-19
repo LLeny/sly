@@ -258,6 +258,7 @@ pub fn info(rom: &core_model::RomFile, sram: &[u8]) -> Result<CartridgeInfo, Sne
             capacity: sram.len(),
             battery_backed: true,
         }),
+        display_rotation: core_model::DisplayRotation::None,
     })
 }
 

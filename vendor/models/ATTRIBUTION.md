@@ -3,3 +3,4 @@
 - Source: https://sketchfab.com/3d-models/snes-super-mario-world-box-18c44fb2ca494e95b62739da0c8d2a6d
 - Author: https://sketchfab.com/rennau
 - License: Creative Commons Attribution 4.0, https://creativecommons.org/licenses/by/4.0/
+`lynx-cartridge.glb` is derived from "AtariGamer_Lynx_CurvedCart.stl" by AtariGamer (https://atarigamer.com), converted to glTF.

@@ -52,3 +52,4 @@ macro_rules! catalog {
 
 pub(super) const SNES: Sources = catalog!("Nintendo - Super Nintendo Entertainment System");
 pub(super) const GBA: Sources = catalog!("Nintendo - Game Boy Advance");
+pub(super) const LYNX: Sources = catalog!("Atari - Lynx");

@@ -53,6 +53,12 @@ Color means playable or work-in-progress. Click on a logo to see the respective 
     <td><img src="assets/systems/nds.svg" width="240" alt="Nintendo DS"></td>
     <td><img src="assets/systems/3ds.svg" width="240" alt="Nintendo 3DS"></td>
   </tr>
+  <tr>
+    <td><img src="assets/systems/lynx.svg" width="240" alt="Atari Lynx"></td>
+    <td></td>
+    <td></td>
+    <td></td>
+  </tr>
 </table>
 
 ## Features
@@ -96,10 +102,11 @@ Color means playable or work-in-progress. Click on a logo to see the respective 
 
 ## Usage
 
-| System | File types     |
-| ------ | -------------- |
-| SNES   | `.sfc`, `.smc` |
-| GBA    | `.gba`         |
+| System     | File types     |
+| ---------- | -------------- |
+| SNES       | `.sfc`, `.smc` |
+| GBA        | `.gba`         |
+| Atari Lynx | `.lnx`         |
 
 How you load games depends on the frontend:
 

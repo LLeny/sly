@@ -38,6 +38,14 @@ pub struct BackupMemory {
     pub battery_backed: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DisplayRotation {
+    #[default]
+    None,
+    Rotate90,
+    Rotate270,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CartridgeInfo {
     pub system: System,
@@ -46,6 +54,7 @@ pub struct CartridgeInfo {
     pub tv_system: Option<TvSystem>,
     pub rom: RomIdentity,
     pub backup: Option<BackupMemory>,
+    pub display_rotation: DisplayRotation,
 }
 
 impl CartridgeInfo {

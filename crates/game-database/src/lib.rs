@@ -99,10 +99,12 @@ pub fn lookup(system: System, identity: &RomIdentity) -> GameMeta {
 fn database(system: System) -> &'static GameDb {
     static SNES: OnceLock<GameDb> = OnceLock::new();
     static GBA: OnceLock<GameDb> = OnceLock::new();
+    static LYNX: OnceLock<GameDb> = OnceLock::new();
 
     match system {
         System::Snes => SNES.get_or_init(|| GameDb::from_sources(&sources::SNES)),
         System::Gba => GBA.get_or_init(|| GameDb::from_sources(&sources::GBA)),
+        System::Lynx => LYNX.get_or_init(|| GameDb::from_sources(&sources::LYNX)),
     }
 }
 

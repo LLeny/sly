@@ -222,6 +222,10 @@ impl core_model::Core for GbaDebug {
         self.core.software_frame()
     }
 
+    fn display_aspect(&self) -> Option<f32> {
+        self.core.display_aspect()
+    }
+
     fn frame_interval(&self) -> Option<Duration> {
         self.core.frame_interval()
     }

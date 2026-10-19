@@ -34,6 +34,8 @@ mod ffi {
         tv_system: u8,
         /// 0 = none, 1 = SRAM, 2 = FRAM, 3 = EEPROM, 4 = flash.
         backup_kind: u8,
+        /// 0 = none, 1 = 90°, 2 = 270°.
+        display_rotation: u8,
     }
 
     #[derive(Clone, Debug)]
@@ -47,6 +49,7 @@ mod ffi {
     enum System {
         Snes = 0,
         Gba = 1,
+        Lynx = 2,
     }
 
     /// Values match `SlyButton` in the C API.
@@ -140,6 +143,7 @@ fn binding_system(system: CoreSystem) -> ffi::System {
     match system {
         CoreSystem::Snes => ffi::System::Snes,
         CoreSystem::Gba => ffi::System::Gba,
+        CoreSystem::Lynx => ffi::System::Lynx,
     }
 }
 
@@ -194,6 +198,7 @@ fn binding_cartridge_info(meta: &core_model::CartridgeInfo) -> ffi::CartridgeInf
         rom_size: meta.rom.len,
         tv_system: sly::capi::binding_tv(meta.tv_system) as u8,
         backup_kind: sly::capi::binding_backup(meta.backup.map(|backup| backup.kind)) as u8,
+        display_rotation: sly::capi::binding_rotation(meta.display_rotation) as u8,
     }
 }
 
