@@ -1,4 +1,6 @@
-use core_model::{AudioSpec, CartridgeInfo, ControllerDescriptor, Core, StateError, System};
+use core_model::{
+    AudioSpec, CartridgeInfo, ControllerDescriptor, Core, RomFile, StateError, System,
+};
 use storage::BackupPolicy;
 
 pub use core_model::Button;
@@ -71,7 +73,8 @@ pub struct Runtime {
 
 impl Runtime {
     pub fn new(system: System, rom: Vec<u8>) -> Result<Self, String> {
-        let core = core_loader::load(system, rom).map_err(|error| error.to_string())?;
+        let cartridge = RomFile::new().data(rom);
+        let core = core_loader::load(system, cartridge).map_err(|error| error.to_string())?;
         let meta = core
             .cartridge_info()
             .ok_or("loaded core did not report cartridge metadata")?;

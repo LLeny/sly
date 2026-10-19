@@ -1,69 +1,65 @@
-use std::fmt::Write;
+use core_model::{CartridgeInfo, Region, RomFile};
 
-use core_model::{CartridgeInfo, Region, RomIdentity};
-use sha1::{Digest, Sha1};
-
-use crate::error::GbaError;
+use crate::cartridge_header::CartridgeHeader;
 
 pub struct Cartridge {
-    rom: Vec<u8>,
+    rom: RomFile,
+    header: CartridgeHeader,
 }
 
 impl Cartridge {
-    pub fn new(rom: Vec<u8>) -> Result<Self, GbaError> {
-        Ok(Self { rom })
-    }
-
-    pub(crate) fn rom(&self) -> &[u8] {
-        &self.rom
-    }
-
-    pub fn entry_point(&self) -> u32 {
-        u32::from_le_bytes(self.rom[0x34..0x38].try_into().unwrap())
+    pub fn load(rom: RomFile) -> Self {
+        let header = CartridgeHeader::parse(&rom.data);
+        Self { rom, header }
     }
 
     pub fn title(&self) -> String {
-        String::from_utf8_lossy(&self.rom[0xA0..0xAC])
-            .trim_end_matches('\0')
-            .to_string()
+        self.header.title()
     }
 
-    pub fn info(&self) -> CartridgeInfo {
-        CartridgeInfo {
+    pub fn region(&self) -> Option<Region> {
+        self.header.region()
+    }
+
+    pub fn header(&self) -> &CartridgeHeader {
+        &self.header
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.rom.data
+    }
+
+    pub fn info(&self) -> Option<CartridgeInfo> {
+        Some(core_model::CartridgeInfo {
             system: core_model::System::Gba,
-            title: self.title(),
-            region: self.region(),
+            title: self.header.title(),
+            region: self.header.region(),
             tv_system: None,
-            rom: self::identity(&self.rom),
+            rom: crate::cartridge_header::identity(&self.rom.data),
             backup: None,
-        }
+        })
     }
+}
 
-    fn region(&self) -> Option<Region> {
-        match self.rom[0xAF] {
-            b'J' => Some(Region::Japan),
-            b'E' => Some(Region::NorthAmerica),
-            b'P' => Some(Region::Europe),
-            b'D' => Some(Region::Germany),
-            b'F' => Some(Region::France),
-            b'I' => Some(Region::Italy),
-            b'S' => Some(Region::Spain),
-            _ => None,
+impl Default for Cartridge {
+    fn default() -> Self {
+        Self {
+            rom: RomFile::new(),
+            header: CartridgeHeader::default(),
         }
     }
 }
 
-pub fn identity(rom: &[u8]) -> RomIdentity {
-    let sha1 = Sha1::digest(rom)
-        .iter()
-        .fold(String::with_capacity(40), |mut hex, byte| {
-            write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
-            hex
-        });
+impl core_model::Cartridge for Cartridge {
+    fn data(&self) -> &[u8] {
+        self.data()
+    }
 
-    RomIdentity {
-        sha1,
-        crc32: crc32fast::hash(rom),
-        len: rom.len(),
+    fn filename(&self) -> &str {
+        &self.rom.filename
+    }
+
+    fn info(&self) -> Option<CartridgeInfo> {
+        self.info()
     }
 }

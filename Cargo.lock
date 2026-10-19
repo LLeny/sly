@@ -1676,7 +1676,7 @@ dependencies = [
 
 [[package]]
 name = "core-loader"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "core-model",
  "debugger-model",
@@ -1687,7 +1687,7 @@ dependencies = [
 
 [[package]]
 name = "core-model"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -2741,7 +2741,7 @@ dependencies = [
 
 [[package]]
 name = "gba"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chapa",
  "chipi-macros",
@@ -5720,6 +5720,7 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 name = "playground"
 version = "0.1.0"
 dependencies = [
+ "core-model",
  "snes",
  "tracing",
  "tracing-subscriber",
@@ -7301,7 +7302,7 @@ dependencies = [
 
 [[package]]
 name = "snes"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chapa",
  "chipi-macros",
@@ -7741,6 +7742,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "core-model",
  "gba",
  "owo-colors",
  "serde",

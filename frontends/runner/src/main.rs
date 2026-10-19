@@ -286,7 +286,8 @@ fn main() {
 
     let rom = std::fs::read(&path).expect("Failed to read ROM");
     let system = core_loader::system_for_path(&path).expect("Unsupported ROM file");
-    let mut core = core_loader::load(system, rom).expect("Failed to load cartridge");
+    let cartridge = core_model::RomFile::new().data(rom).filename(path);
+    let mut core = core_loader::load(system, cartridge).expect("Failed to load cartridge");
     let cartridge = core
         .cartridge_info()
         .expect("Loaded core must provide cartridge metadata");

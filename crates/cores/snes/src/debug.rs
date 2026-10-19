@@ -37,12 +37,12 @@ use registers::*;
 use run::{EVENT_IRQ, EVENT_NMI, EVENT_SCANLINE, EventBaseline, EventWatch};
 use video::*;
 
+use crate::Snes;
 use crate::apu::{Apu, spc700};
 use crate::callstack::CallFrame;
-use crate::cartridge::{MapMode, Speed};
+use crate::cartridge_header::{CartridgeHeader, MapMode, Speed};
 use crate::cpu::disasm::{Disasm, FlowKind as CoreFlow, InstructionClass};
 use crate::mmio::{Address, MemKind, MemoryAccess, TrackMode};
-use crate::{Cartridge, Snes};
 
 const WRAM_SIZE: u32 = 0x2_0000;
 const PPU_BASE: u32 = 0x2100;
@@ -71,21 +71,34 @@ pub struct SnesDebug {
 }
 
 impl SnesDebug {
-    pub fn new(cart: Cartridge, label: impl Into<Arc<str>>, cover: Option<Arc<str>>) -> Self {
-        let mut cartridge = self::cartridge_view(&cart);
-        cartridge.cover = cover;
+    pub fn new(
+        cart: core_model::RomFile,
+        label: impl Into<Arc<str>>,
+        cover: Option<Arc<str>>,
+    ) -> Self {
+        let cartridge = crate::Cartridge::load(cart).unwrap_or_default();
+        Self::new_loaded(cartridge, label, cover)
+    }
+
+    fn new_loaded(
+        cartridge: crate::Cartridge,
+        label: impl Into<Arc<str>>,
+        cover: Option<Arc<str>>,
+    ) -> Self {
+        let header = cartridge.header();
+
+        let mut cart_view = self::cartridge_view(&cartridge);
+        cart_view.cover = cover;
 
         let segments = vec![
-            self::mapper_name(&cart).into(),
-            crate::cartridge::tv_system(cart.region())
-                .to_string()
-                .into(),
-            core_model::format_byte_size(cart.rom.len()).into(),
+            self::mapper_name(header, cartridge.data()).into(),
+            header.tv_system().to_string().into(),
+            core_model::format_byte_size(cartridge.data().len()).into(),
         ];
 
         let mut debug = Self {
-            core: Snes::new(cart),
-            cartridge,
+            core: Snes::with_mmu(crate::Mmio::new(cartridge)),
+            cartridge: cart_view,
             system: "SNES".into(),
             label: label.into(),
             segments,
@@ -113,11 +126,11 @@ impl SnesDebug {
     }
 
     fn has_gsu(&self) -> bool {
-        self.core.mmu.cartridge.coprocessor() == crate::cartridge::Coprocessor::SuperFx
+        self.core.mmu.cartridge.coprocessor() == crate::cartridge_header::Coprocessor::SuperFx
     }
 
     fn has_sa1(&self) -> bool {
-        self.core.mmu.cartridge.coprocessor() == crate::cartridge::Coprocessor::Sa1
+        self.core.mmu.cartridge.coprocessor() == crate::cartridge_header::Coprocessor::Sa1
     }
 
     fn pc_of(&self, cpu: &str) -> u32 {
@@ -135,6 +148,14 @@ impl SnesDebug {
 }
 
 impl Core for SnesDebug {
+    fn load_cartridge(&mut self, cart: core_model::RomFile) -> Result<(), core_model::CoreError> {
+        let cartridge = crate::Cartridge::load(cart)
+            .map_err(|error| core_model::CartridgeError::InvalidRom(error.to_string()))?;
+        let (label, cover) = (self.label.clone(), self.cartridge.cover.clone());
+        *self = SnesDebug::new_loaded(cartridge, label, cover);
+        Ok(())
+    }
+
     fn cartridge_info(&self) -> Option<core_model::CartridgeInfo> {
         self.core.cartridge_info()
     }

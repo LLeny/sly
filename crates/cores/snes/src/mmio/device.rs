@@ -1,5 +1,6 @@
+use crate::Bus;
+use crate::cartridge_header::CartridgeHeader;
 use crate::mmio::{MemoryMap, OPEN_BUS};
-use crate::{Bus, Cartridge};
 
 pub const IO_BASE: u16 = 0x2000;
 pub const IO_SIZE: usize = 0x4000;
@@ -137,9 +138,9 @@ impl<M: MemoryMap> Default for DeviceTable<M> {
 }
 
 impl<M: MemoryMap> DeviceTable<M> {
-    pub fn for_cartridge(cartridge: &Cartridge) -> Self {
+    pub fn for_cartridge(header: &CartridgeHeader) -> Self {
         let mut table = Self::default();
-        table.install(&crate::mmio::coprocessor_devices(cartridge));
+        table.install(&crate::mmio::coprocessor_devices(header));
         table
     }
 

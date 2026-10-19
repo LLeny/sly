@@ -1,3 +1,4 @@
+mod cartridge;
 mod input;
 mod metadata;
 pub mod state;
@@ -5,11 +6,26 @@ pub mod state;
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use cartridge::{Cartridge, RomFile};
 pub use input::ControllerDescriptor;
 pub use metadata::{
     BackupKind, BackupMemory, CartridgeInfo, GameId, RomIdentity, format_byte_size,
 };
 pub use state::StateError;
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CartridgeError {
+    #[error("invalid ROM: {0}")]
+    InvalidRom(String),
+    #[error("cartridge is not compatible with this core")]
+    Incompatible,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CoreError {
+    #[error(transparent)]
+    Cartridge(#[from] CartridgeError),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AudioSpec {
@@ -206,6 +222,8 @@ impl<'a> SoftwareFrame<'a> {
 }
 
 pub trait Core {
+    fn load_cartridge(&mut self, rom: RomFile) -> Result<(), CoreError>;
+
     fn reset(&mut self);
     fn step(&mut self);
     fn run_frame(&mut self);

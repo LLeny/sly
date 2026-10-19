@@ -1,5 +1,5 @@
 use crate::Cartridge;
-use crate::cartridge::{Coprocessor, MapMode};
+use crate::cartridge_header::{CartridgeHeader, Coprocessor, MapMode};
 use crate::mmio::{Address, AddressSpace, device};
 use crate::sa1::{SNES_IRAM_END, SNES_IRAM_START, Sa1};
 
@@ -65,7 +65,9 @@ fn map_cartridge(cartridge: &Cartridge, sa1: Option<&Sa1>, addr: Address) -> Add
             0x0000..=0x1FFF => AddressSpace::Wram(usize::from(offset)), // 8 KiB WRAM
             // PPU/APU/CPU/DMA MMIO, minus the SA-1 I-RAM window carved out of it
             device::IO_BASE..=device::IO_END => match offset {
-                SNES_IRAM_START..=SNES_IRAM_END if cartridge.coprocessor() == Coprocessor::Sa1 => {
+                SNES_IRAM_START..=SNES_IRAM_END
+                    if cartridge.header().coprocessor() == Coprocessor::Sa1 =>
+                {
                     AddressSpace::Iram(usize::from(offset - SNES_IRAM_START))
                 }
                 _ => AddressSpace::Io(offset),
@@ -77,7 +79,7 @@ fn map_cartridge(cartridge: &Cartridge, sa1: Option<&Sa1>, addr: Address) -> Add
 }
 
 fn cart_space(cartridge: &Cartridge, sa1: Option<&Sa1>, bank: u8, offset: u16) -> AddressSpace {
-    match cartridge.coprocessor() {
+    match cartridge.header().coprocessor() {
         Coprocessor::SuperFx => crate::superfx::map::cart_space(cartridge, bank, offset),
         Coprocessor::Sa1 => crate::sa1::map::cart_space(cartridge, sa1, bank, offset),
         _ => self::standard_cart_space(cartridge, bank, offset),
@@ -85,7 +87,7 @@ fn cart_space(cartridge: &Cartridge, sa1: Option<&Sa1>, bank: u8, offset: u16) -
 }
 
 fn standard_cart_space(cartridge: &Cartridge, bank: u8, offset: u16) -> AddressSpace {
-    if let Some(space) = self::map_sram(cartridge, bank, offset) {
+    if let Some(space) = self::map_sram(cartridge.header(), bank, offset) {
         return space;
     }
 
@@ -96,15 +98,15 @@ fn standard_cart_space(cartridge: &Cartridge, bank: u8, offset: u16) -> AddressS
 }
 
 pub(crate) fn rom_index(cartridge: &Cartridge, index: usize) -> usize {
-    match cartridge.rom_mask() {
+    match cartridge.header().rom_mask() {
         Some(mask) => index & mask,
-        None => index % cartridge.rom.len(),
+        None => index % cartridge.data().len(),
     }
 }
 
 /// Translate the standard SRAM windows.
-fn map_sram(cartridge: &Cartridge, bank: u8, offset: u16) -> Option<AddressSpace> {
-    let raw_index = match cartridge.map_mode()? {
+fn map_sram(header: &CartridgeHeader, bank: u8, offset: u16) -> Option<AddressSpace> {
+    let raw_index = match header.map_mode()? {
         MapMode::LoRom if matches!(bank, 0x70..=0x7D | 0xF0..=0xFF) && offset <= 0x7FFF => {
             (((bank & 0x0F) as usize) << 15) | offset as usize
         }
@@ -116,7 +118,7 @@ fn map_sram(cartridge: &Cartridge, bank: u8, offset: u16) -> Option<AddressSpace
         _ => return None,
     };
 
-    Some(AddressSpace::Sram(cartridge.sram_index(raw_index)?))
+    Some(AddressSpace::Sram(header.sram_index(raw_index)?))
 }
 
 /// Waitstates within the system banks $00-$3F and $80-$BF.
@@ -141,7 +143,7 @@ fn rom_speed(fastrom: bool) -> u64 {
 
 /// Translate a cartridge address to a ROM byte index per the map mode.
 fn map_rom(cartridge: &Cartridge, bank: u8, offset: u16) -> AddressSpace {
-    let Some(map_mode) = cartridge.map_mode() else {
+    let Some(map_mode) = cartridge.header().map_mode() else {
         return AddressSpace::Unmapped;
     };
 

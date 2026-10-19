@@ -13,8 +13,9 @@ pub(super) fn frame_interval(snes: &Snes) -> Duration {
     Duration::from_nanos(nanos as u64)
 }
 
-pub(super) fn cartridge_view(cart: &Cartridge) -> CartridgeView {
-    let speed = match cart.memory_map() {
+pub(super) fn cartridge_view(cart: &crate::Cartridge) -> CartridgeView {
+    let header = cart.header();
+    let speed = match header.memory_map(cart.data()) {
         Ok(mm) => match mm.speed() {
             Speed::Fast => "Fast (3.58 MHz)",
             Speed::Slow => "Slow (2.68 MHz)",
@@ -23,16 +24,16 @@ pub(super) fn cartridge_view(cart: &Cartridge) -> CartridgeView {
     };
 
     CartridgeView {
-        title: cart.title().into(),
+        title: header.title().into(),
         details: StructuredView {
             sections: vec![Section {
                 rows: vec![
-                    Field::new("Mapper", self::mapper_name(cart)).accented(),
+                    Field::new("Mapper", self::mapper_name(header, cart.data())).accented(),
                     Field::new("Speed", speed),
-                    Field::new("Region", cart.region().to_string()),
-                    Field::new("ROM size", core_model::format_byte_size(cart.rom.len())),
-                    Field::new("SRAM size", core_model::format_byte_size(cart.sram.len())),
-                    Field::new("Header", format!("${:06X}", cart.header_offset())),
+                    Field::new("Region", header.region().to_string()),
+                    Field::new("ROM size", core_model::format_byte_size(cart.data().len())),
+                    Field::new("SRAM size", core_model::format_byte_size(header.sram_size)),
+                    Field::new("Header", format!("${:06X}", header.header_offset())),
                 ]
                 .into_iter()
                 .map(Row::Field)
@@ -45,8 +46,8 @@ pub(super) fn cartridge_view(cart: &Cartridge) -> CartridgeView {
     }
 }
 
-pub(super) fn mapper_name(cart: &Cartridge) -> &'static str {
-    match cart.memory_map() {
+pub(super) fn mapper_name(header: &CartridgeHeader, rom: &[u8]) -> &'static str {
+    match header.memory_map(rom) {
         Ok(mm) => match mm.map_mode() {
             MapMode::LoRom => "LoROM",
             MapMode::HiRom => "HiROM",

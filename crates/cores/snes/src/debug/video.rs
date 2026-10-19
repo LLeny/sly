@@ -693,7 +693,7 @@ impl VideoDebug for SnesDebug {
                         .unwrap_or((fx.scbr, fx.scmr.raw(), fx.por.raw()));
 
                 let mut hash = DefaultHasher::new();
-                hash.write(&self.core.mmu.cartridge.sram);
+                hash.write(self.core.mmu.cartridge.sram());
                 hash.write(&[base, mode, plot]);
                 hash.write_u64(self.palette_key());
                 hash.finish()

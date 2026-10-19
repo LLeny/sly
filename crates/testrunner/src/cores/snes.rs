@@ -2,7 +2,7 @@ use snes::apu::spc700::{self, Flags as PswFlags};
 use snes::apu::{Apu, ApuMap, Region};
 use snes::cpu::Flags;
 use snes::mmio::{Address, AddressSpace};
-use snes::{Cartridge, MemoryMap, Mmio, Snes};
+use snes::{MemoryMap, Mmio, Snes};
 
 use crate::harness::{Regs, State, TestCore};
 
@@ -12,7 +12,7 @@ pub struct FlatMap;
 impl MemoryMap for FlatMap {
     const WRAM_SIZE: usize = 0x100_0000;
 
-    fn map(&self, _cartridge: &Cartridge, addr: Address) -> AddressSpace {
+    fn map(&self, _cartridge: &snes::Cartridge, addr: Address) -> AddressSpace {
         AddressSpace::Wram(addr.as_24bit() as usize)
     }
 }
@@ -23,7 +23,8 @@ pub struct SnesCpu {
 
 impl SnesCpu {
     pub fn new() -> Self {
-        let cartridge = Cartridge::new(vec![0; 0x1_0000]).expect("stub cartridge");
+        let cartridge = snes::Cartridge::load(core_model::RomFile::new().data(vec![0; 0x1_0000]))
+            .expect("stub cartridge");
         Self {
             snes: Snes::with_mmu(Mmio::with_map(cartridge, FlatMap)),
         }

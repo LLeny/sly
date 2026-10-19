@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Bus;
 use crate::apu::SPC700_CLOCK;
-use crate::cartridge::TvSystem;
+use crate::cartridge_header::TvSystem;
 use crate::mmio::MemoryMap;
 
 pub(crate) const MASTER_CLOCKS_PER_SCANLINE: u64 = 1364;

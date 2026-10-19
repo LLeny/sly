@@ -1,4 +1,5 @@
 use crate::Cartridge;
+use crate::cartridge_header::CartridgeHeader;
 use crate::mmio::map::rom_index;
 use crate::mmio::{Address, AddressSpace, CartRegion};
 
@@ -9,7 +10,7 @@ pub fn cart_space(cartridge: &Cartridge, bank: u8, offset: u16) -> AddressSpace 
     match bank {
         0x00..=0x3F | 0x80..=0xBF => match offset {
             RAM_WINDOW_START..=RAM_WINDOW_END => {
-                self::ram(cartridge, (offset - RAM_WINDOW_START) as usize)
+                self::ram(cartridge.header(), (offset - RAM_WINDOW_START) as usize)
             }
             _ => self::rom(
                 cartridge,
@@ -20,9 +21,10 @@ pub fn cart_space(cartridge: &Cartridge, bank: u8, offset: u16) -> AddressSpace 
             cartridge,
             (((bank & 0x1F) as usize) << 16) | offset as usize,
         ),
-        0x60..=0x7D | 0xE0..=0xFF => {
-            self::ram(cartridge, ((bank as usize) << 16) | offset as usize)
-        }
+        0x60..=0x7D | 0xE0..=0xFF => self::ram(
+            cartridge.header(),
+            ((bank as usize) << 16) | offset as usize,
+        ),
         _ => AddressSpace::Unmapped,
     }
 }
@@ -31,8 +33,8 @@ fn rom(cartridge: &Cartridge, index: usize) -> AddressSpace {
     AddressSpace::Cart(CartRegion::Rom, rom_index(cartridge, index))
 }
 
-fn ram(cartridge: &Cartridge, index: usize) -> AddressSpace {
-    match cartridge.sram_index(index) {
+fn ram(header: &CartridgeHeader, index: usize) -> AddressSpace {
+    match header.sram_index(index) {
         Some(index) => AddressSpace::Cart(CartRegion::Ram, index),
         None => AddressSpace::Unmapped,
     }
@@ -43,7 +45,7 @@ pub(crate) fn gsu_space(cartridge: &Cartridge, addr: Address) -> AddressSpace {
     match addr.bank() {
         0x00..=0x3F => self::rom(cartridge, (bank << 15) | (offset & 0x7FFF)),
         0x40..=0x5F => self::rom(cartridge, ((bank & 0x1F) << 16) | offset),
-        0x70 | 0x71 => self::ram(cartridge, ((bank & 1) << 16) | offset),
+        0x70 | 0x71 => self::ram(cartridge.header(), ((bank & 1) << 16) | offset),
         _ => AddressSpace::Unmapped,
     }
 }

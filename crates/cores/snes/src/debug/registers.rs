@@ -192,8 +192,8 @@ pub(super) fn dma_view(core: &Snes) -> StructuredView {
 }
 
 pub(super) fn mmio_view(core: &Snes) -> MmioView {
-    let has_gsu = core.mmu.cartridge.coprocessor() == crate::cartridge::Coprocessor::SuperFx;
-    let has_sa1 = core.mmu.cartridge.coprocessor() == crate::cartridge::Coprocessor::Sa1;
+    let has_gsu = core.mmu.cartridge.coprocessor() == crate::cartridge_header::Coprocessor::SuperFx;
+    let has_sa1 = core.mmu.cartridge.coprocessor() == crate::cartridge_header::Coprocessor::Sa1;
 
     let mut symbols: Vec<_> = crate::mmio::symbols()
         .map(|symbol| (self::mmio_component(symbol.addr), symbol))

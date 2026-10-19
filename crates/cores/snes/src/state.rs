@@ -1,10 +1,11 @@
 use core_model::System;
 use core_model::state::{Envelope, StateError, Thumbnail};
 
+use crate::cartridge_header;
 use crate::mmio::MemoryMap;
 use crate::{Snes, ppu};
 
-const PAYLOAD_VERSION: u16 = 1;
+const PAYLOAD_VERSION: u16 = 3;
 
 impl<M: MemoryMap> Snes<M> {
     pub fn save_state(&self) -> Result<Vec<u8>, StateError> {
@@ -16,8 +17,8 @@ impl<M: MemoryMap> Snes<M> {
 
         Envelope {
             system: System::Snes,
-            rom_crc32: cartridge.rom_crc32(),
-            rom_len: cartridge.rom.len() as u32,
+            rom_crc32: cartridge_header::identity(cartridge.data()).crc32,
+            rom_len: cartridge.data().len() as u32,
             payload_version: PAYLOAD_VERSION,
             thumbnail: Some(Thumbnail {
                 width: ppu::SCREEN_WIDTH,
@@ -38,15 +39,16 @@ impl<M: MemoryMap> Snes<M> {
         envelope.check_payload_version(PAYLOAD_VERSION)?;
 
         let cartridge = &self.mmu.cartridge;
-        envelope.check_rom(cartridge.rom_crc32(), cartridge.rom.len())?;
+        envelope.check_rom(
+            cartridge_header::identity(cartridge.data()).crc32,
+            cartridge.data().len(),
+        )?;
 
         let mut restored: Snes<M> = postcard::from_bytes(envelope.payload)
             .map_err(|err| StateError::Corrupt(format!("decoding state: {err}")))?;
 
-        restored
-            .mmu
-            .cartridge
-            .restore_rom_from(&mut self.mmu.cartridge);
+        let rom = self.mmu.cartridge.take_rom();
+        restored.mmu.cartridge.set_rom(rom);
 
         restored.rebuild_devices();
         restored
@@ -63,8 +65,8 @@ impl<M: MemoryMap> Snes<M> {
             return None;
         }
 
-        let sram = &self.mmu.cartridge.sram;
-        (!sram.is_empty()).then_some(sram.as_slice())
+        let sram = self.mmu.cartridge.sram();
+        (!sram.is_empty()).then_some(sram)
     }
 
     pub fn load_save_ram(&mut self, bytes: &[u8]) -> bool {
@@ -72,7 +74,7 @@ impl<M: MemoryMap> Snes<M> {
             return false;
         }
 
-        let sram = &mut self.mmu.cartridge.sram;
+        let sram = self.mmu.cartridge.sram_mut();
         if sram.is_empty() || sram.len() != bytes.len() {
             return false;
         }

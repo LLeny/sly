@@ -17,6 +17,13 @@ pub struct GamePak {
 }
 
 impl GamePak {
+    pub(crate) fn empty_cartridge() -> Self {
+        Self {
+            cartridge: Cartridge::default(),
+            sram: vec![0; SRAM_SIZE as usize],
+        }
+    }
+
     pub fn new(cartridge: Cartridge) -> Self {
         Self {
             cartridge,
@@ -48,7 +55,7 @@ impl GamePak {
 
     fn route(&self, address: u32, width: Width) -> Option<&[u8]> {
         let (memory, offset): (&[u8], _) = match address {
-            ROM_BASE..=ROM_END => (self.cartridge.rom(), address & ROM_MASK),
+            ROM_BASE..=ROM_END => (self.cartridge.data(), address & ROM_MASK),
             SRAM_BASE..=SRAM_END => (&self.sram, address - SRAM_BASE),
             _ => return None,
         };

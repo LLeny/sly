@@ -11,7 +11,7 @@ impl SnesDebug {
                 .core
                 .mmu
                 .cartridge
-                .sram
+                .sram()
                 .get(addr as usize)
                 .copied()
                 .unwrap_or(0),
@@ -19,7 +19,7 @@ impl SnesDebug {
                 .core
                 .mmu
                 .cartridge
-                .rom
+                .data()
                 .get(addr as usize)
                 .copied()
                 .unwrap_or(0),
@@ -64,13 +64,13 @@ impl SnesDebug {
         let mut regions = vec![
             MemoryRegion::new("wram", "WRAM", 0, WRAM_SIZE),
             MemoryRegion::new("vram", "VRAM", 0, 0x1_0000),
-            MemoryRegion::new("rom", "ROM", 0, self.core.mmu.cartridge.rom.len() as u32),
+            MemoryRegion::new("rom", "ROM", 0, self.core.mmu.cartridge.data().len() as u32),
             MemoryRegion::new("ppu", "PPU/APU", PPU_BASE, PPU_SIZE),
             MemoryRegion::new("cpu", "CPU/DMA", CPU_BASE, CPU_SIZE),
             MemoryRegion::new("bus", "CPU Bus", 0, BUS_SIZE),
             MemoryRegion::new("spc", "SPC RAM", 0, 0x1_0000),
         ];
-        if !self.core.mmu.cartridge.sram.is_empty() {
+        if !self.core.mmu.cartridge.sram().is_empty() {
             let name = if self.has_gsu() {
                 "Game Pak RAM"
             } else if self.has_sa1() {
@@ -80,7 +80,7 @@ impl SnesDebug {
             };
             regions.insert(
                 1,
-                MemoryRegion::new("sram", name, 0, self.core.mmu.cartridge.sram.len() as u32),
+                MemoryRegion::new("sram", name, 0, self.core.mmu.cartridge.sram().len() as u32),
             );
         }
         if self.has_sa1() {
@@ -121,8 +121,8 @@ impl SnesDebug {
         match region {
             "wram" => window(&self.core.mmu.wram, addr, len),
             "iram" => window(&self.core.sa1.iram, addr, len),
-            "sram" => window(&self.core.mmu.cartridge.sram, addr, len),
-            "rom" => window(&self.core.mmu.cartridge.rom, addr, len),
+            "sram" => window(self.core.mmu.cartridge.sram(), addr, len),
+            "rom" => window(self.core.mmu.cartridge.data(), addr, len),
             _ => (0..len)
                 .map(|i| {
                     u32::try_from(i)
@@ -145,8 +145,8 @@ impl SnesDebug {
         match region {
             "wram" => patch(&mut self.core.mmu.wram, addr, bytes),
             "iram" => patch(&mut self.core.sa1.iram, addr, bytes),
-            "sram" => patch(&mut self.core.mmu.cartridge.sram, addr, bytes),
-            "rom" => patch(&mut self.core.mmu.cartridge.rom, addr, bytes),
+            "sram" => patch(self.core.mmu.cartridge.sram_mut(), addr, bytes),
+            "rom" => patch(self.core.mmu.cartridge.data_mut(), addr, bytes),
             "spc" => self.core.apu.patch_ram(addr, bytes),
             _ => 0,
         }

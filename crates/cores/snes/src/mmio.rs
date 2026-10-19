@@ -13,10 +13,11 @@ mod symbol;
 #[cfg(feature = "debug")]
 pub use access::{AccessTracker, MemoryAccess, TrackMode};
 
-use crate::cartridge::Coprocessor;
+use crate::Bus;
+use crate::Cartridge;
+use crate::cartridge_header::{CartridgeHeader, Coprocessor};
 use crate::mmio::wram::WramPort;
 use crate::sa1::Sa1;
-use crate::{Bus, Cartridge};
 use serde::{Deserialize, Serialize};
 
 pub use addr::Address;
@@ -26,10 +27,10 @@ pub use device::{IO_BASE, IO_END};
 pub use map::{CartridgeMap, MemoryMap};
 pub use symbol::{MmioSymbol, address_of, is_symbol, symbol, symbols};
 
-pub(crate) fn coprocessor_devices<M: MemoryMap>(cartridge: &Cartridge) -> Vec<RegEntry<M>> {
-    match cartridge.coprocessor() {
-        crate::cartridge::Coprocessor::SuperFx => crate::superfx::io::registers(),
-        crate::cartridge::Coprocessor::Sa1 => crate::sa1::io::registers(),
+pub(crate) fn coprocessor_devices<M: MemoryMap>(header: &CartridgeHeader) -> Vec<RegEntry<M>> {
+    match header.coprocessor() {
+        Coprocessor::SuperFx => crate::superfx::io::registers(),
+        Coprocessor::Sa1 => crate::sa1::io::registers(),
         _ => Vec::new(),
     }
 }
@@ -123,9 +124,9 @@ impl Mmio {
 impl<M: MemoryMap> Mmio<M> {
     pub fn with_map(cartridge: Cartridge, map: M) -> Self {
         Self {
-            devices: DeviceTable::for_cartridge(&cartridge),
-            cartridge,
+            devices: DeviceTable::for_cartridge(cartridge.header()),
             wram: vec![0; M::WRAM_SIZE].into_boxed_slice(),
+            cartridge,
             map,
             fastrom: false,
             wrio: 0xFF,
@@ -162,14 +163,14 @@ impl<M: MemoryMap> Mmio<M> {
 
     pub(crate) fn cart_read(&self, region: CartRegion, index: usize) -> u8 {
         match region {
-            CartRegion::Rom => self.cartridge.rom[index],
-            CartRegion::Ram => self.cartridge.sram[index],
+            CartRegion::Rom => self.cartridge.data()[index],
+            CartRegion::Ram => self.cartridge.sram()[index],
         }
     }
 
     pub(crate) fn cart_write(&mut self, region: CartRegion, index: usize, value: u8) {
         match region {
-            CartRegion::Ram => self.cartridge.sram[index] = value,
+            CartRegion::Ram => self.cartridge.sram_mut()[index] = value,
             CartRegion::Rom => tracing::warn!(index, "Write to cartridge ROM"),
         }
     }
@@ -182,7 +183,7 @@ impl<M: MemoryMap> Mmio<M> {
 
 impl<M: MemoryMap> Bus<M> {
     pub(crate) fn rebuild_devices(&mut self) {
-        self.mmu.devices = DeviceTable::for_cartridge(&self.mmu.cartridge);
+        self.mmu.devices = DeviceTable::for_cartridge(self.mmu.cartridge.header());
     }
 
     fn cart_read(&self, region: CartRegion, index: usize, addr: Address) -> u8 {
@@ -264,8 +265,8 @@ impl<M: MemoryMap> Bus<M> {
         let value = match space {
             AddressSpace::Wram(index) => self.mmu.wram[*index],
             AddressSpace::Iram(index) => self.sa1.iram[*index],
-            AddressSpace::Sram(index) => self.mmu.cartridge.sram[*index],
-            AddressSpace::Rom(index) => self.mmu.cartridge.rom[*index],
+            AddressSpace::Sram(index) => self.mmu.cartridge.sram()[*index],
+            AddressSpace::Rom(index) => self.mmu.cartridge.data()[*index],
             AddressSpace::Cart(region, index) => self.cart_read(*region, *index, addr),
             AddressSpace::Io(reg) => self.read_io(*reg),
             AddressSpace::Unmapped => {
@@ -287,8 +288,8 @@ impl<M: MemoryMap> Bus<M> {
         match self.mmu.map(&self.sa1, addr) {
             AddressSpace::Wram(index) => self.mmu.wram[index],
             AddressSpace::Iram(index) => self.sa1.iram[index],
-            AddressSpace::Sram(index) => self.mmu.cartridge.sram[index],
-            AddressSpace::Rom(index) => self.mmu.cartridge.rom[index],
+            AddressSpace::Sram(index) => self.mmu.cartridge.sram()[index],
+            AddressSpace::Rom(index) => self.mmu.cartridge.data()[index],
             AddressSpace::Cart(region, index) => self.cart_read(region, index, addr),
             AddressSpace::Io(reg) => self.peek_io(reg),
             AddressSpace::Unmapped => OPEN_BUS,
@@ -320,7 +321,7 @@ impl<M: MemoryMap> Bus<M> {
         match space {
             AddressSpace::Wram(index) => self.mmu.wram[*index] = value,
             AddressSpace::Iram(index) => self.sa1.write_iram_from_snes(*index, value),
-            AddressSpace::Sram(index) => self.mmu.cartridge.sram[*index] = value,
+            AddressSpace::Sram(index) => self.mmu.cartridge.sram_mut()[*index] = value,
             AddressSpace::Cart(region, index) => self.cart_write(*region, *index, value),
             AddressSpace::Rom(_) => {
                 tracing::warn!(

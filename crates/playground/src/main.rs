@@ -1,5 +1,6 @@
 fn main() {
-    use snes::{Cartridge, Snes};
+    use core_model::Core;
+    use snes::Snes;
 
     tracing_subscriber::fmt::init();
 
@@ -12,14 +13,18 @@ fn main() {
 
     let buffer = std::fs::read(&path).expect("Failed to read ROM");
 
-    let cart = Cartridge::new(buffer).expect("Failed to create cartridge");
-    let title = cart.title();
-    println!("Loaded ROM: {}", title);
+    let mut snes = Snes::new();
+    snes.load_cartridge(core_model::RomFile::new().data(buffer).filename(&path))
+        .expect("Failed to load cartridge");
 
-    let memory_map = cart.memory_map().expect("Failed to get memory map");
-    println!("Memory map: {:?}", memory_map);
+    let info = <snes::Cartridge as core_model::Cartridge>::info(&snes.mmu.cartridge)
+        .expect("Failed to parse cartridge header");
+    println!("Loaded ROM: {}", info.title);
 
-    let mut snes = Snes::new(cart);
+    let mut data = snes.mmu.cartridge.data().to_vec();
+    let header = snes::cartridge_header::CartridgeHeader::parse(&mut data)
+        .expect("Failed to parse cartridge header");
+    println!("Memory map: {:?}", header.map_mode());
 
     loop {
         if let Some(addr) = addr

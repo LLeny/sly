@@ -14,8 +14,7 @@ use self::regs::{
     SnesBwramMapping, SnesCpuControl, SnesFlags, SnesInterruptBits, SuperMmcBank, VECTOR_COUNT,
     VECTOR_START,
 };
-use crate::Cartridge;
-use crate::cartridge::Coprocessor;
+use crate::cartridge_header::Coprocessor;
 use crate::cpu::{Cpu, CpuBus, CpuPeek};
 use crate::mmio::{Address, AddressSpace, CartRegion, MemoryMap, OPEN_BUS};
 
@@ -349,12 +348,12 @@ impl Default for Sa1 {
 
 impl Sa1 {
     #[cfg(feature = "debug")]
-    pub(crate) fn peek8(&self, cartridge: &Cartridge, addr: Address) -> u8 {
+    pub(crate) fn peek8(&self, cartridge: &crate::Cartridge, addr: Address) -> u8 {
         match map::cpu_space(cartridge, &self.memory, addr.bank(), addr.address()) {
             AddressSpace::Iram(index) => self.iram[index],
             AddressSpace::Cart(CartRegion::Ram, index) => cartridge.sram_read(index),
             AddressSpace::Rom(index) | AddressSpace::Cart(CartRegion::Rom, index) => {
-                cartridge.rom[index]
+                cartridge.data()[index]
             }
             AddressSpace::Io(reg) => self.peek_register(reg),
             _ => OPEN_BUS,
@@ -505,7 +504,7 @@ impl Sa1 {
 
     pub(crate) fn cpu_and_bus<'a>(
         &'a mut self,
-        cartridge: &'a mut Cartridge,
+        cartridge: &'a mut crate::Cartridge,
     ) -> (&'a mut Cpu, Bus<'a>) {
         let Self {
             cpu,
@@ -560,7 +559,7 @@ impl Sa1 {
 }
 
 pub(crate) struct Bus<'a> {
-    cartridge: &'a mut Cartridge,
+    cartridge: &'a mut crate::Cartridge,
     iram: &'a mut [u8; IRAM_SIZE],
     ciwp: &'a mut IramWriteProtection,
     memory: &'a mut MemoryControl,
@@ -576,6 +575,14 @@ pub(crate) struct Bus<'a> {
 impl Bus<'_> {
     fn space(&self, addr: Address) -> AddressSpace {
         map::cpu_space(self.cartridge, self.memory, addr.bank(), addr.address())
+    }
+
+    fn sram_read(&self, index: usize) -> u8 {
+        self.cartridge.sram_read(index)
+    }
+
+    fn sram_write(&mut self, index: usize, value: u8) {
+        self.cartridge.sram_write(index, value);
     }
 
     fn read_io(&self, reg: u16) -> u8 {
@@ -666,9 +673,9 @@ impl CpuBus for Bus<'_> {
     fn read8(&mut self, addr: Address) -> u8 {
         match self.space(addr) {
             AddressSpace::Iram(index) => self.iram[index],
-            AddressSpace::Cart(CartRegion::Ram, index) => self.cartridge.sram_read(index),
+            AddressSpace::Cart(CartRegion::Ram, index) => self.sram_read(index),
             AddressSpace::Rom(index) | AddressSpace::Cart(CartRegion::Rom, index) => {
-                self.cartridge.rom[index]
+                self.cartridge.data()[index]
             }
             AddressSpace::Io(reg) => self.read_io(reg),
             _ => {
@@ -693,7 +700,7 @@ impl CpuBus for Bus<'_> {
             AddressSpace::Cart(CartRegion::Ram, index)
                 if self.memory.bwram_sa1_write_allowed(index) =>
             {
-                self.cartridge.sram_write(index, value);
+                self.sram_write(index, value);
             }
             AddressSpace::Cart(CartRegion::Ram, _) => {}
             AddressSpace::Rom(_) | AddressSpace::Cart(CartRegion::Rom, _) => tracing::warn!(
@@ -717,9 +724,9 @@ impl CpuPeek for Bus<'_> {
     fn peek8(&self, addr: Address) -> u8 {
         match self.space(addr) {
             AddressSpace::Iram(index) => self.iram[index],
-            AddressSpace::Cart(CartRegion::Ram, index) => self.cartridge.sram_read(index),
+            AddressSpace::Cart(CartRegion::Ram, index) => self.sram_read(index),
             AddressSpace::Rom(index) | AddressSpace::Cart(CartRegion::Rom, index) => {
-                self.cartridge.rom[index]
+                self.cartridge.data()[index]
             }
             AddressSpace::Io(reg) => self.peek_io(reg),
             _ => OPEN_BUS,

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use core_model::{CartridgeInfo, Core, RomIdentity, System};
+use core_model::{CartridgeInfo, Core, RomFile, RomIdentity, System};
 use thiserror::Error;
 
 pub type PlayerCore = Box<dyn Core + Send + Sync>;
@@ -13,6 +13,8 @@ pub enum LoadError {
     Snes(#[from] snes::SnesError),
     #[error("Cannot load GBA cartridge: {0}")]
     Gba(#[from] gba::error::GbaError),
+    #[error("Cannot load cartridge: {0}")]
+    Core(#[from] core_model::CoreError),
 }
 
 pub fn system_for_path(path: impl AsRef<Path>) -> Result<System, LoadError> {
@@ -33,22 +35,33 @@ pub fn system_for_path(path: impl AsRef<Path>) -> Result<System, LoadError> {
 
 pub fn identity(system: System, rom: &[u8]) -> RomIdentity {
     match system {
-        System::Snes => snes::cartridge::identity(rom),
-        System::Gba => gba::cartridge::identity(rom),
+        System::Snes => snes::cartridge_header::identity(rom),
+        System::Gba => gba::cartridge_header::identity(rom),
     }
 }
 
 pub fn inspect(system: System, rom: Vec<u8>) -> Result<CartridgeInfo, LoadError> {
     match system {
-        System::Snes => Ok(snes::Cartridge::new(rom)?.info()),
-        System::Gba => Ok(gba::Cartridge::new(rom)?.info()),
+        System::Snes => Ok(snes::cartridge_header::info(
+            &RomFile::new().data(rom),
+            &[],
+        )?),
+        System::Gba => Ok(gba::cartridge_header::info(&RomFile::new().data(rom))),
     }
 }
 
-pub fn load(system: System, rom: Vec<u8>) -> Result<PlayerCore, LoadError> {
+pub fn load(system: System, cartridge: RomFile) -> Result<PlayerCore, LoadError> {
     match system {
-        System::Snes => Ok(Box::new(snes::Snes::new(snes::Cartridge::new(rom)?))),
-        System::Gba => Ok(Box::new(gba::Gba::new(gba::Cartridge::new(rom)?))),
+        System::Snes => {
+            let mut core = snes::Snes::new();
+            core.load_cartridge(cartridge)?;
+            Ok(Box::new(core))
+        }
+        System::Gba => {
+            let mut core = gba::Gba::new();
+            core.load_cartridge(cartridge)?;
+            Ok(Box::new(core))
+        }
     }
 }
 
@@ -59,13 +72,13 @@ pub fn load_debug(
     name: String,
 ) -> Result<Box<dyn debugger_model::DebugCore>, LoadError> {
     match system {
-        System::Snes => Ok(Box::new(snes::debug::SnesDebug::new(
-            snes::Cartridge::new(rom)?,
-            name,
-            None,
-        ))),
+        System::Snes => {
+            let cart = RomFile::new().data(rom);
+            snes::cartridge_header::info(&cart, &[])?;
+            Ok(Box::new(snes::debug::SnesDebug::new(cart, name, None)))
+        }
         System::Gba => Ok(Box::new(gba::debug::GbaDebug::new(
-            gba::Cartridge::new(rom)?,
+            RomFile::new().data(rom),
             name,
             None,
         ))),

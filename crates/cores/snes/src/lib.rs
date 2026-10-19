@@ -1,7 +1,8 @@
 mod alu;
 pub mod apu;
 pub mod callstack;
-pub mod cartridge;
+mod cartridge;
+pub mod cartridge_header;
 pub mod cpu;
 #[cfg(feature = "debug")]
 pub mod debug;
@@ -18,6 +19,7 @@ pub mod state;
 pub mod superfx;
 
 pub use cartridge::Cartridge;
+pub use cartridge_header::CartridgeHeader;
 pub use cpu::Cpu;
 pub use error::SnesError;
 pub use mmio::{CartridgeMap, MemoryMap, Mmio};
@@ -126,15 +128,24 @@ impl<M: MemoryMap> DerefMut for Snes<M> {
 }
 
 impl Snes {
-    pub fn new(cartridge: Cartridge) -> Self {
-        Self::with_mmu(Mmio::new(cartridge))
+    pub fn new() -> Self {
+        Self::build(
+            Mmio::with_map(Cartridge::default(), CartridgeMap::default()),
+            cartridge_header::TvSystem::Ntsc,
+        )
     }
 }
 
 impl<M: MemoryMap> Snes<M> {
     pub fn with_mmu(mmu: Mmio<M>) -> Self {
-        let tv_system = cartridge::tv_system(mmu.cartridge.region());
-        let mut snes = Self {
+        let tv_system = mmu.cartridge.tv_system();
+        let mut snes = Self::build(mmu, tv_system);
+        snes.reset();
+        snes
+    }
+
+    fn build(mmu: Mmio<M>, tv_system: cartridge_header::TvSystem) -> Self {
+        Self {
             cpu: Cpu::new(0),
             bus: Bus {
                 mmu,
@@ -148,16 +159,14 @@ impl<M: MemoryMap> Snes<M> {
                 sa1: Sa1::default(),
                 superfx: SuperFx::default(),
             },
-        };
-        snes.reset();
-        snes
+        }
     }
 
     pub fn reset(&mut self) {
         const RESET_VECTOR_ADDR: u16 = 0xFFFC;
         const BANK_ZERO: u8 = 0x00;
 
-        let tv_system = cartridge::tv_system(self.mmu.cartridge.region());
+        let tv_system = self.mmu.cartridge.tv_system();
 
         self.cpu = Cpu::new(0);
         self.irq = Irq::default();
@@ -261,6 +270,15 @@ impl<M: MemoryMap> Bus<M> {
 }
 
 impl<M: MemoryMap> core_model::Core for Snes<M> {
+    fn load_cartridge(&mut self, rom: core_model::RomFile) -> Result<(), core_model::CoreError> {
+        let cartridge = Cartridge::load(rom)
+            .map_err(|error| core_model::CartridgeError::InvalidRom(error.to_string()))?;
+        self.mmu.cartridge = cartridge;
+        self.bus.rebuild_devices();
+        self.reset();
+        Ok(())
+    }
+
     fn reset(&mut self) {
         Snes::reset(self);
     }
@@ -304,13 +322,13 @@ impl<M: MemoryMap> core_model::Core for Snes<M> {
             session: self.mmu.cartridge.title().into(),
             segments: vec![
                 self.mmu.cartridge.region().to_string().into(),
-                format!("{} KB", self.mmu.cartridge.rom.len() / 1024).into(),
+                format!("{} KB", self.mmu.cartridge.data().len() / 1024).into(),
             ],
         }
     }
 
     fn cartridge_info(&self) -> Option<core_model::CartridgeInfo> {
-        Some(self.mmu.cartridge.info())
+        self.mmu.cartridge.info()
     }
 
     fn software_frame(&self) -> Option<core_model::SoftwareFrame<'_>> {

@@ -1,5 +1,6 @@
 pub mod bus;
-pub mod cartridge;
+mod cartridge;
+pub mod cartridge_header;
 pub mod cpu;
 pub mod dma;
 pub mod error;
@@ -56,7 +57,7 @@ pub struct Gba {
 }
 
 impl Gba {
-    pub fn new(cartridge: Cartridge) -> Self {
+    pub fn new() -> Self {
         let mut map = MmioMap::new(Handler::MEMORY);
         ppu::io::register(&mut map);
         gamepak::io::register(&mut map);
@@ -64,21 +65,16 @@ impl Gba {
         irq::io::register(&mut map);
         dma::io::register(&mut map);
 
-        let mut gba = Self {
+        Self {
             dma: Dma::new(),
             cpu: Cpu::new(),
             ppu: Ppu::new(),
-            gamepak: GamePak::new(cartridge),
+            gamepak: GamePak::empty_cartridge(),
             input: Input::new(),
             mmio: Mmio::new(map),
             scheduler: Scheduler::new(),
             irq: Irq::new(),
-        };
-
-        gba.skip_bios();
-        gba.schedule_video_events();
-
-        gba
+        }
     }
 
     pub fn skip_bios(&mut self) {
@@ -238,6 +234,12 @@ impl Gba {
 }
 
 impl core_model::Core for Gba {
+    fn load_cartridge(&mut self, rom: core_model::RomFile) -> Result<(), core_model::CoreError> {
+        self.gamepak = GamePak::new(Cartridge::load(rom));
+        core_model::Core::reset(self);
+        Ok(())
+    }
+
     fn set_button(&mut self, port: usize, button: core_model::Button, pressed: bool) {
         self.input.set_button(port, button, pressed);
     }
@@ -313,6 +315,6 @@ impl core_model::Core for Gba {
     }
 
     fn cartridge_info(&self) -> Option<core_model::CartridgeInfo> {
-        Some(self.gamepak.cartridge().info())
+        self.gamepak.cartridge().info()
     }
 }

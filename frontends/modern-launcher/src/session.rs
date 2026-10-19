@@ -43,7 +43,11 @@ impl LoadedGame {
             );
         }
 
-        let mut core = core_loader::load(entry.system, bytes).map_err(|error| error.to_string())?;
+        let cartridge = core_model::RomFile::new()
+            .data(bytes)
+            .filename(entry.path.display().to_string());
+        let mut core = core_loader::load(entry.system, cartridge)
+            .map_err(|error| error.to_string())?;
 
         let interval = core
             .frame_interval()

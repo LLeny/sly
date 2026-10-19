@@ -79,7 +79,7 @@ impl Gba {
 
         let payload = postcard::to_allocvec(&state)
             .map_err(|e| StateError::Corrupt(format!("encoding GBA state: {e}")))?;
-        let rom = self.gamepak.cartridge().rom();
+        let rom = self.gamepak.cartridge().data();
 
         Envelope {
             system: System::Gba,
@@ -103,7 +103,7 @@ impl Gba {
         }
         envelope.check_payload_version(VERSION)?;
 
-        let rom = self.gamepak.cartridge().rom();
+        let rom = self.gamepak.cartridge().data();
         envelope.check_rom(crc32fast::hash(rom), rom.len())?;
         if envelope.payload.len() > 1024 * 1024 {
             return Err(corrupt("oversized GBA payload"));

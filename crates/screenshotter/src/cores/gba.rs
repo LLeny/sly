@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use core_model::{Core, System as CoreSystem};
-use gba::{Cartridge, Gba};
+use gba::Gba;
 
 use crate::capture::{CaptureConfig, Frame, ScreenshotCore};
 use crate::cores::System;
@@ -30,13 +30,15 @@ impl GbaScreenshotter {
             "ROM is too short for a GBA cartridge header"
         );
         let crc = crc32fast::hash(&rom);
-        let cartridge = Cartridge::new(rom).context("parsing cartridge header")?;
-        let game_id = crate::cores::game_id(&cartridge.title(), crc);
+        let cartridge = core_model::RomFile::new().data(rom);
+        let info = gba::cartridge_header::info(&cartridge);
+        let game_id = crate::cores::game_id(&info.title, crc);
 
-        Ok(Self {
-            gba: Gba::new(cartridge),
-            game_id,
-        })
+        let mut gba = Gba::new();
+        gba.load_cartridge(cartridge)
+            .expect("fresh core accepts cartridge");
+
+        Ok(Self { gba, game_id })
     }
 }
 

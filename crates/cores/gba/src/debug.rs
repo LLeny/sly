@@ -11,7 +11,7 @@ use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::time::Duration;
 
-use core_model::System;
+use core_model::{Core, System};
 use debugger_model::{
     AccessSource, AccessTracking, AccessWidth, BreakpointKind, BreakpointMark, CallStackView,
     CartridgeView, CpuDescriptor, CpuId, CpuView, DebugMemoryError, DecodeMode, DisasmLine,
@@ -22,7 +22,7 @@ use workspace_model::{ComponentManifest, DockLocation};
 
 use crate::cpu::Bus;
 use crate::scheduler::EventKind;
-use crate::{Cartridge, Cpu, Gba, VIDEO_EVENTS};
+use crate::{Cpu, Gba, VIDEO_EVENTS};
 
 const CPU: &str = "gba.arm7tdmi";
 const SPACE: &str = "gba.bus";
@@ -61,15 +61,15 @@ struct Tick {
 }
 
 impl GbaDebug {
-    pub fn new(cartridge: Cartridge, name: String, cover: Option<Arc<str>>) -> Self {
-        let title = cartridge.title().into();
+    pub fn new(cart: core_model::RomFile, name: String, cover: Option<Arc<str>>) -> Self {
+        let title = crate::cartridge_header::title(&cart.data).into();
         let details = StructuredView {
             sections: vec![Section {
                 rows: vec![
                     Row::Field(Field::new("System", System::Gba.qualified_name())),
                     Row::Field(Field::new(
                         "ROM size",
-                        core_model::format_byte_size(cartridge.rom().len()),
+                        core_model::format_byte_size(cart.data.len()),
                     )),
                 ],
                 ..Default::default()
@@ -77,8 +77,12 @@ impl GbaDebug {
             ..Default::default()
         };
 
+        let mut core = Gba::new();
+        core.load_cartridge(cart)
+            .expect("fresh core accepts cartridge");
+
         Self {
-            core: Gba::new(cartridge),
+            core,
             cartridge: CartridgeView {
                 title,
                 details,
@@ -176,7 +180,7 @@ impl GbaDebug {
     }
 
     fn regions(&self) -> impl Iterator<Item = (&'static str, &'static str, u32, u32)> + '_ {
-        let rom_len = self.core.gamepak.cartridge().rom().len();
+        let rom_len = self.core.gamepak.cartridge().data().len();
 
         REGIONS.into_iter().map(move |(id, name, base, size)| {
             let size = if id == ROM {
@@ -201,6 +205,11 @@ impl GbaDebug {
 }
 
 impl core_model::Core for GbaDebug {
+    fn load_cartridge(&mut self, cart: core_model::RomFile) -> Result<(), core_model::CoreError> {
+        *self = GbaDebug::new(cart, self.label.to_string(), self.cartridge.cover.clone());
+        Ok(())
+    }
+
     fn set_button(&mut self, port: usize, button: core_model::Button, pressed: bool) {
         self.core.set_button(port, button, pressed);
     }

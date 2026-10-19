@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use core_model::{Core, System as CoreSystem};
-use snes::{Cartridge, Snes};
+use core_model::{Core, System as CoreSystem, TvSystem};
+use snes::Snes;
 
 use crate::capture::{CaptureConfig, Frame, ScreenshotCore};
 use crate::cores::System;
@@ -26,13 +26,19 @@ struct SnesScreenshotter {
 
 impl SnesScreenshotter {
     fn new(rom: Vec<u8>) -> Result<Self> {
-        let cartridge = Cartridge::new(rom).context("parsing cartridge header")?;
-        let game_id = crate::cores::game_id(&cartridge.title(), crc32fast::hash(&cartridge.rom));
+        let cartridge = core_model::RomFile::new().data(rom);
+        let info =
+            snes::cartridge_header::info(&cartridge, &[]).context("parsing cartridge header")?;
+        let game_id = crate::cores::game_id(&info.title, info.rom.crc32);
         let frame_rate =
-            snes::cartridge::frame_rate(snes::cartridge::tv_system(cartridge.region()));
+            snes::cartridge_header::frame_rate(info.tv_system.unwrap_or(TvSystem::Ntsc));
+
+        let mut snes = Snes::new();
+        snes.load_cartridge(cartridge)
+            .expect("fresh core accepts cartridge");
 
         Ok(Self {
-            snes: Snes::new(cartridge),
+            snes,
             game_id,
             frame_rate,
         })
